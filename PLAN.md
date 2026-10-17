@@ -2,7 +2,13 @@
 
 > **Loại:** Sản phẩm **nội bộ** (internal tool).
 > **Ngày chốt:** 2026-10-17.
-> **Trạng thái quyết định:** Lõi đã chốt sau 2 vòng khảo sát code-level + 1 vòng deep audit có kiểm chứng GitHub API.
+> **Trạng thái quyết định:** Lõi đã chốt sau 2 vòng khảo sát code-level + 1 vòng deep audit (kiểm chứng GitHub API) + 1 vòng khảo sát Specora bằng tay.
+>
+> **Nhật ký quyết định (2026-10-17):**
+> - **Lõi = OpenHands `software-agent-sdk`**, chạy keyless qua Claude Code (ACP) — đã chứng minh.
+> - **Deploy target = Next.js-on-Vercel (monolith)** — giữ nguyên.
+> - **KHÔNG lấy nguyên Specora**: khảo sát tay cho thấy nó khóa cứng FastAPI+Postgres+Docker, Next.js chỉ là vỏ client, **không có đường Vercel** + alpha/1-dev → mâu thuẫn mục tiêu. Thay vào đó **"đào" hệ contract-schema (meta-YAML + stdlib mixins) và mô hình healer-loop** của Specora, cài lại trên OpenHands cho stack Vercel-native.
+> - **Oracle self-correct = test (không judge-LLM)**: `run_goal` của OpenHands cần judge-LLM (tốn key) → đường keyless dùng oracle-bằng-test (`area/engine.run_until`).
 
 AREA = một **orchestrator do ta tự viết**, điều phối các engine/stage best-of-breed. Không repo đơn lẻ nào là "toàn bộ lõi".
 
@@ -131,6 +137,6 @@ SW_Factory/
 
 ## Phụ lục — vì sao KHÔNG chọn các phương án khác
 - **MetaGPT làm lõi:** không có MCP (cắm REA phải tự viết), deploy chỉ là stub trỏ cloud thương mại MGX, repo **đình trệ ~9 tháng**. Chỉ mượn pattern spec.
-- **Specora Core làm lõi:** sát ý tưởng nhất nhưng **alpha, 5⭐, patent-pending** → rủi ro cao. Chỉ mượn ý tưởng kiến trúc.
+- **Specora Core làm lõi:** sát ý tưởng nhất, Forge codegen tất định/keyless chất lượng tốt (~16k LOC, ít stub) — nhưng **khóa cứng FastAPI+Postgres+Docker, Next.js chỉ là vỏ client, KHÔNG có đường Vercel**, cộng alpha/1-dev/patent-pending/no-tests. Stack mâu thuẫn mục tiêu Vercel → chỉ **"đào" contract-schema + healer-loop**, không lấy nguyên.
 - **REA làm trung tâm:** REA chỉ "đọc hiểu", không build/deploy; mới, breaking change, pháp lý nhạy cảm.
 ```
