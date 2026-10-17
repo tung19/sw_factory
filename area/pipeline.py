@@ -1,4 +1,4 @@
-"""area.pipeline — Flow A end to end: requirement -> spec -> working app."""
+"""area.pipeline — Flow A (requirement) and Flow B (clone) end to end."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from area.build import build_app
+from area.re import spec_from_source
 from area.spec import Acceptance, Spec, extract_spec
 
 WORKSPACE = Path(__file__).resolve().parent.parent / "workspace"
@@ -21,6 +22,17 @@ class PipelineResult:
     passed: bool
 
 
+def _build(name, spec, acc, root, target, backend, model, build_iters) -> PipelineResult:
+    app_dir = root / "apps" / name
+    print(f"[area] build : target={target} -> {app_dir}")
+    passed = build_app(
+        spec, acc, app_dir, target=target, backend=backend, model=model,
+        max_iters=build_iters,
+    )
+    print(f"[area]        build {'GREEN' if passed else 'NOT green'}")
+    return PipelineResult(name, spec, acc, root / "specs" / name, app_dir, passed)
+
+
 def run_pipeline(
     requirement: str,
     *,
@@ -32,33 +44,35 @@ def run_pipeline(
     build_iters: int = 3,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
-    """Intake -> spec -> build, one call. Returns a PipelineResult.
-
-    Deploy is a separate, human-gated step (see area.deploy / `area deploy`).
-    """
+    """Flow A: requirement -> spec -> build."""
     root = Path(workspace) if workspace else WORKSPACE
-    spec_dir = root / "specs" / name
-    app_dir = root / "apps" / name
-
-    print(f"[area] (1/2) spec  : {requirement!r}\n[area]        -> {spec_dir}")
+    print(f"[area] (1/2) spec  : {requirement!r}")
     spec, acc = extract_spec(
-        requirement, spec_dir, backend=backend, model=model, max_iters=spec_iters
+        requirement, root / "specs" / name, backend=backend, model=model,
+        max_iters=spec_iters,
     )
-    print(
-        f"[area]        spec OK: {len(spec.features)} features, "
-        f"{len(acc.criteria)} acceptance criteria"
-    )
+    print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    return _build(name, spec, acc, root, target, backend, model, build_iters)
 
-    print(f"[area] (2/2) build : target={target} -> {app_dir}")
-    passed = build_app(
-        spec,
-        acc,
-        app_dir,
-        target=target,
-        backend=backend,
-        model=model,
-        max_iters=build_iters,
-    )
-    print(f"[area]        build {'GREEN' if passed else 'NOT green'}")
 
-    return PipelineResult(name, spec, acc, spec_dir, app_dir, passed)
+def clone_pipeline(
+    source: str,
+    *,
+    name: str = "clone",
+    kind: str = "auto",
+    target: str = "cloudflare",
+    backend: str = "acp",
+    model: Optional[str] = None,
+    spec_iters: int = 3,
+    build_iters: int = 3,
+    workspace: Optional[str | Path] = None,
+) -> PipelineResult:
+    """Flow B: reverse-engineer a sample app -> spec -> build."""
+    root = Path(workspace) if workspace else WORKSPACE
+    print(f"[area] (1/2) re-spec: {source!r} (kind={kind})")
+    spec, acc = spec_from_source(
+        source, root / "specs" / name, kind=kind, backend=backend, model=model,
+        max_iters=spec_iters,
+    )
+    print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    return _build(name, spec, acc, root, target, backend, model, build_iters)
