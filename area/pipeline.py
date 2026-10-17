@@ -8,7 +8,7 @@ from typing import Optional
 from area.build import build_app
 from area.spec import Acceptance, Spec, extract_spec
 
-_WORKSPACE = Path(__file__).resolve().parent.parent / "workspace"
+WORKSPACE = Path(__file__).resolve().parent.parent / "workspace"
 
 
 @dataclass
@@ -25,14 +25,18 @@ def run_pipeline(
     requirement: str,
     *,
     name: str = "app",
+    target: str = "cloudflare",
     backend: str = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
-    """Intake -> spec -> build, one call. Returns a PipelineResult."""
-    root = Path(workspace) if workspace else _WORKSPACE
+    """Intake -> spec -> build, one call. Returns a PipelineResult.
+
+    Deploy is a separate, human-gated step (see area.deploy / `area deploy`).
+    """
+    root = Path(workspace) if workspace else WORKSPACE
     spec_dir = root / "specs" / name
     app_dir = root / "apps" / name
 
@@ -45,9 +49,15 @@ def run_pipeline(
         f"{len(acc.criteria)} acceptance criteria"
     )
 
-    print(f"[area] (2/2) build : -> {app_dir}")
+    print(f"[area] (2/2) build : target={target} -> {app_dir}")
     passed = build_app(
-        spec, acc, app_dir, backend=backend, model=model, max_iters=build_iters
+        spec,
+        acc,
+        app_dir,
+        target=target,
+        backend=backend,
+        model=model,
+        max_iters=build_iters,
     )
     print(f"[area]        build {'GREEN' if passed else 'NOT green'}")
 
