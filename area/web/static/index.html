@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AREA — AI Software Factory</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --fg:#e6edf3; --muted:#8b949e; --accent:#2f81f7; --green:#3fb950;
+    --red:#f85149; --amber:#d29922; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+  header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+  header .tag{color:var(--muted);font-size:12px}
+  .wrap{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px;max-width:1400px;margin:0 auto}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 10px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--fg);
+    border-radius:7px;padding:8px 10px;font:inherit}
+  textarea{resize:vertical;min-height:70px}
+  .row{display:flex;gap:8px}.row>*{flex:1}
+  .tabs{display:flex;gap:6px;margin-bottom:10px}
+  .tabs button{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--muted);
+    padding:7px;border-radius:7px;cursor:pointer}
+  .tabs button.active{color:var(--fg);border-color:var(--accent);background:#132135}
+  .chk{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-size:13px}
+  .chk input{width:auto}
+  button.go{margin-top:12px;width:100%;background:var(--accent);border:0;color:#fff;padding:10px;
+    border-radius:8px;font-weight:600;cursor:pointer}
+  button.go:disabled{opacity:.5;cursor:not-allowed}
+  .btn{background:var(--panel2);border:1px solid var(--border);color:var(--fg);padding:5px 10px;
+    border-radius:6px;cursor:pointer;font-size:12px}
+  .list{display:flex;flex-direction:column;gap:6px}
+  .item{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:7px;cursor:pointer}
+  .item:hover{border-color:var(--accent)}
+  .item.sel{border-color:var(--accent)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .running{background:var(--amber);animation:pulse 1s infinite}
+  .green{background:var(--green)}.failed{background:var(--red)}.interrupted{background:var(--muted)}
+  @keyframes pulse{50%{opacity:.3}}
+  .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meta{color:var(--muted);font-size:11px}
+  .badge{font-size:11px;padding:1px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
+  a{color:var(--accent)}
+  pre.log{background:#010409;border:1px solid var(--border);border-radius:8px;padding:12px;
+    font-family:var(--mono);font-size:12px;height:62vh;overflow:auto;white-space:pre-wrap;margin:0}
+  .loghead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:20px}
+  .modal.open{display:flex}
+  .modal .box{background:var(--panel);border:1px solid var(--border);border-radius:10px;max-width:760px;width:100%;
+    max-height:80vh;overflow:auto;padding:18px}
+  .modal pre{background:#010409;border:1px solid var(--border);border-radius:7px;padding:10px;
+    font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚙︎ AREA</h1><span class="tag">internal AI software factory · requirement / clone → spec → build → deploy</span>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2>New job</h2>
+      <div class="tabs">
+        <button id="tabRun" class="active" onclick="setTab('run')">Run (requirement)</button>
+        <button id="tabClone" onclick="setTab('clone')">Clone (app)</button>
+      </div>
+      <div id="paneRun">
+        <label>Requirement</label>
+        <textarea id="requirement" placeholder="A minimal todo web app: add, list, mark done, delete…"></textarea>
+      </div>
+      <div id="paneClone" style="display:none">
+        <label>Sample app source (git URL / local path / http URL)</label>
+        <input id="source" placeholder="https://github.com/user/app  or  https://someapp.com"/>
+        <label>Source kind</label>
+        <select id="srcKind"><option>auto</option><option>repo</option><option>path</option><option>url</option></select>
+      </div>
+      <div class="row">
+        <div><label>Name</label><input id="name" placeholder="myapp"/></div>
+        <div><label>Target</label><select id="target"><option>cloudflare</option><option>plain</option></select></div>
+      </div>
+      <div class="chk"><input type="checkbox" id="deploy"/><label for="deploy" style="margin:0">Deploy after green build (Cloudflare)</label></div>
+      <button class="go" id="goBtn" onclick="startJob()">Start</button>
+    </div>
+
+    <div class="card">
+      <h2>Apps <button class="btn" style="float:right" onclick="refreshApps()">↻</button></h2>
+      <div class="list" id="apps"><div class="empty">no apps yet</div></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Jobs <button class="btn" style="float:right" onclick="refreshJobs()">↻</button></h2>
+      <div class="list" id="jobs"><div class="empty">no jobs yet</div></div>
+    </div>
+    <div class="card">
+      <div class="loghead"><h2 style="margin:0">Live log</h2><span class="meta" id="logTitle">— select or start a job —</span></div>
+      <pre class="log" id="log"></pre>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal" onclick="if(event.target.id==='modal')closeModal()">
+  <div class="box">
+    <div style="display:flex;justify-content:space-between"><h2 id="mTitle">spec</h2><button class="btn" onclick="closeModal()">✕</button></div>
+    <div id="mBody"></div>
+  </div>
+</div>
+
+<script>
+let tab='run', es=null, selJob=null;
+const $=id=>document.getElementById(id);
+function setTab(t){tab=t;$('tabRun').classList.toggle('active',t==='run');$('tabClone').classList.toggle('active',t==='clone');
+  $('paneRun').style.display=t==='run'?'':'none';$('paneClone').style.display=t==='clone'?'':'none';}
+function fmtTime(s){if(!s)return'';const d=new Date(s*1000);return d.toLocaleTimeString();}
+
+async function startJob(){
+  const name=$('name').value.trim();
+  if(!name){alert('Name required');return;}
+  const params={name,target:$('target').value,deploy:$('deploy').checked};
+  if(tab==='run'){params.requirement=$('requirement').value.trim();if(!params.requirement){alert('Requirement required');return;}}
+  else{params.source=$('source').value.trim();params.srcKind=$('srcKind').value;if(!params.source){alert('Source required');return;}}
+  $('goBtn').disabled=true;
+  try{
+    const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({kind:tab,params})});
+    const j=await r.json();
+    if(j.id){openLog(j.id);refreshJobs();}
+    else alert(j.error||'failed');
+  }finally{$('goBtn').disabled=false;}
+}
+
+async function deployApp(name){
+  if(!confirm('Deploy "'+name+'" to Cloudflare production?'))return;
+  const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({kind:'deploy',params:{name}})});
+  const j=await r.json(); if(j.id){openLog(j.id);refreshJobs();}
+}
+
+function openLog(jid){
+  selJob=jid; if(es)es.close();
+  $('log').textContent=''; $('logTitle').textContent='job '+jid;
+  renderJobs(lastJobs);
+  es=new EventSource('/api/jobs/'+jid+'/stream');
+  es.onmessage=e=>{const el=$('log');el.textContent+=e.data+'\n';el.scrollTop=el.scrollHeight;};
+  es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();
+    try{const j=JSON.parse(e.data);if(j.url)$('log').textContent+='\n🌐 '+j.url+'\n';}catch(_){ }});
+  es.onerror=()=>{es.close();};
+}
+
+let lastJobs=[];
+function renderJobs(jobs){
+  lastJobs=jobs; const box=$('jobs');
+  if(!jobs.length){box.innerHTML='<div class="empty">no jobs yet</div>';return;}
+  box.innerHTML='';
+  jobs.forEach(j=>{
+    const d=document.createElement('div');d.className='item'+(j.id===selJob?' sel':'');
+    d.onclick=()=>openLog(j.id);
+    d.innerHTML=`<span class="dot ${j.status}"></span>
+      <span class="grow"><b>${j.kind}</b> · ${j.name||''} <span class="meta">${fmtTime(j.started)}</span></span>
+      ${j.url?`<a href="${j.url}" target="_blank" onclick="event.stopPropagation()">open ↗</a>`:''}
+      <span class="badge">${j.status}</span>`;
+    box.appendChild(d);
+  });
+}
+async function refreshJobs(){const r=await fetch('/api/jobs');renderJobs(await r.json());}
+
+async function refreshApps(){
+  const r=await fetch('/api/apps');const apps=await r.json();const box=$('apps');
+  if(!apps.length){box.innerHTML='<div class="empty">no apps yet</div>';return;}
+  box.innerHTML='';
+  apps.forEach(a=>{
+    const d=document.createElement('div');d.className='item';
+    d.innerHTML=`<span class="grow"><b>${a.name}</b> ${a.built?'<span class="badge">built</span>':''}
+      ${a.url?`<a href="${a.url}" target="_blank">live ↗</a>`:''}</span>`;
+    const spec=document.createElement('button');spec.className='btn';spec.textContent='spec';
+    spec.onclick=()=>viewSpec(a.name);d.appendChild(spec);
+    if(a.built){const dep=document.createElement('button');dep.className='btn';dep.textContent='deploy';
+      dep.onclick=()=>deployApp(a.name);d.appendChild(dep);}
+    box.appendChild(d);
+  });
+}
+
+async function viewSpec(name){
+  const r=await fetch('/api/apps/'+name+'/spec');const s=await r.json();
+  $('mTitle').textContent=name+' — spec';
+  $('mBody').innerHTML=`<label>spec.yaml</label><pre>${esc(s.spec||'(none)')}</pre>
+    <label>acceptance.yaml</label><pre>${esc(s.acceptance||'(none)')}</pre>`;
+  $('modal').classList.add('open');
+}
+function esc(t){return t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+function closeModal(){$('modal').classList.remove('open');}
+
+refreshJobs();refreshApps();setInterval(()=>{if(!es||es.readyState===2)refreshJobs();},4000);
+</script>
+</body>
+</html>

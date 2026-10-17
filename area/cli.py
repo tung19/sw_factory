@@ -65,6 +65,10 @@ def main(argv=None) -> int:
     d.add_argument("name")
     d.add_argument("--yes", action="store_true", help="skip the human gate")
 
+    g = sub.add_parser("gui", help="Launch the AREA web GUI")
+    g.add_argument("--host", default="127.0.0.1")
+    g.add_argument("--port", type=int, default=8787)
+
     args = p.parse_args(argv)
 
     if args.cmd == "run":
@@ -97,6 +101,15 @@ def main(argv=None) -> int:
             return 1
         ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes))
         return 0 if ok else 1
+
+    if args.cmd == "gui":
+        import uvicorn
+
+        from area.web.server import app as webapp
+
+        print(f"[area] GUI → http://{args.host}:{args.port}")
+        uvicorn.run(webapp, host=args.host, port=args.port, log_level="warning")
+        return 0
 
     return 2
 
