@@ -1,8 +1,9 @@
 """area.deploy.cloudflare — deploy a built app to Cloudflare Workers.
 
-Keyless: uses the developer's `wrangler login` session (run `npx wrangler login`
-once). Runs the app's own `deploy` script (vinext/@vinext/cloudflare). A human
-gate guards production by default.
+Keyless: vinext's deploy helper authenticates via the Cloudflare `cf` CLI
+(NOT wrangler) — run `cf auth login` once (e.g. the app's
+./node_modules/.bin/cf auth login), or set CLOUDFLARE_API_TOKEN. Runs the app's
+own `deploy` script (vinext-cloudflare). A human gate guards production.
 """
 from __future__ import annotations
 
@@ -26,8 +27,8 @@ def _env() -> dict:
 def deploy(app_dir: str | Path) -> tuple[bool, str, Optional[str]]:
     """Run the app's Cloudflare deploy. Returns (ok, output_tail, url).
 
-    Requires a prior `npx wrangler login`. Prefers the app's `npm run deploy`
-    script, falling back to `npx @vinext/cloudflare deploy`.
+    Requires a prior `cf auth login` (or CLOUDFLARE_API_TOKEN). Prefers the
+    app's `npm run deploy` script, falling back to `npx @vinext/cloudflare deploy`.
     """
     app = Path(app_dir)
     cmd = [

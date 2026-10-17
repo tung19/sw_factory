@@ -6,7 +6,7 @@
 >
 > **Nhật ký quyết định (2026-10-17):**
 > - **Lõi = OpenHands `software-agent-sdk`**, chạy keyless qua Claude Code (ACP) — đã chứng minh.
-> - **Deploy target = Cloudflare Workers (vinext + wrangler)** — đổi từ Vercel (user có sẵn account CF). App Next.js (Server Actions, đã xác nhận Supported trên Workers) deploy qua `vinext`/`@vinext/cloudflare`; auth keyless bằng `wrangler login`. Lưu ý: `vinext` còn **beta**; Vercel giữ làm phương án dự phòng.
+> - **Deploy target = Cloudflare Workers (vinext + wrangler)** — đổi từ Vercel (user có sẵn account CF). App Next.js (Server Actions, đã xác nhận Supported trên Workers) deploy qua `vinext`/`@vinext/cloudflare`; auth keyless bằng **`cf auth login`** (Cloudflare CLI — KHÔNG phải wrangler), hoặc `CLOUDFLARE_API_TOKEN`. Lưu ý: `vinext` còn **beta**; Vercel giữ làm phương án dự phòng. ✅ Đã deploy thật end-to-end: `guestbook.monbkel.workers.dev` (HTTP 200).
 > - **KHÔNG lấy nguyên Specora**: khảo sát tay cho thấy nó khóa cứng FastAPI+Postgres+Docker, Next.js chỉ là vỏ client, **không có đường Vercel** + alpha/1-dev → mâu thuẫn mục tiêu. Thay vào đó **"đào" hệ contract-schema (meta-YAML + stdlib mixins) và mô hình healer-loop** của Specora, cài lại trên OpenHands cho stack Vercel-native.
 > - **Oracle self-correct = test (không judge-LLM)**: `run_goal` của OpenHands cần judge-LLM (tốn key) → đường keyless dùng oracle-bằng-test (`area/engine.run_until`).
 
