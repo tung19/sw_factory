@@ -12,6 +12,9 @@ dependencies = [
     "openhands-tools==1.55.1",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
 [tool.uv]
 # Reproducibility guard: don't resolve to packages newer than this when locking.
 # exclude-newer = "2026-10-17"
