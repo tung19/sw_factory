@@ -15,6 +15,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest==9.1.1"]
 
+[project.scripts]
+area = "area.cli:main"
+
 [tool.uv]
 # Reproducibility guard: don't resolve to packages newer than this when locking.
 # exclude-newer = "2026-10-17"
