@@ -83,7 +83,7 @@ area gui                     # dashboard http://127.0.0.1:8787
 | 1. Luồng A | requirement → spec → app (`area run`) | ✅ (todo, notes) |
 | 2. Self-correct | `run_until` oracle-test (keyless) | ✅ (deviation: không dùng judge) |
 | 3. Deploy | Cloudflare + human gate + **rollback** | ✅ (guestbook live) · `area rollback` ✅ |
-| 4. Clone Tier 1 | RE app mẫu → spec → app | ✅ (deviation: source/curl) · ⚠️ **chưa parity/E2E** |
+| 4. Clone Tier 1 | RE app mẫu → spec → app | ✅ (source/curl) · E2E via `area e2e` ✅ |
 | 5. Tier 2 + hardening | REA opt-in; hardening | ⚠️ một phần: REA wiring ✅, compat-date fix ✅, healer ✅; **thiếu cost-cap, model-tiering, observability** |
 | + GUI | web dashboard | ✅ (ngoài plan gốc) |
 | + Chaos-audit | path-traversal, server-400, command_verifier, atomic jobs.json | ✅ đã vá |
@@ -138,4 +138,4 @@ SW_Factory/
 | **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
-**Đã xong P1, P2, P3.** **Còn lại (thấp): P4** (E2E/parity) · **P5** (model tiering/observability) · **P6** (memory store).
+**Đã xong P1–P4.** **Còn lại (thấp): P5** (model tiering/observability) · **P6** (memory store).
