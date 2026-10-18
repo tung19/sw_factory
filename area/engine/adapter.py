@@ -181,11 +181,14 @@ def run_until(
 
     passed = False
     used = max_iters
+    first_fail = None
     for attempt in range(1, max_iters + 1):
         result = verify()
         if result.ok:
             passed, used = True, attempt
             break
+        if first_fail is None:
+            first_fail = result.feedback
         conv.send_message(
             "The acceptance checks did not pass yet. Fix the code so they pass.\n\n"
             f"--- check output (attempt {attempt}/{max_iters}) ---\n{result.feedback}"
@@ -201,6 +204,17 @@ def run_until(
                     outer_iters=used, passed=passed, backend=type(agent).__name__)
     except Exception:
         pass
+    # P6 memory: a failure we had to overcome is a pitfall worth remembering.
+    if passed and used > 1 and first_fail:
+        try:
+            from area import memory
+
+            memory.remember(
+                symptom=f"[{label}] {first_fail[:280]}",
+                tags=[label.split(':')[0], label],
+            )
+        except Exception:
+            pass
     return passed, conv
 
 

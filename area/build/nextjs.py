@@ -107,6 +107,7 @@ def build_app(
     backend: str = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
+    design: str = "",
 ) -> bool:
     """Scaffold + self-correct a Next.js app until build + Vitest pass.
 
@@ -125,6 +126,16 @@ def build_app(
         prompt, oracle_cmd = _prompt_plain(spec_yaml, acc_yaml), _ORACLE_PLAIN
     else:
         raise ValueError(f"unknown target: {target!r} (use 'cloudflare' or 'plain')")
+
+    # P6 memory: prepend known pitfalls; design stage (if any) as architecture.
+    from area.memory import as_prompt, recall
+
+    tags = ["build", target] + (
+        ["cloudflare", "vinext"] if target == "cloudflare" else ["next"]
+    )
+    if design:
+        prompt = f"=== Architecture (follow this design) ===\n{design}\n\n" + prompt
+    prompt = as_prompt(recall(tags=tags, text=spec_yaml)) + prompt
 
     oracle = command_verifier(oracle_cmd, cwd=app)
     agent = build_agent(backend, model=model)

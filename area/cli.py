@@ -40,6 +40,8 @@ def _add_common(sp):
                     help="max USD spend per agent run (cost cap)")
     sp.add_argument("--agent-iters", type=int, default=None,
                     help="max steps per agent run (default 80)")
+    sp.add_argument("--design", action="store_true",
+                    help="run the architect stage (design.md) before build")
     sp.add_argument("--verify", action="store_true",
                     help="independent holdout acceptance check after a green build")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
@@ -118,6 +120,13 @@ def main(argv=None) -> int:
     ob = sub.add_parser("obs", help="Show cost/latency/outcome summary of agent runs")
     ob.add_argument("--json", action="store_true")
 
+    mm = sub.add_parser("mem", help="Show the experience store (pitfalls remembered)")
+
+    dg = sub.add_parser("design", help="Architect stage: write design.md from a spec")
+    dg.add_argument("name")
+    dg.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    dg.add_argument("--model", default=None)
+
     e2 = sub.add_parser("e2e", help="Playwright end-to-end UI verification of a built app")
     e2.add_argument("name")
     e2.add_argument("--backend", default="acp", choices=["acp", "llm"])
@@ -141,6 +150,7 @@ def main(argv=None) -> int:
             args.requirement, name=args.name or "app", target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
+            design=args.design,
         )
         return _finish(res, args)
 
@@ -152,6 +162,7 @@ def main(argv=None) -> int:
             use_rea=args.rea, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
+            design=args.design,
         )
         return _finish(res, args)
 
@@ -254,6 +265,24 @@ def main(argv=None) -> int:
                 f"${round(d['cost'], 4)} {round(d['time'], 1)}s"
             )
         return 0
+
+    if args.cmd == "mem":
+        from area.memory import lessons
+
+        ls = lessons()
+        print(f"[mem] {len(ls)} lesson(s)")
+        for e in ls[-30:]:
+            print(f"  [{','.join(e.get('tags', []))}] {e.get('symptom', '')[:110]}")
+            if e.get("fix"):
+                print(f"      FIX: {e['fix'][:110]}")
+        return 0
+
+    if args.cmd == "design":
+        from area.design import design_stage
+
+        txt = design_stage(args.name, backend=args.backend, model=args.model)
+        print(f"\n[area] design: {'✅ wrote design.md' if txt else '❌ none'} — {args.name}")
+        return 0 if txt else 1
 
     return 2
 
