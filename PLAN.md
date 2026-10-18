@@ -117,8 +117,8 @@ SW_Factory/
 ## 9. Rủi ro & trạng thái
 | Rủi ro | Cách chặn | Trạng thái |
 |---|---|---|
-| **LLM tự chấm test** (oracle bị lừa) | holdout / human acceptance test | ❌ **chưa** (gap P1) |
-| Cháy quota (agent loop) | budget cap per run | ❌ chưa (P2); `run_until` chỉ cap vòng ngoài |
+| **LLM tự chấm test** (oracle bị lừa) | holdout / human acceptance test | ✅ **P1 shipped** (`area/verify`, validated notes 7/7) |
+| Cháy quota (agent loop) | budget cap per run | ✅ **P2 shipped**: cap 80 steps/run + `--budget $`/`AREA_MAX_BUDGET` |
 | OpenHands breaking (release tuần) | pin version + adapter | ✅ pin 1.55.1 + `area/engine` |
 | REA mong manh/pháp lý | mặc định Tier 1; REA opt-in | ✅ |
 | Code "trôi" | giữ spec artifact + regen | ✅ (regen từ spec) |
@@ -131,11 +131,11 @@ SW_Factory/
 
 | # | Mức | Việc | Định nghĩa "done" |
 |---|---|---|---|
-| **P1** | 🔴 | **Oracle holdout**: bước/agent RIÊNG dịch `acceptance.yaml` → test mà agent build **không được sửa** (hoặc human test) | build chỉ xanh khi qua test độc lập, không tự-chấm |
-| **P2** | 🟡 | **Cost/budget cap** mỗi agent run (giới hạn vòng/chi phí) | run tự dừng khi vượt ngân sách, báo rõ |
+| ~~**P1**~~ | ✅ | ~~**Oracle holdout**~~ **XONG**: `area/verify` — verifier agent viết test, khóa checksum, fixer không được sửa (`area verify`, `--verify`) | ✅ validated notes 7/7 độc lập |
+| ~~**P2**~~ | ✅ | ~~**Cost/budget cap**~~ **XONG**: cap 80 steps/run (mặc định, SDK là 500) + `--budget $`/`--agent-iters`/env | run dừng khi vượt cap |
 | **P3** | 🟡 | **Rollback deploy** (Cloudflare: giữ version trước, lệnh `area rollback <name>`) | 1 lệnh quay lại bản trước |
 | **P4** | 🟢 | **E2E/parity test** (Playwright) cho app & clone | parity test pass trên UI thật |
 | **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
-**Đang làm:** P1 (oracle holdout) → P2 → P3 → ...
+**Đã xong P1, P2.** **Đang làm: P3** (rollback deploy) → P4 → ...

@@ -103,11 +103,40 @@ class VerifyResult:
 Verifier = Callable[[], VerifyResult]
 
 
-def run_once(agent: AgentBase, workspace: str | Path, message: str) -> Conversation:
-    """Send one message and run the agent to completion."""
+def _mk_conversation(agent, ws, agent_iters, budget):
+    """Build a Conversation with per-run caps (P2 cost/budget guard).
+
+    agent_iters caps steps per agent.run() (default 80; env AREA_AGENT_ITERS;
+    the SDK default is 500). budget caps USD spend per run (env AREA_MAX_BUDGET).
+    Budget needs LocalConversation (the Conversation factory omits it).
+    """
+    if agent_iters is None:
+        agent_iters = int(os.getenv("AREA_AGENT_ITERS", "80"))
+    if budget is None:
+        b = os.getenv("AREA_MAX_BUDGET")
+        budget = float(b) if b else None
+    if budget is not None:
+        try:
+            from openhands.sdk.conversation.impl.local_conversation import (
+                LocalConversation,
+            )
+
+            return LocalConversation(
+                agent=agent, workspace=str(ws),
+                max_iteration_per_run=agent_iters, max_budget_per_run=budget,
+            )
+        except Exception:
+            pass  # fall back to the factory (iteration cap only)
+    return Conversation(
+        agent=agent, workspace=str(ws), max_iteration_per_run=agent_iters
+    )
+
+
+def run_once(agent, workspace, message, *, agent_iters=None, budget=None):
+    """Send one message and run the agent to completion (capped)."""
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
-    conv = Conversation(agent=agent, workspace=str(ws))
+    conv = _mk_conversation(agent, ws, agent_iters, budget)
     conv.send_message(message)
     conv.run()
     return conv
@@ -120,6 +149,8 @@ def run_until(
     verify: Verifier,
     *,
     max_iters: int = 5,
+    agent_iters: int | None = None,
+    budget: float | None = None,
 ) -> tuple[bool, Conversation]:
     """Keyless self-correct loop.
 
@@ -130,7 +161,7 @@ def run_until(
     """
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
-    conv = Conversation(agent=agent, workspace=str(ws))
+    conv = _mk_conversation(agent, ws, agent_iters, budget)
     conv.send_message(task)
     conv.run()
 

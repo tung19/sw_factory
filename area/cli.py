@@ -10,6 +10,7 @@ Common: [--backend acp|llm] [--model M] [--spec-iters K] [--build-iters K] [--ye
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from area._util import safe_name
@@ -35,6 +36,10 @@ def _add_common(sp):
     sp.add_argument("--model", default=None)
     sp.add_argument("--spec-iters", type=int, default=3)
     sp.add_argument("--build-iters", type=int, default=3)
+    sp.add_argument("--budget", type=float, default=None,
+                    help="max USD spend per agent run (cost cap)")
+    sp.add_argument("--agent-iters", type=int, default=None,
+                    help="max steps per agent run (default 80)")
     sp.add_argument("--verify", action="store_true",
                     help="independent holdout acceptance check after a green build")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
@@ -94,14 +99,24 @@ def main(argv=None) -> int:
     h.add_argument("--model", default=None)
     h.add_argument("--spec-iters", type=int, default=3)
     h.add_argument("--build-iters", type=int, default=3)
+    h.add_argument("--budget", type=float, default=None)
+    h.add_argument("--agent-iters", type=int, default=None)
 
     vf = sub.add_parser("verify", help="Independent holdout acceptance check of a built app")
     vf.add_argument("name")
     vf.add_argument("--backend", default="acp", choices=["acp", "llm"])
     vf.add_argument("--model", default=None)
     vf.add_argument("--max-iters", type=int, default=3)
+    vf.add_argument("--budget", type=float, default=None)
+    vf.add_argument("--agent-iters", type=int, default=None)
 
     args = p.parse_args(argv)
+
+    # P2 cost/budget cap -> env read by area/engine at call time
+    if getattr(args, "budget", None) is not None:
+        os.environ["AREA_MAX_BUDGET"] = str(args.budget)
+    if getattr(args, "agent_iters", None) is not None:
+        os.environ["AREA_AGENT_ITERS"] = str(args.agent_iters)
 
     if args.cmd == "run":
         from area.pipeline import run_pipeline
