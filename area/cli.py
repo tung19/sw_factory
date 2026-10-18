@@ -178,6 +178,26 @@ def main(argv=None) -> int:
     ch.add_argument("--budget", type=float, default=None)
     ch.add_argument("--agent-iters", type=int, default=None)
 
+    mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
+    mo.add_argument("target", help="app name or https URL")
+    mo.add_argument("--checks", type=int, default=5)
+    mo.add_argument("--interval", type=float, default=5.0)
+    mo.add_argument("--health", default="/", help="path to probe (e.g. /health)")
+    mo.add_argument("--json", action="store_true")
+
+    st = sub.add_parser("status", help="Monitoring summary of a deployed app")
+    st.add_argument("name")
+    st.add_argument("--json", action="store_true")
+
+    wa = sub.add_parser("watch", help="Self-heal loop: probe->heal->rebuild->gate->redeploy")
+    wa.add_argument("name")
+    wa.add_argument("--checks", type=int, default=3)
+    wa.add_argument("--interval", type=float, default=5.0)
+    wa.add_argument("--max-heals", type=int, default=1)
+    wa.add_argument("--yes", action="store_true", help="skip the redeploy human gate")
+    wa.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    wa.add_argument("--model", default=None)
+
     args = p.parse_args(argv)
 
     # P2 cost/budget cap -> env read by area/engine at call time
@@ -344,6 +364,43 @@ def main(argv=None) -> int:
             args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
         )
         print(f"\n[area] chaos: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+        return 0 if ok else 1
+
+    if args.cmd == "monitor":
+        import json as _json
+
+        from area.monitor import monitor as _mon
+
+        m = _mon(args.target, checks=args.checks, interval=args.interval,
+                 health=args.health)
+        if args.json:
+            print(_json.dumps({k: v for k, v in m.items() if k != "results"}, indent=2))
+        else:
+            print(f"\n[area] monitor: {m['name']} uptime={m['uptime_pct']}% "
+                  f"avg={m['avg_ms']}ms ({m['ok']}/{m['checks']})")
+        return 0 if m["ok"] == m["checks"] else 1
+
+    if args.cmd == "status":
+        import json as _json
+
+        from area.monitor import status as _st
+
+        s = _st(args.name)
+        if args.json:
+            print(_json.dumps(s, indent=2))
+        else:
+            print(f"[area] status {s['name']}: url={s['url']} "
+                  f"uptime={s['uptime_pct']}% avg={s['avg_ms']}ms "
+                  f"p95={s['p95_ms']}ms samples={s['samples']}")
+        return 0
+
+    if args.cmd == "watch":
+        from area.monitor import watch as _watch
+
+        ok = _watch(args.name, checks=args.checks, interval=args.interval,
+                    max_heals=args.max_heals, confirm=_confirm_fn(args.yes),
+                    backend=args.backend, model=args.model)
+        print(f"\n[area] watch: {'✅ healthy/healed' if ok else '❌ needs attention'} — {args.name}")
         return 0 if ok else 1
 
     return 2

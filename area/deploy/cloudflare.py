@@ -71,6 +71,13 @@ def deploy_with_gate(
     ok, out, url = deploy(app_dir)
     if ok:
         print(f"[area] ✅ deployed to Cloudflare: {url or '(URL not parsed — see output)'}")
+        if url:
+            try:
+                from area.monitor import record_deploy
+
+                record_deploy(Path(app_dir).name, url)
+            except Exception:
+                pass
     else:
         print(f"[area] ❌ deploy failed:\n{out}")
     return ok, url
