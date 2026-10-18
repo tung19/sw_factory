@@ -44,6 +44,23 @@ def deploy(app_dir: str | Path) -> tuple[bool, str, Optional[str]]:
     return proc.returncode == 0, out[-4000:], (m.group(0) if m else None)
 
 
+def rollback(app_dir: str | Path, *, version: Optional[str] = None) -> tuple[bool, str]:
+    """Roll a deployed Worker back to its previous (or a specific) version.
+
+    Server-side via `wrangler rollback` — no rebuild. Needs a wrangler login
+    (`npx wrangler login`). Run inside the app dir so wrangler finds the worker.
+    """
+    app = Path(app_dir)
+    ver = f" {version}" if version else ""
+    cmd = [
+        "bash", "-lc",
+        f"printf 'y\\n' | npx -y wrangler rollback{ver} --message 'area rollback' 2>&1",
+    ]
+    proc = subprocess.run(cmd, cwd=str(app), capture_output=True, text=True, env=_env())
+    out = (proc.stdout + "\n" + proc.stderr).strip()
+    return proc.returncode == 0, out[-4000:]
+
+
 def deploy_with_gate(
     app_dir: str | Path, *, confirm: Callable[[str], bool]
 ) -> tuple[bool, Optional[str]]:

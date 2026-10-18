@@ -85,6 +85,11 @@ def main(argv=None) -> int:
     d.add_argument("name")
     d.add_argument("--yes", action="store_true", help="skip the human gate")
 
+    rb = sub.add_parser("rollback", help="Roll a deployed app back to its previous Cloudflare version")
+    rb.add_argument("name")
+    rb.add_argument("--version", default=None, help="specific version id (default: previous)")
+    rb.add_argument("--yes", action="store_true", help="skip the human gate")
+
     g = sub.add_parser("gui", help="Launch the AREA web GUI")
     g.add_argument("--host", default="127.0.0.1")
     g.add_argument("--port", type=int, default=8787)
@@ -148,6 +153,29 @@ def main(argv=None) -> int:
             print(f"[area] no app at {app_dir}")
             return 1
         ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes))
+        return 0 if ok else 1
+
+    if args.cmd == "rollback":
+        from area.deploy import rollback
+        from area.pipeline import WORKSPACE
+
+        app_dir = WORKSPACE / "apps" / safe_name(args.name)
+        if not app_dir.exists():
+            print(f"[area] no app at {app_dir}")
+            return 1
+        if not args.yes:
+            try:
+                ans = input(
+                    f"Roll {args.name} back to previous Cloudflare version? [y/N] "
+                ).strip().lower()
+            except EOFError:
+                ans = "n"
+            if ans != "y":
+                print("[area] rollback cancelled")
+                return 1
+        ok, out = rollback(app_dir, version=args.version)
+        print(out[-1000:])
+        print(f"[area] rollback: {'✅ done' if ok else '❌ failed'} — {args.name}")
         return 0 if ok else 1
 
     if args.cmd == "gui":

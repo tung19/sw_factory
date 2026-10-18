@@ -82,7 +82,7 @@ area gui                     # dashboard http://127.0.0.1:8787
 | 0. Setup | uv + Python 3.12 + pin OpenHands SDK | ✅ |
 | 1. Luồng A | requirement → spec → app (`area run`) | ✅ (todo, notes) |
 | 2. Self-correct | `run_until` oracle-test (keyless) | ✅ (deviation: không dùng judge) |
-| 3. Deploy | Cloudflare + human gate | ✅ (guestbook live) · ⚠️ **thiếu rollback** |
+| 3. Deploy | Cloudflare + human gate + **rollback** | ✅ (guestbook live) · `area rollback` ✅ |
 | 4. Clone Tier 1 | RE app mẫu → spec → app | ✅ (deviation: source/curl) · ⚠️ **chưa parity/E2E** |
 | 5. Tier 2 + hardening | REA opt-in; hardening | ⚠️ một phần: REA wiring ✅, compat-date fix ✅, healer ✅; **thiếu cost-cap, model-tiering, observability** |
 | + GUI | web dashboard | ✅ (ngoài plan gốc) |
@@ -133,9 +133,9 @@ SW_Factory/
 |---|---|---|---|
 | ~~**P1**~~ | ✅ | ~~**Oracle holdout**~~ **XONG**: `area/verify` — verifier agent viết test, khóa checksum, fixer không được sửa (`area verify`, `--verify`) | ✅ validated notes 7/7 độc lập |
 | ~~**P2**~~ | ✅ | ~~**Cost/budget cap**~~ **XONG**: cap 80 steps/run (mặc định, SDK là 500) + `--budget $`/`--agent-iters`/env | run dừng khi vượt cap |
-| **P3** | 🟡 | **Rollback deploy** (Cloudflare: giữ version trước, lệnh `area rollback <name>`) | 1 lệnh quay lại bản trước |
+| ~~**P3**~~ | ✅ | ~~**Rollback**~~ **XONG**: `area rollback <name>` (wrangler rollback, server-side, human gate) | ⚠️ cần re-deploy thật để validate |
 | **P4** | 🟢 | **E2E/parity test** (Playwright) cho app & clone | parity test pass trên UI thật |
 | **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
-**Đã xong P1, P2.** **Đang làm: P3** (rollback deploy) → P4 → ...
+**Đã xong P1, P2, P3.** **Còn lại (thấp): P4** (E2E/parity) · **P5** (model tiering/observability) · **P6** (memory store).
