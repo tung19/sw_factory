@@ -135,6 +135,23 @@ def main(argv=None) -> int:
     e2.add_argument("--budget", type=float, default=None)
     e2.add_argument("--agent-iters", type=int, default=None)
 
+    au = sub.add_parser("audit", help="Security + static gate (tsc, npm audit, secrets)")
+    au.add_argument("name")
+    au.add_argument("--fix", action="store_true", help="let an agent fix issues and re-gate")
+    au.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    au.add_argument("--model", default=None)
+    au.add_argument("--max-iters", type=int, default=3)
+    au.add_argument("--budget", type=float, default=None)
+    au.add_argument("--agent-iters", type=int, default=None)
+
+    ch = sub.add_parser("chaos", help="Chaos/resilience test the app and harden it")
+    ch.add_argument("name")
+    ch.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    ch.add_argument("--model", default=None)
+    ch.add_argument("--max-iters", type=int, default=3)
+    ch.add_argument("--budget", type=float, default=None)
+    ch.add_argument("--agent-iters", type=int, default=None)
+
     args = p.parse_args(argv)
 
     # P2 cost/budget cap -> env read by area/engine at call time
@@ -283,6 +300,25 @@ def main(argv=None) -> int:
         txt = design_stage(args.name, backend=args.backend, model=args.model)
         print(f"\n[area] design: {'✅ wrote design.md' if txt else '❌ none'} — {args.name}")
         return 0 if txt else 1
+
+    if args.cmd == "audit":
+        from area.verify import static_audit
+
+        ok = static_audit(
+            args.name, fix=args.fix, backend=args.backend, model=args.model,
+            max_iters=args.max_iters,
+        )
+        print(f"\n[area] audit: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+        return 0 if ok else 1
+
+    if args.cmd == "chaos":
+        from area.verify import chaos_verify
+
+        ok = chaos_verify(
+            args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
+        )
+        print(f"\n[area] chaos: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+        return 0 if ok else 1
 
     return 2
 
