@@ -151,12 +151,15 @@ def command_verifier(cmd: Sequence[str], *, cwd: str | Path | None = None) -> Ve
     """A Verifier that runs a shell command; exit code 0 means pass."""
 
     def _run() -> VerifyResult:
-        proc = subprocess.run(
-            list(cmd),
-            cwd=str(cwd) if cwd else None,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            proc = subprocess.run(
+                list(cmd),
+                cwd=str(cwd) if cwd else None,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as e:  # missing binary, bad cwd, etc. — never crash the loop
+            return VerifyResult(ok=False, feedback=f"verifier command failed: {e}")
         out = (proc.stdout + "\n" + proc.stderr).strip()
         return VerifyResult(ok=proc.returncode == 0, feedback=out[-4000:])
 

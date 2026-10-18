@@ -60,8 +60,11 @@ class JobManager:
         return {}
 
     def _save(self) -> None:
+        # atomic write (temp + os.replace) so concurrent jobs can't tear jobs.json
         try:
-            JOBS_JSON.write_text(json.dumps(list(self._jobs.values()), indent=2))
+            tmp = JOBS_JSON.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(list(self._jobs.values()), indent=2))
+            os.replace(tmp, JOBS_JSON)
         except Exception:
             pass
 
