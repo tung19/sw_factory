@@ -27,8 +27,10 @@ npm audit --audit-level=high > /tmp/_area_aud.txt 2>&1; rc=$?
 tail -15 /tmp/_area_aud.txt
 [ $rc -eq 0 ] && echo "AUDIT: ok" || { echo "AUDIT: FAIL (high/critical)"; fail=1; }
 echo "== secrets scan =="
-if grep -rnEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9_-]{16,}" app lib src components 2>/dev/null \
-     | grep -viE "process\.env|NEXT_PUBLIC|example|placeholder|dummy|import |from " | head -10; then
+secret_hits=$(grep -rnEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9_-]{16,}" app lib src components 2>/dev/null \
+     | grep -viE "process\.env|NEXT_PUBLIC|example|placeholder|dummy|import |from " | head -10)
+if [ -n "$secret_hits" ]; then
+  echo "$secret_hits"
   echo "SECRETS: FAIL (possible hardcoded secret)"; fail=1
 else echo "SECRETS: ok"; fi
 exit $fail
