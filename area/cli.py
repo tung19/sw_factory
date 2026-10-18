@@ -10,6 +10,7 @@ Common: [--backend acp|llm] [--model M] [--spec-iters K] [--build-iters K] [--ye
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 
 def _confirm_fn(assume_yes: bool):
@@ -59,6 +60,8 @@ def main(argv=None) -> int:
     c = sub.add_parser("clone", help="Flow B: reverse-engineer a sample app -> spec -> app")
     c.add_argument("source", help="git URL | local path | http(s) URL of the sample app")
     c.add_argument("--kind", default="auto", choices=["auto", "repo", "path", "url"])
+    c.add_argument("--rea", action="store_true",
+                   help="Tier 2: use REA MCP for deep RE (authorized targets only)")
     _add_common(c)
 
     d = sub.add_parser("deploy", help="Deploy a built app to Cloudflare (human gate)")
@@ -68,6 +71,17 @@ def main(argv=None) -> int:
     g = sub.add_parser("gui", help="Launch the AREA web GUI")
     g.add_argument("--host", default="127.0.0.1")
     g.add_argument("--port", type=int, default=8787)
+
+    h = sub.add_parser("heal", help="Fix a built app at the SPEC level from an error, then regen")
+    h.add_argument("name")
+    h.add_argument("--error", default=None, help="error text / stack trace")
+    h.add_argument("--error-file", default=None, help="file containing the error/log")
+    h.add_argument("--no-rebuild", action="store_true")
+    h.add_argument("--target", default="cloudflare", choices=["cloudflare", "plain"])
+    h.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    h.add_argument("--model", default=None)
+    h.add_argument("--spec-iters", type=int, default=3)
+    h.add_argument("--build-iters", type=int, default=3)
 
     args = p.parse_args(argv)
 
@@ -85,7 +99,8 @@ def main(argv=None) -> int:
         from area.pipeline import clone_pipeline
 
         res = clone_pipeline(
-            args.source, name=args.name or "clone", kind=args.kind, target=args.target,
+            args.source, name=args.name or "clone", kind=args.kind,
+            use_rea=args.rea, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
         )
@@ -110,6 +125,26 @@ def main(argv=None) -> int:
         print(f"[area] GUI → http://{args.host}:{args.port}")
         uvicorn.run(webapp, host=args.host, port=args.port, log_level="warning")
         return 0
+
+    if args.cmd == "heal":
+        from area.heal import heal
+
+        err = args.error
+        if args.error_file:
+            err = Path(args.error_file).read_text()
+        if not err:
+            print("[area] provide --error or --error-file")
+            return 1
+        res = heal(
+            args.name, err, target=args.target, backend=args.backend,
+            model=args.model, spec_iters=args.spec_iters,
+            rebuild=not args.no_rebuild, build_iters=args.build_iters,
+        )
+        print(
+            f"\n[area] heal: spec_changed={res.spec_changed} "
+            f"rebuilt={res.rebuilt} build={res.build_passed}"
+        )
+        return 0 if (res.build_passed is None or res.build_passed) else 1
 
     return 2
 

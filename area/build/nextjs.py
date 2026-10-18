@@ -77,8 +77,15 @@ Cloudflare target (use Cloudflare's CURRENT recommended Next.js-on-Workers path)
   (non-interactive; pass flags to avoid prompts) OR build a Next.js app and run
   `npx vinext init` (vinext needs Next.js 16 — upgrade Next if required).
 - Keep Server Actions (they ARE supported on Workers via vinext).
-- The generated `wrangler` config must enable `nodejs_compat` and set a
-  `compatibility_date` of today or earlier.
+- Enable `nodejs_compat` (compatibilityFlags: ["nodejs_compat"]).
+- COMPAT-DATE GOTCHA (this breaks builds): vinext writes compatibility_date =
+  TODAY, but the installed `workerd` can be a few days behind, and a future
+  compatibility_date makes `build:cf` (vite build) FAIL. After init, run
+  `npm ls workerd` and set compatibility_date (in cloudflare.config.ts / the
+  wrangler config) to the installed workerd's release date OR EARLIER.
+- Keep Vitest ISOLATED: its own vitest.config.ts with a plain node environment
+  and NO vinext/Cloudflare plugins, so logic tests don't load the RSC/Cloudflare
+  build pipeline. (vinext is Vite-based: build:cf = `vite build`, not next build.)
 
 package.json scripts MUST include exactly these three (names matter — the
 verifier calls build:cf and test):

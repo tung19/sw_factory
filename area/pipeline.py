@@ -60,6 +60,7 @@ def clone_pipeline(
     *,
     name: str = "clone",
     kind: str = "auto",
+    use_rea: bool = False,
     target: str = "cloudflare",
     backend: str = "acp",
     model: Optional[str] = None,
@@ -69,10 +70,10 @@ def clone_pipeline(
 ) -> PipelineResult:
     """Flow B: reverse-engineer a sample app -> spec -> build."""
     root = Path(workspace) if workspace else WORKSPACE
-    print(f"[area] (1/2) re-spec: {source!r} (kind={kind})")
+    print(f"[area] (1/2) re-spec: {source!r} (kind={kind}, rea={use_rea})")
     spec, acc = spec_from_source(
-        source, root / "specs" / name, kind=kind, backend=backend, model=model,
-        max_iters=spec_iters,
+        source, root / "specs" / name, kind=kind, use_rea=use_rea,
+        backend=backend, model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
     return _build(name, spec, acc, root, target, backend, model, build_iters)
