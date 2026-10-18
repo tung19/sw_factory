@@ -115,6 +115,14 @@ def main(argv=None) -> int:
     vf.add_argument("--budget", type=float, default=None)
     vf.add_argument("--agent-iters", type=int, default=None)
 
+    e2 = sub.add_parser("e2e", help="Playwright end-to-end UI verification of a built app")
+    e2.add_argument("name")
+    e2.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    e2.add_argument("--model", default=None)
+    e2.add_argument("--max-iters", type=int, default=3)
+    e2.add_argument("--budget", type=float, default=None)
+    e2.add_argument("--agent-iters", type=int, default=None)
+
     args = p.parse_args(argv)
 
     # P2 cost/budget cap -> env read by area/engine at call time
@@ -214,6 +222,15 @@ def main(argv=None) -> int:
             args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
         )
         print(f"\n[area] holdout verify: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+        return 0 if ok else 1
+
+    if args.cmd == "e2e":
+        from area.verify import e2e_verify
+
+        ok = e2e_verify(
+            args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
+        )
+        print(f"\n[area] e2e: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
         return 0 if ok else 1
 
     return 2
