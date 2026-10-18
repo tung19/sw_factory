@@ -1,16 +1,16 @@
-# AREA — Kế hoạch kiến trúc (bản đã audit)
+# AREA — Kế hoạch kiến trúc & trạng thái
 
 > **Loại:** Sản phẩm **nội bộ** (internal tool).
-> **Ngày chốt:** 2026-10-17.
-> **Trạng thái quyết định:** Lõi đã chốt sau 2 vòng khảo sát code-level + 1 vòng deep audit (kiểm chứng GitHub API) + 1 vòng khảo sát Specora bằng tay.
+> **Cập nhật:** 2026-10-18 (đồng bộ với hệ thống đã ship + chaos-audit).
+> **Repo:** github.com/tung19/sw_factory (private).
 >
-> **Nhật ký quyết định (2026-10-17):**
-> - **Lõi = OpenHands `software-agent-sdk`**, chạy keyless qua Claude Code (ACP) — đã chứng minh.
-> - **Deploy target = Cloudflare Workers (vinext + wrangler)** — đổi từ Vercel (user có sẵn account CF). App Next.js (Server Actions, đã xác nhận Supported trên Workers) deploy qua `vinext`/`@vinext/cloudflare`; auth keyless bằng **`cf auth login`** (Cloudflare CLI — KHÔNG phải wrangler), hoặc `CLOUDFLARE_API_TOKEN`. Lưu ý: `vinext` còn **beta**; Vercel giữ làm phương án dự phòng. ✅ Đã deploy thật end-to-end: `guestbook.monbkel.workers.dev` (HTTP 200).
-> - **KHÔNG lấy nguyên Specora**: khảo sát tay cho thấy nó khóa cứng FastAPI+Postgres+Docker, Next.js chỉ là vỏ client, **không có đường Vercel** + alpha/1-dev → mâu thuẫn mục tiêu. Thay vào đó **"đào" hệ contract-schema (meta-YAML + stdlib mixins) và mô hình healer-loop** của Specora, cài lại trên OpenHands cho stack Vercel-native.
-> - **Oracle self-correct = test (không judge-LLM)**: `run_goal` của OpenHands cần judge-LLM (tốn key) → đường keyless dùng oracle-bằng-test (`area/engine.run_until`).
+> **Nhật ký quyết định:**
+> - **Lõi = OpenHands `software-agent-sdk` 1.55.1** (pin), chạy **keyless qua Claude Code (ACP)** — đã chứng minh.
+> - **Deploy = Cloudflare Workers (vinext + `@vinext/cloudflare`)**; auth keyless bằng **`cf auth login`** (Cloudflare CLI — KHÔNG phải wrangler), hoặc `CLOUDFLARE_API_TOKEN`. `vinext` beta. ✅ Đã deploy thật: `guestbook.monbkel.workers.dev` (HTTP 200).
+> - **Self-correct = oracle-bằng-test (`run_until`)**, KHÔNG dùng `run_goal`+judge (judge cần key). *(Xem gap P1: oracle hiện bị agent tự-chấm.)*
+> - **KHÔNG lấy nguyên Specora** (khóa stack Docker/FastAPI, alpha, patent) → chỉ "đào" ý tưởng contract-schema + healer-loop, cài lại trên stack Cloudflare.
 
-AREA = một **orchestrator do ta tự viết**, điều phối các engine/stage best-of-breed. Không repo đơn lẻ nào là "toàn bộ lõi".
+AREA = một **orchestrator do ta tự viết** (~1000 dòng keo) điều phối OpenHands SDK. Không repo đơn lẻ nào là "toàn bộ lõi".
 
 ---
 
@@ -18,125 +18,124 @@ AREA = một **orchestrator do ta tự viết**, điều phối các engine/stag
 
 ```
 LUỒNG A (Requirement):  Requirement (NL) ─┐
-                                           ├─▶ SPEC ─▶ PLAN ─▶ DEV LOOP ─▶ VERIFY ─▶ DEPLOY
-LUỒNG B (Clone app):    App mẫu ──────────┘        (artifact)  (code+test+self-correct)  (prod)
-                        (reverse-engineer, 2 tầng)
+                                           ├─▶ SPEC ─▶ DEV LOOP ─▶ VERIFY ─▶ DEPLOY ─▶ (HEAL)
+LUỒNG B (Clone app):    App mẫu ──────────┘  (artifact)  (self-correct)           (lỗi→sửa spec→regen)
 ```
 
-Nguyên tắc bất biến: **mọi spec phải sinh acceptance criteria + test chạy được** → đó là "oracle" để vòng lặp biết khi nào "xong". Ưu tiên **acceptance test do người viết / holdout**, không phó mặc LLM tự sinh test (judge có thể bị lừa).
+Nguyên tắc bất biến: **mọi spec phải sinh acceptance criteria + test chạy được** = "oracle". ⚠️ PLAN yêu cầu **không phó mặc LLM tự sinh test** — hiện chưa đạt (gap **P1**).
 
 ---
 
-## 2. Quyết định lõi (đã chốt)
+## 2. Quyết định lõi (đã ship)
 
-| Thành phần | Chọn | Lý do (đã kiểm chứng) |
+| Thành phần | Chọn | Ghi chú |
 |---|---|---|
-| **Execution engine** | **OpenHands `software-agent-sdk`** (Python, MIT) | Có sẵn **vòng tự sửa có kiểm chứng** (`run_goal` + judge LLM đòi bằng chứng test-pass, `critic`, iterative-refinement). MCP first-class. Repo **đang active** (push hằng ngày). |
-| **Harness/model** | LiteLLM (model-agnostic); tùy chọn chạy **Claude làm coder dưới OpenHands qua ACP** | Linh hoạt model; tận dụng chất lượng Claude khi cần. |
-| **Clone app (RE)** | **2 tầng** (xem §4) | Giảm phụ thuộc + rủi ro pháp lý. |
-| **Spec stage** | Tự xây — mượn **pattern PRD/TRD-eval-loop của MetaGPT** + giữ **spec artifact** kiểu Specora | MetaGPT mạnh khâu spec nhưng repo đã **đình trệ ~9 tháng** → chỉ mượn pattern, không phụ thuộc. |
-| **Deploy** | **Vercel** qua Terminal tool / Vercel MCP, gate bằng stop-hook | Web app Next.js → Vercel. |
-| **Tham khảo kiến trúc** | **Specora Core** (ý tưởng "contract = chân lý, code vứt đi, regen tất định") | Chỉ **mượn ý tưởng** — Specora alpha + **patent-pending**, KHÔNG dùng làm code. |
-
-### ⚠️ Lưu ý vận hành bắt buộc
-- **Pin version OpenHands SDK** + **bọc sau adapter của ta** (`run_goal`/`critic` là subsystem mới, repo release hằng tuần có breaking change).
-- Local mode **không sandbox** → prod phải bật **Docker/cloud runtime**.
-- OpenHands/MetaGPT đều **MIT** (không patent grant — nội bộ nên chấp nhận được).
+| **Execution engine** | OpenHands `software-agent-sdk` 1.55.1 (MIT, pin) | bọc sau `area/engine` |
+| **Harness/model** | **Claude Code qua ACP** (keyless, không key) | `area/engine.build_agent(backend="acp")` |
+| **Self-correct** | **`run_until`** (oracle = test, lặp tới khi xanh) | KHÔNG dùng run_goal/judge (cần key) |
+| **Spec stage** | tự xây, schema Pydantic + prompt | `area/spec` |
+| **Clone (RE)** | 2 tầng (xem §4) | `area/re` |
+| **Deploy** | **Cloudflare Workers (vinext)** + human gate | `area/deploy`, auth `cf auth login` |
+| **Healer** | lỗi runtime → sửa **spec** → regen | `area/heal` (ý tưởng Specora) |
+| **GUI** | Starlette web dashboard | `area/web`, lệnh `area gui` |
 
 ---
 
-## 3. Kiến trúc tổng thể
+## 3. Kiến trúc tổng thể (thực tế)
 
 ```
-                 ┌─────────────── INTAKE ───────────────┐
-  Luồng A:  Requirement (text/PRD) ─────────┐
-  Luồng B:  App mẫu ──▶ RE 2 tầng ──────────┤
-                                            ▼
-                                ┌───────────────────────┐
-                                │  SPEC STAGE            │  → spec.yaml + acceptance.yaml + tests/
-                                │  (PRD/TRD pattern)     │     (spec artifact, versioned)
-                                └───────────┬───────────┘
-                                            ▼
-                                ┌───────────────────────┐
-                                │  OpenHands SDK engine  │  → dev + run_goal(judge) + critic
-                                │  (pinned + adapter)    │     (self-correct tới khi test xanh)
-                                └───────────┬───────────┘
-                                            ▼
-                         VERIFY (E2E + acceptance + holdout do người viết)
-                                            ▼
-                     Vercel staging → smoke test → 🔒 human gate → production
+  Luồng A: Requirement ─┐
+  Luồng B: App mẫu ─▶ area/re (Tier1 source/curl | Tier2 REA MCP, opt-in)
+                        │
+                        ▼
+               area/spec  → spec.yaml + acceptance.yaml  (Pydantic-validated, oracle)
+                        ▼
+               area/build → scaffold Next.js (vinext) ─┐
+                        │                               │ run_until: agent build → test → fix → lặp
+                        ◀───────────────────────────────┘ (oracle = next/vinext build + Vitest)
+                        ▼
+               area/deploy → `cf`/vinext deploy  → 🔒 human gate → *.workers.dev
+                        ▼
+               area/heal → (khi có lỗi runtime) sửa spec → regen
+   Giao diện: area/cli (run/clone/deploy/heal/gui) + area/web (GUI + SSE log)
 ```
 
-## 4. Luồng B — Clone app theo 2 tầng
+## 4. Luồng B — Clone 2 tầng (đã ship)
 
-- **Tầng 1 (mặc định, rủi ro thấp):** dùng **BrowserToolSet + repomix MCP + grep** của OpenHands → agent tự duyệt app mẫu (web/open-source/app của chính ta), suy ra hành vi, dựng **parity tests**. *Không cần REA.*
-- **Tầng 2 (tùy chọn, chỉ khi được phép):** cắm **REA** qua `mcp_config` cho binary/closed-source sâu. Kèm xác nhận "authorized use".
+- **Tier 1 (mặc định, keyless, không Docker):** agent dùng tool của chính nó — `git clone`/đọc source, hoặc `curl` URL — suy ra feature + data model → spec. *(Khác PLAN cũ "browser+repomix MCP" vì né Docker.)*
+- **Tier 2 (opt-in `--rea`, chỉ app được phép):** cắm REA MCP (`rea_mcp_config`, stdio `npx rea-agents`). ⚠️ REA beta + phiên gần đây lỗi kết nối `-32000` → wiring sẵn nhưng chưa chạy thật ổn.
 
-➡️ Output cả 2 tầng đều đổ vào **SPEC STAGE** rồi chạy chung pipeline.
+## 5. Command surface
 
-## 5. Các điểm cắm (integration points) trên OpenHands SDK
+```
+area run   "<requirement>"  [--target cloudflare|plain] [--deploy]
+area clone "<git|path|url>"  [--kind ...] [--rea] [--deploy]
+area deploy <name>           [--yes]
+area heal  <name> --error "<log>"  [--no-rebuild]
+area gui                     # dashboard http://127.0.0.1:8787
+```
 
-| Hạng mục | Cách cắm | Công sức |
+## 6. Roadmap — trạng thái
+
+| Phase | Mục tiêu | Trạng thái |
 |---|---|---|
-| **Spec-extraction** | stage thượng nguồn + `register_tool` có `response_schema`; seed qua `AgentContext`/skills; tham khảo planning preset | trung bình |
-| **REA (Tầng 2)** | thêm vào `Agent.mcp_config` = `MCPServer(url, auth)`; mẫu `examples/.../07_mcp_integration.py` | thấp |
-| **Vercel deploy** | Terminal chạy `vercel --prod` *hoặc* Vercel MCP; gate "done" bằng stop-hook hoặc gộp vào `run_goal` objective | thấp |
-| **Self-correct** | dùng sẵn `run_goal` + `critic` (bọc adapter, pin version) | gần như 0 |
+| 0. Setup | uv + Python 3.12 + pin OpenHands SDK | ✅ |
+| 1. Luồng A | requirement → spec → app (`area run`) | ✅ (todo, notes) |
+| 2. Self-correct | `run_until` oracle-test (keyless) | ✅ (deviation: không dùng judge) |
+| 3. Deploy | Cloudflare + human gate | ✅ (guestbook live) · ⚠️ **thiếu rollback** |
+| 4. Clone Tier 1 | RE app mẫu → spec → app | ✅ (deviation: source/curl) · ⚠️ **chưa parity/E2E** |
+| 5. Tier 2 + hardening | REA opt-in; hardening | ⚠️ một phần: REA wiring ✅, compat-date fix ✅, healer ✅; **thiếu cost-cap, model-tiering, observability** |
+| + GUI | web dashboard | ✅ (ngoài plan gốc) |
+| + Chaos-audit | path-traversal, server-400, command_verifier, atomic jobs.json | ✅ đã vá |
 
----
-
-## 6. Roadmap MVP
-
-| Phase | Mục tiêu | "Done" khi |
-|---|---|---|
-| **0. Setup** | git init; cài OpenHands SDK bằng `uv` (Python 3.12); cấu hình key; chạy `01_hello_world` | agent chạy được 1 task đơn giản |
-| **1. Luồng A tối giản** | requirement → spec artifact → 1 web app Next.js 1 tính năng → chạy local | app chạy, test pass |
-| **2. Self-correct loop** | nối `run_goal`+judge vào acceptance test; auto-fix tới khi xanh | agent tự sửa tới khi test xanh |
-| **3. Deploy** | Vercel staging → human gate → prod + rollback | 1 app lên prod thật |
-| **4. Clone Tầng 1** | browser+repomix → clone 1 tính năng web app mẫu | parity tests pass |
-| **5. Clone Tầng 2 (REA) + hardening** | cắm REA (opt-in); cost caps; model tiering; observability; pin/adapter | chạy ổn định nhiều lap |
-
-## 7. Cấu trúc thư mục đề xuất
+## 7. Cấu trúc thực tế
 
 ```
 SW_Factory/
 ├── area/
-│   ├── intake/          # nhận requirement + app mẫu
-│   ├── re/              # reverse-engineer 2 tầng (browser/repomix | REA MCP)
-│   ├── spec/            # spec stage → spec.yaml + acceptance.yaml + tests/
-│   ├── engine/          # adapter bọc OpenHands SDK (pin version)
-│   ├── verify/          # E2E + acceptance + holdout
-│   ├── deploy/          # Vercel adapter + human gate
-│   └── memory/          # experience/learning store
-├── workspace/           # các web app được sinh ra
-├── .mcp.json            # REA (opt-in) + Vercel + github
-├── config/
-├── PLAN.md
-└── README.md
+│   ├── engine/    ✅ adapter OpenHands (build_agent acp/llm, run_until, verifiers)
+│   ├── spec/      ✅ schema + extract_spec
+│   ├── build/     ✅ nextjs (target cloudflare|plain)
+│   ├── re/        ✅ clone Tier1/Tier2 (spec_from_source, rea_mcp_config)
+│   ├── deploy/    ✅ cloudflare + human gate
+│   ├── heal.py    ✅ spec-level healer
+│   ├── pipeline.py / cli.py / _util.py  ✅
+│   ├── web/       ✅ GUI (Starlette + SSE)
+│   ├── intake/    ⬜ rỗng (gộp vào spec/re)
+│   ├── verify/    ⬜ rỗng (gộp vào engine oracle; CHƯA có E2E/holdout)
+│   └── memory/    ⬜ rỗng (CHƯA có experience store)
+├── workspace/     (gitignored) apps + specs sinh ra
+├── scripts/       01–05 demo + _reference/
+├── .mcp.json · pyproject.toml · requirements.lock · PLAN.md · README.md
 ```
 
-## 8. Điều kiện tiên quyết (môi trường hiện tại còn thiếu)
+## 8. Điều kiện tiên quyết — trạng thái
+- [x] Python 3.12 (uv) · [x] uv · [x] GitHub (gh) · [x] Cloudflare (`cf auth login`)
+- [x] Keyless qua Claude Code (không cần `LLM_API_KEY`)
+- [~] Docker daemon: tắt — **không cần** cho đường keyless/local; cần nếu bật sandbox prod
 
-- [ ] **Python 3.12+** (máy đang 3.9.6) — cài qua `uv`.
-- [ ] **`uv`** (chưa có) — để quản dep + tạo venv 3.12.
-- [ ] **Docker daemon đang chạy** (hiện tắt) — cho sandbox prod & một số runtime.
-- [ ] **1 API key LLM** (`LLM_API_KEY` + `LLM_MODEL`) — đặt qua biến môi trường, không dán vào chat.
-- [ ] Tài khoản **Vercel** + **GitHub** (GitHub MCP cần authorize).
-
-## 9. Rủi ro & cách chặn (từ deep audit)
-
-| Rủi ro | Cách xử lý |
-|---|---|
-| Judge LLM bị "lừa" bằng test dễ | Acceptance test do người viết + holdout scenario |
-| OpenHands SDK breaking change (release tuần) | Pin version + adapter cách ly |
-| REA mong manh / pháp lý | Mặc định Tầng 1 (không REA); REA chỉ opt-in, authorized-use |
-| Code "trôi" do LLM viết tự do | Giữ spec artifact + regen có kiểm soát (ý tưởng Specora) |
-| Local mode không sandbox | Bật Docker/cloud runtime ở prod |
+## 9. Rủi ro & trạng thái
+| Rủi ro | Cách chặn | Trạng thái |
+|---|---|---|
+| **LLM tự chấm test** (oracle bị lừa) | holdout / human acceptance test | ❌ **chưa** (gap P1) |
+| Cháy quota (agent loop) | budget cap per run | ❌ chưa (P2); `run_until` chỉ cap vòng ngoài |
+| OpenHands breaking (release tuần) | pin version + adapter | ✅ pin 1.55.1 + `area/engine` |
+| REA mong manh/pháp lý | mặc định Tier 1; REA opt-in | ✅ |
+| Code "trôi" | giữ spec artifact + regen | ✅ (regen từ spec) |
+| vinext compat-date gotcha | bake fix vào build prompt | ✅ |
+| Path traversal / server 500 / verifier crash / jobs.json race | chaos-audit fixes | ✅ đã vá |
 
 ---
 
-## Phụ lục — vì sao KHÔNG chọn các phương án khác
-- **MetaGPT làm lõi:** không có MCP (cắm REA phải tự viết), deploy chỉ là stub trỏ cloud thương mại MGX, repo **đình trệ ~9 tháng**. Chỉ mượn pattern spec.
-- **Specora Core làm lõi:** sát ý tưởng nhất, Forge codegen tất định/keyless chất lượng tốt (~16k LOC, ít stub) — nhưng **khóa cứng FastAPI+Postgres+Docker, Next.js chỉ là vỏ client, KHÔNG có đường Vercel**, cộng alpha/1-dev/patent-pending/no-tests. Stack mâu thuẫn mục tiêu Vercel → chỉ **"đào" contract-schema + healer-loop**, không lấy nguyên.
-- **REA làm trung tâm:** REA chỉ "đọc hiểu", không build/deploy; mới, breaking change, pháp lý nhạy cảm.
-```
+## 10. VIỆC CÒN LẠI — ưu tiên (làm theo thứ tự)
+
+| # | Mức | Việc | Định nghĩa "done" |
+|---|---|---|---|
+| **P1** | 🔴 | **Oracle holdout**: bước/agent RIÊNG dịch `acceptance.yaml` → test mà agent build **không được sửa** (hoặc human test) | build chỉ xanh khi qua test độc lập, không tự-chấm |
+| **P2** | 🟡 | **Cost/budget cap** mỗi agent run (giới hạn vòng/chi phí) | run tự dừng khi vượt ngân sách, báo rõ |
+| **P3** | 🟡 | **Rollback deploy** (Cloudflare: giữ version trước, lệnh `area rollback <name>`) | 1 lệnh quay lại bản trước |
+| **P4** | 🟢 | **E2E/parity test** (Playwright) cho app & clone | parity test pass trên UI thật |
+| **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
+| **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
+
+**Đang làm:** P1 (oracle holdout) → P2 → P3 → ...
