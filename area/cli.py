@@ -35,6 +35,8 @@ def _add_common(sp):
     sp.add_argument("--model", default=None)
     sp.add_argument("--spec-iters", type=int, default=3)
     sp.add_argument("--build-iters", type=int, default=3)
+    sp.add_argument("--verify", action="store_true",
+                    help="independent holdout acceptance check after a green build")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
 
@@ -43,12 +45,20 @@ def _finish(res, args) -> int:
     status = "✅ GREEN" if res.passed else "❌ NOT green"
     print(f"\n[area] {status} — {res.name}")
     print(f"[area] spec: {res.spec_dir}\n[area] app : {res.app_dir}")
-    if res.passed and args.deploy:
+    if not res.passed:
+        return 1
+    if getattr(args, "verify", False):
+        from area.verify import holdout_verify
+
+        if not holdout_verify(res.name, backend=args.backend, model=args.model):
+            print("[area] ❌ holdout verify failed — skipping deploy")
+            return 1
+    if args.deploy:
         from area.deploy import deploy_with_gate
 
         ok, _ = deploy_with_gate(res.app_dir, confirm=_confirm_fn(args.yes))
         return 0 if ok else 1
-    return 0 if res.passed else 1
+    return 0
 
 
 def main(argv=None) -> int:
@@ -84,6 +94,12 @@ def main(argv=None) -> int:
     h.add_argument("--model", default=None)
     h.add_argument("--spec-iters", type=int, default=3)
     h.add_argument("--build-iters", type=int, default=3)
+
+    vf = sub.add_parser("verify", help="Independent holdout acceptance check of a built app")
+    vf.add_argument("name")
+    vf.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    vf.add_argument("--model", default=None)
+    vf.add_argument("--max-iters", type=int, default=3)
 
     args = p.parse_args(argv)
 
@@ -147,6 +163,15 @@ def main(argv=None) -> int:
             f"rebuilt={res.rebuilt} build={res.build_passed}"
         )
         return 0 if (res.build_passed is None or res.build_passed) else 1
+
+    if args.cmd == "verify":
+        from area.verify import holdout_verify
+
+        ok = holdout_verify(
+            args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
+        )
+        print(f"\n[area] holdout verify: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+        return 0 if ok else 1
 
     return 2
 
