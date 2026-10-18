@@ -14,6 +14,8 @@ import time
 import uuid
 from pathlib import Path
 
+from area._util import safe_name
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 WORKSPACE = ROOT / "workspace"
 STATE_DIR = WORKSPACE / ".area"
@@ -83,6 +85,7 @@ class JobManager:
         raise ValueError(f"unknown job kind: {kind}")
 
     def start(self, kind: str, params: dict) -> str:
+        params = {**params, "name": safe_name(params.get("name", ""))}
         jid = uuid.uuid4().hex[:12]
         cmd = self._cmd(kind, params)
         log = LOG_DIR / f"{jid}.log"
@@ -162,7 +165,7 @@ def list_apps() -> list[dict]:
 
 
 def read_spec(name: str) -> dict:
-    sd = WORKSPACE / "specs" / name
+    sd = WORKSPACE / "specs" / safe_name(name)
     out = {"spec": "", "acceptance": ""}
     for key, fn in (("spec", "spec.yaml"), ("acceptance", "acceptance.yaml")):
         p = sd / fn
@@ -172,7 +175,7 @@ def read_spec(name: str) -> dict:
 
 
 def app_tree(name: str, limit: int = 300) -> list[str]:
-    ad = WORKSPACE / "apps" / name
+    ad = WORKSPACE / "apps" / safe_name(name)
     files = []
     if ad.exists():
         for p in sorted(ad.rglob("*")):

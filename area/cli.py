@@ -12,6 +12,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from area._util import safe_name
+
 
 def _confirm_fn(assume_yes: bool):
     def confirm(path: str) -> bool:
@@ -110,7 +112,7 @@ def main(argv=None) -> int:
         from area.deploy import deploy_with_gate
         from area.pipeline import WORKSPACE
 
-        app_dir = WORKSPACE / "apps" / args.name
+        app_dir = WORKSPACE / "apps" / safe_name(args.name)
         if not app_dir.exists():
             print(f"[area] no app at {app_dir}")
             return 1

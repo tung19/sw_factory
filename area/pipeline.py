@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from area._util import safe_name
 from area.build import build_app
 from area.re import spec_from_source
 from area.spec import Acceptance, Spec, extract_spec
@@ -45,6 +46,7 @@ def run_pipeline(
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
     """Flow A: requirement -> spec -> build."""
+    name = safe_name(name)
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] (1/2) spec  : {requirement!r}")
     spec, acc = extract_spec(
@@ -69,6 +71,7 @@ def clone_pipeline(
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
     """Flow B: reverse-engineer a sample app -> spec -> build."""
+    name = safe_name(name)
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] (1/2) re-spec: {source!r} (kind={kind}, rea={use_rea})")
     spec, acc = spec_from_source(

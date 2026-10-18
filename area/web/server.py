@@ -28,7 +28,13 @@ async def api_jobs(request):
             return JSONResponse({"error": "bad kind"}, status_code=400)
         if not params.get("name"):
             return JSONResponse({"error": "name required"}, status_code=400)
-        jid = MANAGER.start(kind, params)
+        required = {"run": "requirement", "clone": "source"}.get(kind)
+        if required and not params.get(required):
+            return JSONResponse({"error": f"{required} required"}, status_code=400)
+        try:
+            jid = MANAGER.start(kind, params)
+        except (KeyError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse({"id": jid})
     return JSONResponse(MANAGER.list())
 

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from area._util import safe_name
 from area.build import build_app
 from area.engine import build_agent, run_until
 from area.pipeline import WORKSPACE
@@ -41,6 +42,7 @@ def heal(
 ) -> HealResult:
     """Heal an app from a runtime error by fixing its spec, then regenerate."""
     root = Path(workspace) if workspace else WORKSPACE
+    name = safe_name(name)
     spec_dir = root / "specs" / name
     app_dir = root / "apps" / name
     spec_path = spec_dir / "spec.yaml"
