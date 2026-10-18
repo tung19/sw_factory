@@ -132,6 +132,27 @@ def _mk_conversation(agent, ws, agent_iters, budget):
     )
 
 
+_TRANSIENT = ("rate", "429", "529", "overloaded", "server error", "timeout",
+              "temporar", "unavailable", "connection")
+
+
+def _run_retry(conv, *, tries: int = 5, base: float = 15.0) -> None:
+    """conv.run() with exponential backoff on transient errors (rate-limit etc.)."""
+    import time as _t
+
+    for i in range(tries):
+        try:
+            conv.run()
+            return
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            if i == tries - 1 or not any(k in msg for k in _TRANSIENT):
+                raise
+            delay = base * (2 ** i)
+            print(f"[area] transient error ({type(e).__name__}); retry in {delay:.0f}s…")
+            _t.sleep(delay)
+
+
 def run_once(agent, workspace, message, *, agent_iters=None, budget=None, label="agent"):
     """Send one message and run the agent to completion (capped)."""
     import time as _t
@@ -141,7 +162,7 @@ def run_once(agent, workspace, message, *, agent_iters=None, budget=None, label=
     ws.mkdir(parents=True, exist_ok=True)
     conv = _mk_conversation(agent, ws, agent_iters, budget)
     conv.send_message(message)
-    conv.run()
+    _run_retry(conv)
     try:
         from area import obs
 
@@ -177,7 +198,7 @@ def run_until(
     ws.mkdir(parents=True, exist_ok=True)
     conv = _mk_conversation(agent, ws, agent_iters, budget)
     conv.send_message(task)
-    conv.run()
+    _run_retry(conv)
 
     passed = False
     used = max_iters
@@ -193,7 +214,7 @@ def run_until(
             "The acceptance checks did not pass yet. Fix the code so they pass.\n\n"
             f"--- check output (attempt {attempt}/{max_iters}) ---\n{result.feedback}"
         )
-        conv.run()
+        _run_retry(conv)
     else:
         passed = verify().ok
 
