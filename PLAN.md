@@ -138,4 +138,4 @@ SW_Factory/
 | **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
-**Đã xong P1–P6 + design.** **Rigor thêm:** security/static gate (`area audit`) + chaos/resilience (`area chaos`). Còn (tùy chọn): perf/load, prod-monitoring, NFR, CI/CD.
+**Đã xong P1–P6 + design.** **Rigor thêm:** security/static gate (`area audit`) + chaos/resilience (`area chaos`). Còn (tùy chọn): perf/load, prod-monitoring, NFR, CI/CD. **Tự động:** `area run ... --all [--deploy]` chạy mọi gate (verify→audit→e2e→chaos) sau build, chặn deploy nếu fail; audit/chaos tự ghi memory.

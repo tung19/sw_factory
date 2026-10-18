@@ -47,6 +47,10 @@ def chaos_verify(
         f"errors) so `npx vitest run {CHAOS_DIR}` passes. Fix the app, not the "
         "tests' intent."
     )
+    from area.memory import as_prompt, recall
+
+    task = as_prompt(recall(tags=["chaos", "build"], text=name)) + task
+
     oracle = command_verifier(
         ["bash", "-lc", f"npx vitest run {CHAOS_DIR} 2>&1"], cwd=app
     )

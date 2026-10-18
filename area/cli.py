@@ -44,6 +44,11 @@ def _add_common(sp):
                     help="run the architect stage (design.md) before build")
     sp.add_argument("--verify", action="store_true",
                     help="independent holdout acceptance check after a green build")
+    sp.add_argument("--audit", action="store_true", help="security/static gate after build")
+    sp.add_argument("--e2e", action="store_true", help="Playwright E2E gate after build")
+    sp.add_argument("--chaos", action="store_true", help="chaos/resilience gate after build")
+    sp.add_argument("--all", action="store_true",
+                    help="run all gates: verify + audit + e2e + chaos")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
 
@@ -54,18 +59,39 @@ def _finish(res, args) -> int:
     print(f"[area] spec: {res.spec_dir}\n[area] app : {res.app_dir}")
     if not res.passed:
         return 1
-    if getattr(args, "verify", False):
-        from area.verify import holdout_verify
 
-        if not holdout_verify(res.name, backend=args.backend, model=args.model):
-            print("[area] ❌ holdout verify failed — skipping deploy")
+    all_ = getattr(args, "all", False)
+    gates = [
+        g for g in ("verify", "audit", "e2e", "chaos")
+        if all_ or getattr(args, g, False)
+    ]
+    for g in gates:
+        print(f"\n[area] === gate: {g} ===")
+        if not _run_gate(g, res.name, args):
+            print(f"[area] ❌ gate '{g}' failed — skipping deploy")
             return 1
+
     if args.deploy:
         from area.deploy import deploy_with_gate
 
         ok, _ = deploy_with_gate(res.app_dir, confirm=_confirm_fn(args.yes))
         return 0 if ok else 1
     return 0
+
+
+def _run_gate(gate: str, name: str, args) -> bool:
+    from area.verify import chaos_verify, e2e_verify, holdout_verify, static_audit
+
+    kw = dict(backend=args.backend, model=args.model)
+    if gate == "verify":
+        return holdout_verify(name, **kw)
+    if gate == "audit":
+        return static_audit(name, fix=True, **kw)
+    if gate == "e2e":
+        return e2e_verify(name, **kw)
+    if gate == "chaos":
+        return chaos_verify(name, **kw)
+    return True
 
 
 def main(argv=None) -> int:
