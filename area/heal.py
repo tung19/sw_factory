@@ -66,7 +66,8 @@ def heal(
     agent = build_agent(backend, model=model)
     try:
         ok, _ = run_until(
-            agent, spec_dir, task, _spec_verifier(spec_dir), max_iters=spec_iters
+            agent, spec_dir, task, _spec_verifier(spec_dir),
+            max_iters=spec_iters, label="heal:spec",
         )
     finally:
         agent.close()

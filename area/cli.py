@@ -115,6 +115,9 @@ def main(argv=None) -> int:
     vf.add_argument("--budget", type=float, default=None)
     vf.add_argument("--agent-iters", type=int, default=None)
 
+    ob = sub.add_parser("obs", help="Show cost/latency/outcome summary of agent runs")
+    ob.add_argument("--json", action="store_true")
+
     e2 = sub.add_parser("e2e", help="Playwright end-to-end UI verification of a built app")
     e2.add_argument("name")
     e2.add_argument("--backend", default="acp", choices=["acp", "llm"])
@@ -232,6 +235,25 @@ def main(argv=None) -> int:
         )
         print(f"\n[area] e2e: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
         return 0 if ok else 1
+
+    if args.cmd == "obs":
+        import json as _json
+
+        from area.obs import summary
+
+        s = summary()
+        if args.json:
+            print(_json.dumps(s, indent=2))
+            return 0
+        print(
+            f"[obs] runs={s['runs']} · total ${s['total_cost_usd']} · {s['total_time_s']}s"
+        )
+        for lbl, d in sorted(s["by_label"].items()):
+            print(
+                f"  {lbl:16} n={d['n']} ok={d['ok']} "
+                f"${round(d['cost'], 4)} {round(d['time'], 1)}s"
+            )
+        return 0
 
     return 2
 

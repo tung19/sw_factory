@@ -50,7 +50,9 @@ def e2e_verify(
 
     agent = build_agent(backend, model=model)
     try:
-        passed, _ = run_until(agent, app, task, oracle, max_iters=max_iters)
+        passed, _ = run_until(
+            agent, app, task, oracle, max_iters=max_iters, label="e2e"
+        )
     finally:
         agent.close()
     print(f"[area] e2e: {'PASS' if passed else 'FAIL'}")

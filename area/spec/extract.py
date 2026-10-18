@@ -91,7 +91,7 @@ def extract_spec(
     agent = build_agent(backend, model=model)
     try:
         passed, _ = run_until(
-            agent, out, task, _spec_verifier(out), max_iters=max_iters
+            agent, out, task, _spec_verifier(out), max_iters=max_iters, label="spec"
         )
     finally:
         agent.close()

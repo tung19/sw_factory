@@ -69,7 +69,7 @@ def holdout_verify(
     )
     vagent = build_agent(backend, model=model)
     try:
-        run_once(vagent, app, vtask)
+        run_once(vagent, app, vtask, label="holdout:author")
     finally:
         vagent.close()
     if not any(holdout.rglob("*.ts")) and not any(holdout.rglob("*.js")):
@@ -109,7 +109,9 @@ def holdout_verify(
     )
     fagent = build_agent(backend, model=model)
     try:
-        passed, _ = run_until(fagent, app, ftask, oracle, max_iters=max_iters)
+        passed, _ = run_until(
+            fagent, app, ftask, oracle, max_iters=max_iters, label="holdout:fix"
+        )
     finally:
         fagent.close()
     print(f"[area] holdout: {'PASS' if passed else 'FAIL'}")

@@ -78,7 +78,9 @@ def spec_from_source(
     mcp = rea_mcp_config() if use_rea else None
     agent = build_agent(backend, model=model, mcp_config=mcp)
     try:
-        passed, _ = run_until(agent, out, task, _spec_verifier(out), max_iters=max_iters)
+        passed, _ = run_until(
+            agent, out, task, _spec_verifier(out), max_iters=max_iters, label="re"
+        )
     finally:
         agent.close()
 

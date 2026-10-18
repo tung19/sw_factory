@@ -132,13 +132,23 @@ def _mk_conversation(agent, ws, agent_iters, budget):
     )
 
 
-def run_once(agent, workspace, message, *, agent_iters=None, budget=None):
+def run_once(agent, workspace, message, *, agent_iters=None, budget=None, label="agent"):
     """Send one message and run the agent to completion (capped)."""
+    import time as _t
+
+    t0 = _t.time()
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     conv = _mk_conversation(agent, ws, agent_iters, budget)
     conv.send_message(message)
     conv.run()
+    try:
+        from area import obs
+
+        obs.log_run(label, duration=_t.time() - t0, cost=obs.cost_of(conv),
+                    passed=True, backend=type(agent).__name__)
+    except Exception:
+        pass
     return conv
 
 
@@ -151,6 +161,7 @@ def run_until(
     max_iters: int = 5,
     agent_iters: int | None = None,
     budget: float | None = None,
+    label: str = "agent",
 ) -> tuple[bool, Conversation]:
     """Keyless self-correct loop.
 
@@ -159,23 +170,38 @@ def run_until(
     `verify` (e.g. your pytest/E2E/build), so this works with the no-key ACP
     backend. Returns (passed, conversation).
     """
+    import time as _t
+
+    t0 = _t.time()
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     conv = _mk_conversation(agent, ws, agent_iters, budget)
     conv.send_message(task)
     conv.run()
 
+    passed = False
+    used = max_iters
     for attempt in range(1, max_iters + 1):
         result = verify()
         if result.ok:
-            return True, conv
+            passed, used = True, attempt
+            break
         conv.send_message(
             "The acceptance checks did not pass yet. Fix the code so they pass.\n\n"
             f"--- check output (attempt {attempt}/{max_iters}) ---\n{result.feedback}"
         )
         conv.run()
+    else:
+        passed = verify().ok
 
-    return verify().ok, conv
+    try:
+        from area import obs
+
+        obs.log_run(label, duration=_t.time() - t0, cost=obs.cost_of(conv),
+                    outer_iters=used, passed=passed, backend=type(agent).__name__)
+    except Exception:
+        pass
+    return passed, conv
 
 
 def command_verifier(cmd: Sequence[str], *, cwd: str | Path | None = None) -> Verifier:

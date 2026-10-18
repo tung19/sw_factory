@@ -129,7 +129,9 @@ def build_app(
     oracle = command_verifier(oracle_cmd, cwd=app)
     agent = build_agent(backend, model=model)
     try:
-        passed, _ = run_until(agent, app, prompt, oracle, max_iters=max_iters)
+        passed, _ = run_until(
+            agent, app, prompt, oracle, max_iters=max_iters, label=f"build:{target}"
+        )
     finally:
         agent.close()
     return passed

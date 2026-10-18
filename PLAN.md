@@ -138,4 +138,4 @@ SW_Factory/
 | **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
-**Đã xong P1–P4.** **Còn lại (thấp): P5** (model tiering/observability) · **P6** (memory store).
+**Đã xong P1–P5.** **Còn lại: P6** (memory store).
