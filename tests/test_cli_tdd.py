@@ -51,7 +51,7 @@ def test_tdd_skips_redundant_verify_gate(monkeypatch, tmp_path):
     monkeypatch.setattr(area.pipeline, "run_pipeline", lambda req, **kw: _res(tmp_path))
     monkeypatch.setattr(area.cli, "_run_gate", lambda g, n, a: (ran.append(g), True)[1])
     assert area.cli.main(["run", "x", "--tdd", "--all"]) == 0
-    assert "verify" not in ran and set(ran) == {"audit", "e2e", "chaos"}
+    assert "verify" not in ran and set(ran) == {"audit", "e2e", "chaos", "nfr"}
 
 
 def test_non_tdd_runs_verify_gate(monkeypatch, tmp_path):

@@ -62,8 +62,13 @@ def _add_common(sp):
                     help="audit tier-2: make advisory risky-pattern findings BLOCK")
     sp.add_argument("--e2e", action="store_true", help="Playwright E2E gate after build")
     sp.add_argument("--chaos", action="store_true", help="chaos/resilience gate after build")
+    sp.add_argument("--nfr", action="store_true",
+                    help="perf/NFR budget gate: measure bundle/deps/weight vs budget "
+                         "(specs/<name>/nfr.yaml blocks; defaults advisory unless --strict)")
+    sp.add_argument("--nfr-build", action="store_true",
+                    help="NFR: also run a clean timed build to measure build_ms")
     sp.add_argument("--all", action="store_true",
-                    help="run all gates: verify + audit + e2e + chaos")
+                    help="run all gates: verify + audit + e2e + chaos + nfr")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
 
@@ -82,7 +87,7 @@ def _finish(res, args) -> int:
 
     all_ = getattr(args, "all", False)
     gates = [
-        g for g in ("verify", "audit", "e2e", "chaos")
+        g for g in ("verify", "audit", "e2e", "chaos", "nfr")
         if all_ or getattr(args, g, False)
     ]
     # --tdd already builds against the locked holdout suite, so the post-build
@@ -121,7 +126,7 @@ def _finish(res, args) -> int:
 
 
 def _run_gate(gate: str, name: str, args) -> bool:
-    from area.verify import chaos_verify, e2e_verify, holdout_verify, static_audit
+    from area.verify import chaos_verify, e2e_verify, holdout_verify, nfr_verify, static_audit
 
     kw = dict(backend=args.backend, model=args.model)
     if gate == "verify":
@@ -134,6 +139,9 @@ def _run_gate(gate: str, name: str, args) -> bool:
         return e2e_verify(name, **kw)
     if gate == "chaos":
         return chaos_verify(name, **kw)
+    if gate == "nfr":
+        return nfr_verify(name, strict=getattr(args, "strict", False),
+                          run_build=getattr(args, "nfr_build", False), **kw)
     return True
 
 
