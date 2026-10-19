@@ -94,3 +94,36 @@ def test_hub_disconnect_ui_stops_delivery():
     hub.disconnect_ui(a_send)
     asyncio.run(hub.from_runner(P.encode(P.status_msg("1", "done", 0))))
     assert a_got == []
+
+
+# ---- P1: chat / apps relay + runner control handling ------------------------
+
+def test_relayable_from_ui():
+    assert P.is_relayable_from_ui(P.job_msg("1", "run"))
+    assert P.is_relayable_from_ui(P.chat_msg("1", "có app nào?"))
+    assert P.is_relayable_from_ui(P.apps_req())
+    assert not P.is_relayable_from_ui({"type": "job", "kind": "rm", "id": "1"})
+    assert not P.is_relayable_from_ui({"type": "log", "line": "x"})
+
+
+def test_hub_forwards_chat_and_apps():
+    got, send = _sink()
+    hub = Hub()
+    hub.connect_runner(send)
+    assert asyncio.run(hub.from_ui(P.encode(P.chat_msg("1", "hi")))) is True
+    assert asyncio.run(hub.from_ui(P.encode(P.apps_req()))) is True
+    assert len(got) == 2
+
+
+def test_runner_handle_control_chat_and_apps(monkeypatch):
+    import area.runner as R
+    import area.web.chat as C
+    import area.web.jobs as J
+
+    monkeypatch.setattr(C.J, "list_apps", lambda: [{"name": "lf_real"}])
+    monkeypatch.setattr(J, "list_apps", lambda: [{"name": "lf_real"}, {"name": "notes_cf"}])
+    chat = R.handle_control(P.chat_msg("7", "có app nào?"))
+    assert chat["type"] == "chat_reply" and chat["id"] == "7" and chat["action"] == "answer"
+    apps = R.handle_control(P.apps_req())
+    assert apps["type"] == "apps" and "lf_real" in apps["apps"]
+    assert R.handle_control({"type": "log"}) is None

@@ -17,6 +17,23 @@ from area.net.protocol import (
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def handle_control(msg: dict) -> dict | None:
+    """Non-job control messages the runner answers locally from its OWN state:
+    `chat` (routed through the governed, keyless chat box) and `apps` (the apps in
+    this runner's workspace). Returns a reply dict, or None if not a control msg."""
+    t = msg.get("type")
+    if t == "chat":
+        from area.web.chat import route as chat_route
+
+        r = chat_route(str(msg.get("message", "")), str(msg.get("app") or ""))
+        return {"type": "chat_reply", "id": msg.get("id"), **r}
+    if t == "apps":
+        from area.web.jobs import list_apps
+
+        return {"type": "apps", "apps": [a["name"] for a in list_apps()]}
+    return None
+
+
 def _area_cmd() -> list[str]:
     """How to invoke the `area` CLI from inside the runner process."""
     return [sys.executable, "-m", "area.cli"]
@@ -52,9 +69,12 @@ async def _exec_job(ws, job: dict) -> None:
 
 async def _run(coord_url: str, token: str | None) -> None:
     import websockets
+    from urllib.parse import quote
 
     url = coord_url.rstrip("/") + "/ws/runner"
-    print(f"[runner] connecting to {url} …", flush=True)
+    if token:
+        url += "?token=" + quote(token)
+    print(f"[runner] connecting to {coord_url.rstrip('/')}/ws/runner …", flush=True)
     async with websockets.connect(url, max_size=None) as ws:
         await ws.send(encode(hello_msg("runner", token)))
         print("[runner] connected — waiting for jobs (Ctrl-C to stop)", flush=True)
@@ -63,6 +83,10 @@ async def _run(coord_url: str, token: str | None) -> None:
             if is_valid_job(msg):
                 print(f"[runner] job {msg.get('id')} · {msg.get('kind')}", flush=True)
                 await _exec_job(ws, msg)
+                continue
+            reply = handle_control(msg)
+            if reply is not None:
+                await ws.send(encode(reply))
 
 
 def run_runner(coord_url: str, token: str | None = None) -> int:

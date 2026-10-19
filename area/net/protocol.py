@@ -42,6 +42,14 @@ def status_msg(jid: str, status: str, exit_code: int | None = None) -> dict:
     return {"type": "status", "id": jid, "status": status, "exit": exit_code}
 
 
+def chat_msg(cid: str, message: str, app: str = "") -> dict:
+    return {"type": "chat", "id": cid, "message": message, "app": app}
+
+
+def apps_req() -> dict:
+    return {"type": "apps"}
+
+
 def is_valid_job(msg: dict) -> bool:
     return (
         isinstance(msg, dict)
@@ -49,6 +57,14 @@ def is_valid_job(msg: dict) -> bool:
         and msg.get("kind") in ALLOWED_KINDS
         and bool(msg.get("id"))
     )
+
+
+def is_relayable_from_ui(msg: dict) -> bool:
+    """What a UI is allowed to send to a runner: a typed job, a chat query, or an
+    apps-list request. Anything else is dropped at the coordinator."""
+    if is_valid_job(msg):
+        return True
+    return isinstance(msg, dict) and msg.get("type") in ("chat", "apps")
 
 
 def job_argv(kind: str, params: dict | None = None) -> list[str]:

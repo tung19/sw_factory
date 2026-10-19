@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Awaitable, Callable
 
-from area.net.protocol import decode, is_valid_job
+from area.net.protocol import decode, is_relayable_from_ui
 
 Send = Callable[[str], Awaitable[None]]  # an async "send this text frame"
 
@@ -36,9 +36,10 @@ class Hub:
 
     # --- routing -------------------------------------------------------------
     async def from_ui(self, raw: str) -> bool:
-        """Forward a UI frame to the runner IFF it is a valid typed job.
-        Returns True if forwarded. Invalid frames are dropped (not relayed)."""
-        if not is_valid_job(decode(raw)) or self._runner is None:
+        """Forward a UI frame to the runner IFF it is a relayable typed message
+        (a job, a chat query, or an apps request). Returns True if forwarded;
+        anything else is dropped at the coordinator (never relayed)."""
+        if not is_relayable_from_ui(decode(raw)) or self._runner is None:
             return False
         await self._runner(raw)
         return True
