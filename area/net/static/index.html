@@ -151,7 +151,14 @@
 </div>
 <script>
 const $=id=>document.getElementById(id);
-let ws, logBuf='', activeJob=null, RUNNER=false, pendingDoc=null, chatHistory=[], thinking=null;
+let ws, logBuf='', activeJob=null, RUNNER=false, pendingDoc=null, chatHistory=[], thinking=null, jobStart=0, jobTimer=null;
+function jobSecs(){return jobStart?Math.round((Date.now()-jobStart)/1000):0;}
+// Start the live "đang chạy" heartbeat so the user sees progress even BEFORE the
+// first runner log arrives (the runner takes a few seconds to warm up).
+function startJob(){if(jobTimer)clearInterval(jobTimer);jobStart=Date.now();
+  jobTimer=setInterval(()=>{if(!activeJob){clearInterval(jobTimer);jobTimer=null;return;}renderPipe();},1000);
+  renderPipe();}
+function stopJob(){if(jobTimer){clearInterval(jobTimer);jobTimer=null;}}
 const esc=t=>(t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const rid=()=>Math.random().toString(36).slice(2,10);
 
@@ -188,7 +195,7 @@ function onMsg(e){let m;try{m=JSON.parse(e.data)}catch(_){return;}
   if(m.type==='coord'){setRunner(!!m.runner);return;}
   if(m.type==='apps'){fillApps(m.apps||[]);return;}
   if(m.type==='log'){logBuf+=m.line+'\n';renderLog();renderPipe();return;}
-  if(m.type==='status'){logBuf+='— status: '+m.status+(m.exit!=null?' (exit '+m.exit+')':'')+' —\n';renderLog();renderPipe();if(m.status!=='running')send({type:'apps'});return;}
+  if(m.type==='status'){logBuf+='— status: '+m.status+(m.exit!=null?' (exit '+m.exit+')':'')+' —\n';renderLog();renderPipe();if(m.status!=='running'){stopJob();send({type:'apps'});}return;}
   if(m.type==='chat_reply'){onChatReply(m);return;}
 }
 function fillApps(apps){const opts='<option value="">— app —</option>'+apps.map(a=>`<option>${esc(a)}</option>`).join('');
@@ -231,9 +238,10 @@ async function build(){const req=$('req').value.trim();
   $('build').disabled=true;
   const p={requirement:req,name:$('name').value.trim()||'app',tdd:true,deploy:$('depl').checked};
   if(pendingDoc){p.doc_uid=await sendDocChunks(pendingDoc);}
-  const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
+  const id=rid();activeJob=id;
+  logBuf='[area] ▶ Đã gửi tới runner — đang khởi động (log đầu tiên có thể mất vài giây)…\n';renderLog();startJob();
   send({type:'job',id,kind:'run',params:p});
-  stat('▶ Đã gửi yêu cầu tới runner — theo dõi Chu trình bên phải.');
+  stat('▶ Đang chạy — theo dõi Chu trình + Log trực tiếp.');
   $('build').disabled=false;}
 
 // ---- advanced job form ---------------------------------------------------------
@@ -271,14 +279,16 @@ function onChatReply(m){think(false);
     const box=document.createElement('div');box.style.cssText='margin-top:7px;font-size:11px;color:var(--muted);white-space:pre-wrap;border-top:1px solid var(--border);padding-top:6px;max-height:140px;overflow:auto';
     box.textContent=req;
     const b=document.createElement('button');b.className='go';b.textContent='🏭 Tạo phần mềm với spec này →';
-    b.onclick=()=>{b.disabled=true;$('req').value=req;const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
-      send({type:'job',id,kind:'run',params:{requirement:req,name:($('name').value.trim()||'app'),tdd:true}});
-      addChat('bot','▶ Đã đưa spec vào vòng lặp oracle — xem Chu trình bên phải.');};
+    b.onclick=()=>{b.disabled=true;$('req').value=req;const id=rid();activeJob=id;
+      logBuf='[area] ▶ Đã đưa spec vào runner — đang khởi động…\n';renderLog();startJob();
+      send({type:'job',id,kind:'run',params:{requirement:req,name:($('name').value.trim()||'app'),tdd:true,deploy:$('depl').checked}});
+      addChat('bot','▶ Đang chạy — xem Chu trình bên phải.');};
     d.querySelector('.bubble').appendChild(box);d.querySelector('.bubble').appendChild(b);return;}
   if(m.action==='run'){botSay(m.reply);$('req').value=m.instruction||$('req').value;return;}
   if(m.action==='iterate'){const d=addChat('bot',m.reply);chatHistory.push({role:'assistant',text:m.reply});
     const b=document.createElement('button');b.className='go';b.textContent='Xác nhận chạy';
-    b.onclick=()=>{b.disabled=true;const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
+    b.onclick=()=>{b.disabled=true;const id=rid();activeJob=id;
+      logBuf='[area] ▶ Đang chạy iterate — khởi động…\n';renderLog();startJob();
       send({type:'job',id,kind:'iterate',params:{name:m.app,instruction:m.instruction,tdd:true}});
       addChat('bot','▶ Đang chạy iterate — xem Chu trình bên phải.');};
     d.querySelector('.bubble').appendChild(b);}
@@ -308,8 +318,15 @@ function parsePipe(t){const has=re=>re.test(t),grp=re=>{const x=t.match(re);retu
   const url=grp(/(https:\/\/[A-Za-z0-9.\-]+\.(?:workers\.dev|pages\.dev|vercel\.app)\S*)/);if(url){dep.status='done';dep.detail='Đã deploy live';push(dep.chips,'live','ok');}
   if(has(/✅ GREEN —/)){if(gates.status==='active')gates.status='done';if(build.status&&build.status!=='failed')build.status='done';}
   return [{label:'1 · Spec',...spec},{label:'2 · Khoá oracle (TDD)',...tests},{label:'3 · Build',...build},{label:'4 · Gates',...gates},{label:'5 · Deploy',...dep}];}
-function renderPipe(){const st=parsePipe(logBuf),done=st.filter(s=>s.status==='done').length,act=st.find(s=>s.status==='active');
-  $('ptitle').textContent=activeJob?(act?'▶ '+act.label:done+'/'+st.length+' xong'):'— chưa chạy —';
+function renderPipe(){const st=parsePipe(logBuf);
+  let act=st.find(s=>s.status==='active');
+  const anyProgress=st.some(s=>s.status==='active'||s.status==='done'||s.status==='failed');
+  // Job is live but no log marker yet → show stage 1 pulsing so the screen isn't idle.
+  if(activeJob && !anyProgress){st[0].status='active';st[0].detail='Runner đang khởi động…';act=st[0];}
+  const done=st.filter(s=>s.status==='done').length, secs=activeJob?jobSecs():0;
+  $('ptitle').textContent=activeJob
+    ? (act?('▶ '+act.label):(done+'/'+st.length+' xong'))+' · ⏱ '+secs+'s'
+    : '— chưa chạy —';
   $('pipe').innerHTML='<div class="flow">'+st.map(s=>{const ic={active:'◉',done:'✓',failed:'✗'}[s.status]||'○';
     const det=s.detail||{active:'đang chạy…',done:'xong',failed:'lỗi'}[s.status]||'chờ…';
     const ch=(s.chips||[]).map(c=>`<span class="chip ${c.c}">${esc(c.t)}</span>`).join('');
