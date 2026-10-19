@@ -89,7 +89,7 @@
   <div class="col">
     <div class="card" id="pairCard" style="display:none;border-color:var(--amber)">
       <h2>Kết nối runner của bạn</h2>
-      <div class="hint">Chưa có runner cho kênh này — nhà máy chạy trên <b>máy/cloud của bạn</b> (Claude + Cloudflare/Vercel của bạn). Chạy lệnh sau (cần cài AREA — xem docs/RUNNER.md). Bạn vẫn soạn mô tả / upload trước được.</div>
+      <div class="hint">Chưa có runner cho kênh này — nhà máy chạy trên <b>máy của bạn</b> (Claude + Cloudflare/Vercel của bạn). Dán <b>1 lệnh</b> sau vào terminal — nó tự cài + kết nối (cần: git · Python 3.12+ · Claude Code đã login). Bạn vẫn soạn mô tả / upload trước được.</div>
       <pre class="log" id="pairCmd" style="min-height:0;margin-top:8px;user-select:all"></pre>
     </div>
 
@@ -183,8 +183,8 @@ const TOKEN=(function(){
 // you can draft a requirement / upload a doc before a runner is even connected.
 function setRunner(on){RUNNER=on;$('rdot').classList.toggle('on',on);$('rstat').textContent='runner: '+(on?'online':'offline');
   $('pairCard').style.display=on?'none':'';
-  if(!on){const wsp=location.protocol==='https:'?'wss':'ws';
-    $('pairCmd').textContent='area runner --connect '+wsp+'://'+location.host+(TOKEN?' --token '+TOKEN:'');}
+  if(!on){const wsp=location.protocol==='https:'?'wss':'ws',base=location.protocol+'//'+location.host;
+    $('pairCmd').textContent='curl -fsSL '+base+'/runner.sh | bash -s -- --connect '+wsp+'://'+location.host+(TOKEN?' --token '+TOKEN:'');}
   if(on) send({type:'apps'});}
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 function connect(){const p=location.protocol==='https:'?'wss':'ws';

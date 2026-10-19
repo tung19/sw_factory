@@ -7,6 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # keep the Worker's served UI in sync with the canonical coordinator UI
 cp area/net/static/index.html coordinator-cf/public/index.html
+# the one-command runner bootstrap, served at <coordinator>/runner.sh
+cp scripts/bootstrap-runner.sh coordinator-cf/public/runner.sh
 export npm_config_cache="${npm_config_cache:-$HOME/.cache/npm-area}"; mkdir -p "$npm_config_cache"
 cd coordinator-cf
 echo "▶ Deploy coordinator → Cloudflare Workers"
