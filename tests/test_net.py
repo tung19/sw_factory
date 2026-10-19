@@ -54,46 +54,65 @@ def _sink():
     return got, send
 
 
+CH = "chan-1"  # a channel/pairing-token key
+
+
 def test_hub_forwards_valid_job_to_runner():
     runner_got, runner_send = _sink()
     hub = Hub()
-    hub.connect_runner(runner_send)
+    hub.connect_runner(CH, runner_send)
     raw = P.encode(P.job_msg("1", "run", {"requirement": "x"}))
-    assert asyncio.run(hub.from_ui(raw)) is True
+    assert asyncio.run(hub.from_ui(CH, raw)) is True
     assert runner_got == [raw]
 
 
 def test_hub_drops_invalid_job():
     runner_got, runner_send = _sink()
     hub = Hub()
-    hub.connect_runner(runner_send)
-    assert asyncio.run(hub.from_ui(P.encode({"type": "job", "kind": "rm", "id": "1"}))) is False
+    hub.connect_runner(CH, runner_send)
+    assert asyncio.run(hub.from_ui(CH, P.encode({"type": "job", "kind": "rm", "id": "1"}))) is False
     assert runner_got == []  # never relayed
 
 
 def test_hub_no_runner_drops():
     hub = Hub()
-    assert asyncio.run(hub.from_ui(P.encode(P.job_msg("1", "doctor")))) is False
+    assert asyncio.run(hub.from_ui(CH, P.encode(P.job_msg("1", "doctor")))) is False
 
 
 def test_hub_broadcasts_runner_output_to_uis():
     a_got, a_send = _sink()
     b_got, b_send = _sink()
     hub = Hub()
-    hub.connect_ui(a_send)
-    hub.connect_ui(b_send)
+    hub.connect_ui(CH, a_send)
+    hub.connect_ui(CH, b_send)
     raw = P.encode(P.log_msg("1", "building…"))
-    asyncio.run(hub.from_runner(raw))
+    asyncio.run(hub.from_runner(CH, raw))
     assert a_got == [raw] and b_got == [raw]
 
 
 def test_hub_disconnect_ui_stops_delivery():
     a_got, a_send = _sink()
     hub = Hub()
-    hub.connect_ui(a_send)
-    hub.disconnect_ui(a_send)
-    asyncio.run(hub.from_runner(P.encode(P.status_msg("1", "done", 0))))
+    hub.connect_ui(CH, a_send)
+    hub.disconnect_ui(CH, a_send)
+    asyncio.run(hub.from_runner(CH, P.encode(P.status_msg("1", "done", 0))))
     assert a_got == []
+
+
+def test_hub_channels_are_isolated():
+    # P2: a UI on channel A can't reach a runner on channel B, and runner output
+    # only reaches its own channel's UIs.
+    a_runner_got, a_runner_send = _sink()
+    b_ui_got, b_ui_send = _sink()
+    hub = Hub()
+    hub.connect_runner("A", a_runner_send)
+    hub.connect_ui("B", b_ui_send)
+    # a job on channel B has no runner → dropped; channel-A runner never sees it
+    assert asyncio.run(hub.from_ui("B", P.encode(P.job_msg("1", "doctor")))) is False
+    assert a_runner_got == []
+    # channel-A runner output does NOT reach channel-B's UI
+    asyncio.run(hub.from_runner("A", P.encode(P.log_msg("1", "x"))))
+    assert b_ui_got == []
 
 
 # ---- P1: chat / apps relay + runner control handling ------------------------
@@ -109,9 +128,9 @@ def test_relayable_from_ui():
 def test_hub_forwards_chat_and_apps():
     got, send = _sink()
     hub = Hub()
-    hub.connect_runner(send)
-    assert asyncio.run(hub.from_ui(P.encode(P.chat_msg("1", "hi")))) is True
-    assert asyncio.run(hub.from_ui(P.encode(P.apps_req()))) is True
+    hub.connect_runner(CH, send)
+    assert asyncio.run(hub.from_ui(CH, P.encode(P.chat_msg("1", "hi")))) is True
+    assert asyncio.run(hub.from_ui(CH, P.encode(P.apps_req()))) is True
     assert len(got) == 2
 
 

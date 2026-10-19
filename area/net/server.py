@@ -5,12 +5,11 @@ in-memory channel.
 from __future__ import annotations
 
 import os
-import secrets
 from pathlib import Path
 from urllib.parse import parse_qs
 
 from starlette.applications import Starlette
-from starlette.responses import HTMLResponse, PlainTextResponse
+from starlette.responses import HTMLResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -21,30 +20,30 @@ HUB = Hub()
 STATIC = Path(__file__).resolve().parent / "static"
 
 
-def _coord_token() -> str | None:
-    t = (os.getenv("AREA_COORD_TOKEN") or "").strip()
-    return t or None
-
-
-def _authed(scope) -> bool:
-    """When AREA_COORD_TOKEN is set (public exposure), require ?token= on both the
-    page and the websockets. No token set → open (local use)."""
-    t = _coord_token()
-    if not t:
+def _require_token() -> bool:
+    """Public mode: reject tokenless connections (so there's no open shared
+    channel). Enabled by AREA_COORD_REQUIRE_TOKEN=1 (or the legacy AREA_COORD_TOKEN
+    being set). Off by default → local dev works tokenless on the LOCAL channel."""
+    v = (os.getenv("AREA_COORD_REQUIRE_TOKEN") or "").strip().lower()
+    if v in ("1", "true", "yes"):
         return True
+    return bool((os.getenv("AREA_COORD_TOKEN") or "").strip())
+
+
+def _channel(scope) -> str:
+    """The pairing token = the channel key. Empty → the LOCAL channel."""
     qs = parse_qs(scope.get("query_string", b"").decode())
-    got = (qs.get("token") or [None])[0]
-    return bool(got) and secrets.compare_digest(got, t)
+    return (qs.get("token") or [""])[0]
 
 
 async def index(request):
-    if not _authed(request.scope):
-        return PlainTextResponse("unauthorized — thêm ?token=… vào URL", status_code=401)
+    # The page is a static shell with no secrets; the token gates the channel.
     return HTMLResponse((STATIC / "index.html").read_text())
 
 
 async def ws_runner(ws: WebSocket):
-    if not _authed(ws.scope):
+    key = _channel(ws.scope)
+    if _require_token() and not key:
         await ws.close(code=1008)
         return
     await ws.accept()
@@ -52,22 +51,22 @@ async def ws_runner(ws: WebSocket):
     async def send(text: str) -> None:
         await ws.send_text(text)
 
-    HUB.connect_runner(send)
-    # let the UIs know a runner just attached
-    await HUB.from_runner(encode({"type": "coord", "runner": True}))
+    HUB.connect_runner(key, send)
+    await HUB.from_runner(key, encode({"type": "coord", "runner": True}))
     try:
         while True:
             raw = await ws.receive_text()
-            await HUB.from_runner(raw)
+            await HUB.from_runner(key, raw)
     except WebSocketDisconnect:
         pass
     finally:
-        HUB.disconnect_runner(send)
-        await HUB.from_runner(encode({"type": "coord", "runner": False}))
+        HUB.disconnect_runner(key, send)
+        await HUB.from_runner(key, encode({"type": "coord", "runner": False}))
 
 
 async def ws_ui(ws: WebSocket):
-    if not _authed(ws.scope):
+    key = _channel(ws.scope)
+    if _require_token() and not key:
         await ws.close(code=1008)
         return
     await ws.accept()
@@ -75,16 +74,16 @@ async def ws_ui(ws: WebSocket):
     async def send(text: str) -> None:
         await ws.send_text(text)
 
-    HUB.connect_ui(send)
-    await send(encode({"type": "coord", "runner": HUB.has_runner()}))
+    HUB.connect_ui(key, send)
+    await send(encode({"type": "coord", "runner": HUB.has_runner(key)}))
     try:
         while True:
             raw = await ws.receive_text()
-            await HUB.from_ui(raw)
+            await HUB.from_ui(key, raw)
     except WebSocketDisconnect:
         pass
     finally:
-        HUB.disconnect_ui(send)
+        HUB.disconnect_ui(key, send)
 
 
 app = Starlette(routes=[

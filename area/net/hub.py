@@ -1,7 +1,10 @@
-"""area.net.hub — the coordinator's relay. It forwards raw frames between one
-runner and any number of UIs, and drops anything from a UI that isn't a valid
-typed job. It executes nothing and stores no secrets (ADR 0002). P0: a single
-channel (one runner + its UIs); accounts/pairing come in P2.
+"""area.net.hub — the coordinator's relay, keyed by CHANNEL (ADR 0002, P2).
+
+Each pairing **token** is its own private channel: a UI on token X only ever
+reaches the runner that registered with token X, and vice-versa. So many users
+share one coordinator, each isolated to their own runner. Empty token = the
+"local" channel (single-user local dev). The relay still forwards only valid
+typed messages and executes nothing / stores no secrets.
 """
 from __future__ import annotations
 
@@ -9,45 +12,74 @@ from typing import Awaitable, Callable
 
 from area.net.protocol import decode, is_relayable_from_ui
 
-Send = Callable[[str], Awaitable[None]]  # an async "send this text frame"
+Send = Callable[[str], Awaitable[None]]
+LOCAL = ""  # the default channel key when no token is given (local dev)
+
+
+class _Channel:
+    def __init__(self) -> None:
+        self.runner: Send | None = None
+        self.uis: set[Send] = set()
+
+    def empty(self) -> bool:
+        return self.runner is None and not self.uis
 
 
 class Hub:
     def __init__(self) -> None:
-        self._runner: Send | None = None
-        self._uis: set[Send] = set()
+        self._ch: dict[str, _Channel] = {}
 
-    # --- connections ---------------------------------------------------------
-    def connect_runner(self, send: Send) -> None:
-        self._runner = send
+    def _get(self, key: str) -> _Channel:
+        return self._ch.setdefault(key, _Channel())
 
-    def disconnect_runner(self, send: Send | None = None) -> None:
-        if send is None or send is self._runner:
-            self._runner = None
+    def _gc(self, key: str) -> None:
+        c = self._ch.get(key)
+        if c and c.empty():
+            self._ch.pop(key, None)
 
-    def connect_ui(self, send: Send) -> None:
-        self._uis.add(send)
+    # --- connections (per channel) -------------------------------------------
+    def connect_runner(self, key: str, send: Send) -> None:
+        self._get(key).runner = send
 
-    def disconnect_ui(self, send: Send) -> None:
-        self._uis.discard(send)
+    def disconnect_runner(self, key: str, send: Send | None = None) -> None:
+        c = self._ch.get(key)
+        if c and (send is None or send is c.runner):
+            c.runner = None
+            self._gc(key)
 
-    def has_runner(self) -> bool:
-        return self._runner is not None
+    def connect_ui(self, key: str, send: Send) -> None:
+        self._get(key).uis.add(send)
 
-    # --- routing -------------------------------------------------------------
-    async def from_ui(self, raw: str) -> bool:
-        """Forward a UI frame to the runner IFF it is a relayable typed message
-        (a job, a chat query, or an apps request). Returns True if forwarded;
-        anything else is dropped at the coordinator (never relayed)."""
-        if not is_relayable_from_ui(decode(raw)) or self._runner is None:
+    def disconnect_ui(self, key: str, send: Send) -> None:
+        c = self._ch.get(key)
+        if c:
+            c.uis.discard(send)
+            self._gc(key)
+
+    def has_runner(self, key: str) -> bool:
+        c = self._ch.get(key)
+        return bool(c and c.runner is not None)
+
+    def channel_count(self) -> int:
+        return len(self._ch)
+
+    # --- routing (within one channel) ----------------------------------------
+    async def from_ui(self, key: str, raw: str) -> bool:
+        """Forward a UI frame to THIS channel's runner iff it's a relayable typed
+        message (job / chat / apps). Cross-channel is impossible."""
+        c = self._ch.get(key)
+        if not c or c.runner is None or not is_relayable_from_ui(decode(raw)):
             return False
-        await self._runner(raw)
+        await c.runner(raw)
         return True
 
-    async def from_runner(self, raw: str) -> None:
-        """Broadcast a runner frame (log/status) to every connected UI."""
-        for send in list(self._uis):
+    async def from_runner(self, key: str, raw: str) -> None:
+        """Broadcast a runner frame to THIS channel's UIs only."""
+        c = self._ch.get(key)
+        if not c:
+            return
+        for send in list(c.uis):
             try:
                 await send(raw)
-            except Exception:  # noqa: BLE001 — drop a dead UI, keep the rest
-                self._uis.discard(send)
+            except Exception:  # noqa: BLE001
+                c.uis.discard(send)
