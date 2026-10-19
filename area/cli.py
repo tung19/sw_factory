@@ -56,6 +56,10 @@ def _add_common(sp):
     sp.add_argument("--verify", action="store_true",
                     help="independent holdout acceptance check after a green build")
     sp.add_argument("--audit", action="store_true", help="security/static gate after build")
+    sp.add_argument("--audit-level", default="high", choices=["low", "moderate", "high", "critical"],
+                    help="npm-audit severity threshold for the deterministic tier-1 gate")
+    sp.add_argument("--strict", action="store_true",
+                    help="audit tier-2: make advisory risky-pattern findings BLOCK")
     sp.add_argument("--e2e", action="store_true", help="Playwright E2E gate after build")
     sp.add_argument("--chaos", action="store_true", help="chaos/resilience gate after build")
     sp.add_argument("--all", action="store_true",
@@ -93,6 +97,21 @@ def _finish(res, args) -> int:
             print(f"[area] ❌ gate '{g}' failed — skipping deploy")
             return 1
 
+    # SLSA-style provenance: attest what was built + which gates passed, so deploy
+    # can later verify the artifact wasn't modified after gating.
+    try:
+        from area.provenance import write_provenance
+
+        gate_results = {g: True for g in gates}
+        gate_results["holdout_tdd"] = bool(getattr(args, "tdd", False))
+        write_provenance(res.app_dir, name=res.name,
+                         target=getattr(args, "target", None) or "?",
+                         gates=gate_results, spec_dir=res.spec_dir)
+        print(f"[area] provenance recorded ({sum(gate_results.values())} checks) "
+              "→ .area/provenance.json")
+    except Exception as e:  # noqa: BLE001
+        print(f"[area] provenance write skipped (warn): {e}")
+
     if args.deploy:
         from area.deploy import deploy_with_gate
 
@@ -108,7 +127,9 @@ def _run_gate(gate: str, name: str, args) -> bool:
     if gate == "verify":
         return holdout_verify(name, **kw)
     if gate == "audit":
-        return static_audit(name, fix=True, **kw)
+        return static_audit(name, fix=True,
+                            audit_level=getattr(args, "audit_level", "high"),
+                            strict=getattr(args, "strict", False), **kw)
     if gate == "e2e":
         return e2e_verify(name, **kw)
     if gate == "chaos":
@@ -174,6 +195,16 @@ def main(argv=None) -> int:
     d = sub.add_parser("deploy", help="Deploy a built app to Cloudflare (human gate)")
     d.add_argument("name")
     d.add_argument("--yes", action="store_true", help="skip the human gate")
+    d.add_argument("--require-provenance", action="store_true",
+                   help="refuse to deploy unless build provenance verifies "
+                        "(hard block on a modified-after-gating / ungated artifact)")
+
+    pv = sub.add_parser("provenance",
+                        help="Show or verify an app's build provenance (SLSA-style)")
+    pv.add_argument("name")
+    pv.add_argument("--verify", action="store_true",
+                    help="re-verify the built artifact against its recorded provenance "
+                         "(exit 1 on mismatch/absent)")
 
     rb = sub.add_parser("rollback", help="Roll a deployed app back to its previous Cloudflare version")
     rb.add_argument("name")
@@ -223,9 +254,14 @@ def main(argv=None) -> int:
     e2.add_argument("--budget", type=float, default=None)
     e2.add_argument("--agent-iters", type=int, default=None)
 
-    au = sub.add_parser("audit", help="Security + static gate (tsc, npm audit, secrets)")
+    au = sub.add_parser("audit", help="Security + static gate (tsc, npm audit, secrets) — two-tier")
     au.add_argument("name")
     au.add_argument("--fix", action="store_true", help="let an agent fix issues and re-gate")
+    au.add_argument("--audit-level", default="high",
+                    choices=["low", "moderate", "high", "critical"],
+                    help="npm-audit severity threshold for the deterministic tier-1 gate")
+    au.add_argument("--strict", action="store_true",
+                    help="tier-2: make advisory risky-pattern findings BLOCK")
     au.add_argument("--backend", default="acp", choices=["acp", "llm"])
     au.add_argument("--model", default=None)
     au.add_argument("--max-iters", type=int, default=3)
@@ -351,8 +387,32 @@ def main(argv=None) -> int:
         if not app_dir.exists():
             print(f"[area] no app at {app_dir}")
             return 1
-        ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes))
+        ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes),
+                                 require_provenance=getattr(args, "require_provenance", False))
         return 0 if ok else 1
+
+    if args.cmd == "provenance":
+        from area.pipeline import WORKSPACE
+        from area.provenance import read_provenance, verify_provenance
+
+        app_dir = WORKSPACE / "apps" / safe_name(args.name)
+        if not app_dir.exists():
+            print(f"[area] no app at {app_dir}")
+            return 1
+        if args.verify:
+            status, detail = verify_provenance(app_dir)
+            icon = {"ok": "✅", "mismatch": "❌", "absent": "⚠"}.get(status, "?")
+            print(f"[area] provenance {status} {icon} — {detail}")
+            return 0 if status == "ok" else 1
+        prov = read_provenance(app_dir)
+        if not prov:
+            print(f"[area] no provenance recorded for {args.name} "
+                  "(build through AREA's gates to create it)")
+            return 1
+        import json as _json
+
+        print(_json.dumps(prov, indent=2))
+        return 0
 
     if args.cmd == "rollback":
         from area.deploy import rollback
@@ -477,7 +537,7 @@ def main(argv=None) -> int:
 
         ok = static_audit(
             args.name, fix=args.fix, backend=args.backend, model=args.model,
-            max_iters=args.max_iters,
+            max_iters=args.max_iters, audit_level=args.audit_level, strict=args.strict,
         )
         print(f"\n[area] audit: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
         return 0 if ok else 1

@@ -149,6 +149,8 @@ SW_Factory/
 
 **Command box (`area iterate` + dashboard tab "Iterate (ra lệnh)")** ✅ (2026-10-19): user ra lệnh NL cho app ĐANG CÓ ("thêm nút xoá", "đổi dark mode") → lệnh được **gộp vào spec** (`compose_amended_requirement`, không raw-to-agent) → **re-lock oracle (TDD mặc định)** → rebuild + gate; target tự nhận theo app. Giữ nguyên xương sống oracle-loop. Chạy qua job-manager (SSE timeline) + sau auth PR6. `area/pipeline.py:iterate_pipeline`, `area/cli.py` lệnh `iterate`, `area/web` kind `iterate`. 11 test.
 
+**SecOps roadmap** (research 2026-10-19, memory `secops-autonomous-swe-landscape`): không OSS nào tích hợp SecOps first-class vào vòng sinh code tự động; AREA (`area audit`+chaos+oracle-loop) đang đi trước. Nguyên tắc: **gate deterministic = chặn cứng, LLM-review = advisory→blocking sau khi đo FP**. Đã làm (2026-10-19): **`area audit` 2-tầng** (tier-1 tsc/npm-audit severity/secrets chặn cứng; tier-2 advisory risky-pattern scan, `--strict` để chặn) + **SLSA-style provenance** (`area/provenance.py`: materials spec→product digest; verify-before-deploy chặn artifact bị sửa sau khi gate). Còn: policy-as-code (OPA) ở deploy gate, sandbox per-run, map OWASP-ASI→NIST SSDF, harden ACP vs prompt-injection.
+
 ### Lộ trình Hybrid + TDD (2026-10-18, đang làm theo thứ tự)
 | # | Việc | Done khi |
 |---|---|---|

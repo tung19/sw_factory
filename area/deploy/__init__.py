@@ -31,17 +31,54 @@ def detect_provider(app_dir: str | Path) -> str:
 
 
 def deploy_with_gate(
-    app_dir: str | Path, *, confirm: Callable[[str], bool], provider: Optional[str] = None
+    app_dir: str | Path,
+    *,
+    confirm: Callable[[str], bool],
+    provider: Optional[str] = None,
+    require_provenance: Optional[bool] = None,
 ) -> tuple[bool, Optional[str]]:
     """Human gate, then deploy to the right provider (auto-detected if not given).
 
     Cloudflare path auto-provisions D1 first; Vercel path is a plain deploy.
+
+    Provenance check (SLSA-style): before deploying, the built artifact is verified
+    against its recorded provenance. A "mismatch" (the source changed since it was
+    gated) blocks the deploy when require_provenance is set (flag or the
+    AREA_REQUIRE_PROVENANCE env); "absent" only warns (back-compat).
     """
+    import os
+
     app_dir = str(app_dir)
     provider = provider or detect_provider(app_dir)
     if not confirm(app_dir):
         print("[area] deploy cancelled by human gate.")
         return False, None
+
+    if require_provenance is None:
+        require_provenance = (os.getenv("AREA_REQUIRE_PROVENANCE") or "").strip().lower() in (
+            "1", "true", "yes",
+        )
+    try:
+        from area.provenance import verify_provenance
+
+        status, detail = verify_provenance(app_dir)
+        if status == "ok":
+            print(f"[area] ✅ provenance ok — {detail}")
+        elif status == "mismatch":
+            print(f"[area] ❌ provenance MISMATCH:\n{detail}")
+            if require_provenance:
+                print("[area] refusing deploy (AREA_REQUIRE_PROVENANCE) — re-run the "
+                      "build+gates to re-attest, then deploy.")
+                return False, None
+            print("[area] (advisory — set AREA_REQUIRE_PROVENANCE=1 to make this a hard block)")
+        else:  # absent
+            print(f"[area] ⚠ provenance: {detail}")
+            if require_provenance:
+                print("[area] refusing deploy (AREA_REQUIRE_PROVENANCE) — build through "
+                      "AREA's gates first to record provenance.")
+                return False, None
+    except Exception as e:  # noqa: BLE001 — never block deploy on the checker itself
+        print(f"[area] provenance check skipped (warn): {e}")
 
     if provider == "cloudflare":
         if cloudflare.needs_d1(app_dir):
