@@ -88,9 +88,12 @@
 <div class="wrap">
   <div class="col">
     <div class="card" id="pairCard" style="display:none;border-color:var(--amber)">
-      <h2>Kết nối runner của bạn</h2>
-      <div class="hint">Chưa có runner cho kênh này — nhà máy chạy trên <b>máy của bạn</b> (Claude + Cloudflare/Vercel của bạn). Dán <b>1 lệnh</b> sau vào terminal — nó tự cài + kết nối (cần: git · Python 3.12+ · Claude Code đã login). Bạn vẫn soạn mô tả / upload trước được.</div>
-      <pre class="log" id="pairCmd" style="min-height:0;margin-top:8px;user-select:all"></pre>
+      <h2>Kết nối máy của bạn (1 lần)</h2>
+      <div class="hint">Nhà máy chạy trên <b>máy của bạn</b> — dùng <b>Claude của bạn</b> (miễn phí). Cài <b>1 lần</b>, sau đó chỉ cần mở web + bỏ tài liệu, không thao tác gì thêm.</div>
+      <button class="go" onclick="downloadInstaller()" style="margin-top:9px">📥 Tải trợ lý AREA (cài nền tự động)</button>
+      <div class="hint">Tải xong → <b>bấm phải vào file → Open</b> (lần đầu macOS hỏi, chọn Open). Nó tự cài + chạy nền + tự bật khi mở máy. Cần sẵn: <b>Claude Code đã login</b> · git · Python 3.12+.</div>
+      <div class="hint" style="margin-top:7px">— hoặc dán lệnh này vào Terminal (nếu rành kỹ thuật):</div>
+      <pre class="log" id="pairCmd" style="min-height:0;margin-top:4px;user-select:all"></pre>
     </div>
 
     <div class="card hero">
@@ -179,12 +182,25 @@ const TOKEN=(function(){
   return t;
 })();
 
+// Download a double-click installer (.command) with this channel's token baked in.
+// It fetches the served runner.sh and installs the runner as an auto-start service.
+function downloadInstaller(){
+  const wsp=location.protocol==='https:'?'wss':'ws',coordWs=wsp+'://'+location.host,coordHttp=location.protocol+'//'+location.host;
+  const sh='#!/bin/bash\n'
+    +'# AREA — cài trợ lý 1 lần (double-click). Cài runner chạy nền + tự khởi động, dùng Claude của bạn.\n'
+    +'echo "▶ Đang cài trợ lý AREA… (lần đầu có thể mất vài phút)"\n'
+    +'curl -fsSL "'+coordHttp+'/runner.sh" | AREA_INSTALL_SERVICE=1 AREA_PAIR_TOKEN="'+TOKEN+'" bash -s -- --connect "'+coordWs+'" --token "'+TOKEN+'"\n'
+    +'echo ""; read -n1 -p "✅ Xong — nhấn phím bất kỳ để đóng…"\n';
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([sh],{type:'application/x-sh'}));
+  a.download='Cai-tro-ly-AREA.command';document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},150);}
+
 // Connection only toggles the runner indicator + pair hint. Inputs stay usable so
 // you can draft a requirement / upload a doc before a runner is even connected.
 function setRunner(on){RUNNER=on;$('rdot').classList.toggle('on',on);$('rstat').textContent='runner: '+(on?'online':'offline');
   $('pairCard').style.display=on?'none':'';
   if(!on){const wsp=location.protocol==='https:'?'wss':'ws',base=location.protocol+'//'+location.host;
-    $('pairCmd').textContent='curl -fsSL '+base+'/runner.sh | bash -s -- --connect '+wsp+'://'+location.host+(TOKEN?' --token '+TOKEN:'');}
+    $('pairCmd').textContent='curl -fsSL '+base+'/runner.sh | AREA_INSTALL_SERVICE=1 bash -s -- --connect '+wsp+'://'+location.host+(TOKEN?' --token '+TOKEN:'');}
   if(on) send({type:'apps'});}
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 function connect(){const p=location.protocol==='https:'?'wss':'ws';
