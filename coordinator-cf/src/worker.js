@@ -124,6 +124,8 @@ export class CoordChannel {
       // size-capped per frame, and the runner bounds how many chunks it buffers).
       const isUpload = typeof ev.data === "string" && ev.data.startsWith('{"type":"upload"');
       if (!admitFrame(meter, frameSize(ev.data), Date.now(), role === "ui" && !isUpload).ok) return;
+      // keepalive pings keep the socket warm but carry no payload — never relay them.
+      if (typeof ev.data === "string" && ev.data.startsWith('{"type":"ping"')) return;
       if (role === "ui") {
         if (relayable(ev.data) && this.runner) {
           try { this.runner.send(ev.data); } catch (_) { /* dead runner */ }

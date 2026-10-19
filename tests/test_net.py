@@ -148,6 +148,49 @@ def test_runner_job_argv_backend_passthrough(monkeypatch):
     assert "--backend" not in R.job_argv_for("deploy", {"name": "t"})
 
 
+def test_exec_job_survives_dead_ws_and_drains(monkeypatch):
+    """A ws that drops mid-job must NOT kill the build: _exec_job keeps draining the
+    subprocess (so it never blocks on a full pipe) and returns cleanly."""
+    import area.runner as R
+
+    class DeadWS:
+        async def send(self, data):
+            raise ConnectionError("ws dropped")
+
+    drained = []
+
+    class FakeStdout:
+        def __init__(self, lines):
+            self._it = iter(lines)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                line = next(self._it)
+            except StopIteration:
+                raise StopAsyncIteration
+            drained.append(line)
+            return line
+
+    class FakeProc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = FakeStdout([b"line1\n", b"line2\n", b"line3\n"])
+
+        async def wait(self):
+            return 0
+
+    async def fake_exec(*a, **k):
+        return FakeProc()
+
+    monkeypatch.setattr(R.asyncio, "create_subprocess_exec", fake_exec)
+    asyncio.run(R._exec_job(DeadWS(), {"id": "j", "kind": "doctor", "params": {}}))
+    assert drained == [b"line1\n", b"line2\n", b"line3\n"]  # fully drained → no hang
+
+
 def test_runner_reconnects_with_backoff(monkeypatch):
     import area.runner as R
 

@@ -148,24 +148,51 @@ def fold_requirement_doc(params: dict | None, uploads: dict | None = None) -> tu
 async def _exec_job(ws, job: dict, uploads: dict | None = None) -> None:
     jid = job["id"]
     params, note = fold_requirement_doc(job.get("params"), uploads)
+    alive = True
+
+    async def tell(obj) -> None:
+        """Stream a frame to the UI, but never let a dead socket kill the build: if
+        the ws has dropped we stop sending and keep running."""
+        nonlocal alive
+        if not alive:
+            return
+        try:
+            await ws.send(encode(obj))
+        except Exception:  # noqa: BLE001 — ws dropped mid-job; build keeps going
+            alive = False
+
     if note:
-        await ws.send(encode(log_msg(jid, f"[runner] {note}")))
+        await tell(log_msg(jid, f"[runner] {note}"))
     try:
         argv = job_argv_for(job["kind"], params)
     except ValueError as e:
-        await ws.send(encode(status_msg(jid, "failed", None)))
-        await ws.send(encode(log_msg(jid, f"[runner] bad job: {e}")))
+        await tell(status_msg(jid, "failed", None))
+        await tell(log_msg(jid, f"[runner] bad job: {e}"))
         return
-    await ws.send(encode(status_msg(jid, "running")))
+    await tell(status_msg(jid, "running"))
     proc = await asyncio.create_subprocess_exec(
         *_area_cmd(), *argv, cwd=str(ROOT), env=_env(),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
     )
     assert proc.stdout is not None
+    # ALWAYS drain stdout to the end so a dropped ws can't leave the subprocess
+    # blocked on a full pipe — the build runs to completion on disk regardless.
     async for raw in proc.stdout:
-        await ws.send(encode(log_msg(jid, raw.decode(errors="ignore").rstrip("\n"))))
+        await tell(log_msg(jid, raw.decode(errors="ignore").rstrip("\n")))
     rc = await proc.wait()
-    await ws.send(encode(status_msg(jid, "done" if rc == 0 else "failed", rc)))
+    await tell(status_msg(jid, "done" if rc == 0 else "failed", rc))
+
+
+async def _keepalive(ws, interval: float = 25.0) -> None:
+    """Send a tiny app-level ping periodically to keep an idle socket alive. The
+    coordinator drops `ping` frames (never relays them). Exits quietly when the
+    socket is gone (cancelled by the serve loop)."""
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            await ws.send(encode({"type": "ping"}))
+    except Exception:  # noqa: BLE001 — cancelled or socket closed
+        pass
 
 
 async def _serve_once(url: str, token: str | None) -> None:
@@ -174,21 +201,27 @@ async def _serve_once(url: str, token: str | None) -> None:
     import websockets
 
     uploads: dict = {}  # in-flight requirement-doc uploads, reassembled by uid
-    async with websockets.connect(url, max_size=None) as ws:
+    # Lenient ping_timeout + an app-level keepalive keep the socket warm so an idle
+    # connection isn't torn down ("no close frame") between jobs.
+    async with websockets.connect(url, max_size=None, ping_interval=20, ping_timeout=60) as ws:
         await ws.send(encode(hello_msg("runner", token)))
         print("[runner] connected — waiting for jobs (Ctrl-C to stop)", flush=True)
-        async for raw in ws:
-            msg = decode(raw)
-            if msg.get("type") == "upload":
-                _store_chunk(uploads, msg)
-                continue
-            if is_valid_job(msg):
-                print(f"[runner] job {msg.get('id')} · {msg.get('kind')}", flush=True)
-                await _exec_job(ws, msg, uploads)
-                continue
-            reply = handle_control(msg)
-            if reply is not None:
-                await ws.send(encode(reply))
+        ka = asyncio.create_task(_keepalive(ws))
+        try:
+            async for raw in ws:
+                msg = decode(raw)
+                if msg.get("type") == "upload":
+                    _store_chunk(uploads, msg)
+                    continue
+                if is_valid_job(msg):
+                    print(f"[runner] job {msg.get('id')} · {msg.get('kind')}", flush=True)
+                    await _exec_job(ws, msg, uploads)
+                    continue
+                reply = handle_control(msg)
+                if reply is not None:
+                    await ws.send(encode(reply))
+        finally:
+            ka.cancel()
 
 
 async def _run(coord_url: str, token: str | None, *,
