@@ -9,13 +9,14 @@
     --muted:#8893a6;--accent:#4c8dff;--accent2:#7fb0ff;--green:#3fb27f;--red:#f0564a;--amber:#d8a541;
     --chat-bg:#121a28;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:dark}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;height:100vh;display:flex;flex-direction:column}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;height:100%;overflow:hidden;display:flex;flex-direction:column}
   header{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);flex:none}
   header b{font-family:var(--mono)} header .sp{flex:1} header .sub{color:var(--muted);font-size:12px}
   .rdot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block;margin-right:6px}
   .rdot.on{background:var(--green)}
-  .wrap{flex:1;display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px;min-height:0}
-  .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto}
+  .wrap{flex:1;display:grid;grid-template-columns:370px 1fr;gap:12px;padding:12px;min-height:0;overflow:hidden}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden}
   @media(max-width:900px){
     body{height:auto;display:block}
     .wrap{grid-template-columns:1fr;height:auto;min-height:0;flex:none}
@@ -31,8 +32,8 @@
   .card.hero h2{color:var(--accent2)}
   label{display:block;font-size:12px;color:var(--muted);margin:7px 0 3px}
   select,input,textarea{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--fg);border-radius:7px;padding:8px 10px;font:inherit}
-  textarea{resize:vertical;min-height:62px}
-  #req{min-height:92px}
+  textarea{resize:vertical;min-height:44px}
+  #req{min-height:56px}
   button.go{margin-top:11px;width:100%;background:var(--accent);border:0;color:#06101f;font-weight:700;padding:11px;border-radius:8px;cursor:pointer;font-size:14px}
   button.go.sm{padding:9px;font-weight:600}
   button.go:disabled{opacity:.5;cursor:not-allowed}
@@ -64,7 +65,7 @@
   .pchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
   .chip{font-size:11px;padding:1px 8px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
   .chip.ok{border-color:var(--green);color:var(--green)} .chip.bad{border-color:var(--red);color:var(--red)} .chip.run{border-color:var(--amber);color:var(--amber)}
-  .thread{display:flex;flex-direction:column;gap:8px;max-height:200px;overflow:auto;padding:6px;background:var(--panel2);border:1px solid var(--border);border-radius:8px}
+  .thread{display:flex;flex-direction:column;gap:8px;flex:1;min-height:40px;overflow:auto;padding:6px;background:var(--panel2);border:1px solid var(--border);border-radius:8px}
   .msg{display:flex;gap:7px;max-width:88%;font-size:12.5px;line-height:1.45}
   .msg .mava{width:21px;height:21px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;background:rgba(127,176,255,.15);border:1px solid rgba(127,176,255,.4);color:var(--accent2)}
   .msg .bubble{padding:7px 11px;border-radius:12px;white-space:pre-wrap}
@@ -106,7 +107,7 @@
       <label>Tên app (tùy chọn)</label>
       <input id="name" placeholder="app"/>
       <button class="go" id="build" onclick="build()">Tạo phần mềm →</button>
-      <div class="hint" id="buildstat">Nhà máy sẽ tự: spec → khoá oracle (TDD) → build → gates. Dừng ở build xanh; deploy là bước riêng (mục Nâng cao).</div>
+      <div class="hint" id="buildstat">Tự: spec → oracle (TDD) → build → gates. Dừng ở build xanh (deploy ở “Nâng cao”).</div>
 
       <details class="adv">
         <summary>Nâng cao — lệnh khác (deploy · export · clone · iterate · doctor)</summary>
@@ -133,9 +134,9 @@
     </div>
   </div>
   <div class="col">
-    <div class="card">
+    <div class="card fill" style="flex:0 1 auto">
       <h2>Chu trình phát triển — trực tiếp <span class="sub" id="ptitle" style="text-transform:none;letter-spacing:0">— chưa chạy —</span></h2>
-      <div id="pipe" style="max-height:48vh;overflow:auto"></div>
+      <div id="pipe" style="flex:1;min-height:0;overflow:auto"></div>
     </div>
     <div class="card fill">
       <h2>Log trực tiếp (từ runner)</h2>
