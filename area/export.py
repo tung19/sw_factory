@@ -25,7 +25,7 @@ from area.pipeline import WORKSPACE
 _IGNORE_DIRS = {
     "node_modules", ".next", ".vinext", ".open-next", ".cloudflare", ".wrangler",
     ".openhands", ".vercel", "dist", "build", "out", "test-results",
-    "playwright-report", ".area", ".git",
+    "playwright-report", ".area", ".git", ".claude",
 }
 
 _GITIGNORE = """# dependencies & build output

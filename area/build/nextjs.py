@@ -181,6 +181,15 @@ def build_app(
         prompt = _TDD_PREAMBLE + prompt
     prompt = as_prompt(recall(tags=tags, text=spec_yaml)) + prompt
 
+    # Ship AREA's skill pack into the app dir so the ACP Claude Code agent (cwd =
+    # app dir) discovers them as project skills, and nudge it to use them.
+    from area.skills import install_skills, skills_preamble
+
+    installed = install_skills(app)
+    if installed:
+        prompt = skills_preamble(target) + prompt
+        print(f"[area] skills: {', '.join('/' + n for n in installed)}")
+
     oracle = oracle or command_verifier(oracle_cmd, cwd=app)
     label = f"build:{target}" + (":tdd" if tdd else "")
     agent = build_agent(backend, model=model)

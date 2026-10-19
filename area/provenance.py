@@ -26,7 +26,7 @@ PROV_REL = ".area/provenance.json"
 _SKIP = {
     "node_modules", ".next", ".vinext", ".open-next", ".cloudflare", ".wrangler",
     ".openhands", ".git", ".vercel", "dist", "build", "test-results",
-    "playwright-report", ".area",
+    "playwright-report", ".area", ".claude",
 }
 
 
