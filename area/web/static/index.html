@@ -290,6 +290,16 @@ let tab='run', es=null, selJob=null, logBuf='';
 const $=id=>document.getElementById(id);
 const sel={run:[], intake:[]}; // chosen File objects per pane
 
+// Carry the access token on every request so auth works even when the cookie
+// isn't sent (SameSite=Strict over a tunnel / strict browser privacy).
+const GUI_TOKEN=new URLSearchParams(location.search).get('token');
+if(GUI_TOKEN){
+  const _fetch=window.fetch;
+  window.fetch=(u,o)=>{o=o||{};o.headers=Object.assign({},o.headers,{'Authorization':'Bearer '+GUI_TOKEN});return _fetch(u,o);};
+}
+// EventSource can't set headers, so pass the token as a query param for SSE.
+function sse(url){return new EventSource(GUI_TOKEN?url+(url.includes('?')?'&':'?')+'token='+encodeURIComponent(GUI_TOKEN):url);}
+
 function setTab(t){
   tab=t;
   ['run','intake','clone','iterate'].forEach(k=>{
@@ -500,7 +510,7 @@ function openLog(jid){
   logBuf=''; $('log').textContent=''; $('logTitle').textContent='job '+jid;
   $('previewCard').style.display='none'; $('traceLink').style.display='none';
   renderPipe(); renderJobs(lastJobs);
-  es=new EventSource('/api/jobs/'+jid+'/stream');
+  es=sse('/api/jobs/'+jid+'/stream');
   es.onmessage=e=>{logBuf+=e.data+'\n';const el=$('log');el.textContent=logBuf;el.scrollTop=el.scrollHeight;
     const tm=logBuf.match(/\[area\] trace : (\S+)/);
     if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}

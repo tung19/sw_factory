@@ -79,6 +79,10 @@ def answer_from_state(msg: str, app: str = "") -> str:
         js = J.MANAGER.list()
         head = ", ".join(f"{j.get('kind')}·{j.get('name')}[{j.get('status')}]" for j in js[:5])
         return f"{len(js)} job. Gần nhất: " + (head or "(trống)")
+    if any(k in m for k in ("llm", "model", "claude", "mô hình", "ai nào", "dùng gì", "dùng ai")):
+        return ("AREA dùng **Claude** (Opus) qua **Claude Code theo giao thức ACP** — KEYLESS "
+                "(không dùng API key). Agent build/fix/holdout đều chạy qua đường này. Chat box này "
+                "cũng governed-keyless: câu hỏi trả lời từ dữ liệu, lệnh sửa đi qua spec→oracle→rebuild.")
     return ("Mình trả lời được từ dữ liệu nhà máy: spec/acceptance, danh sách app, "
             "job & trạng thái, URL deploy. Câu này cần agent suy luận sâu — để governed + "
             "không tốn phí oan, hãy diễn đạt dạng lệnh (vd 'thêm …') để chạy qua iterate, "
