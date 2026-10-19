@@ -60,11 +60,12 @@ def is_valid_job(msg: dict) -> bool:
 
 
 def is_relayable_from_ui(msg: dict) -> bool:
-    """What a UI is allowed to send to a runner: a typed job, a chat query, or an
-    apps-list request. Anything else is dropped at the coordinator."""
+    """What a UI is allowed to send to a runner: a typed job, a chat query, an
+    apps-list request, or a requirement-document upload chunk. Anything else is
+    dropped at the coordinator."""
     if is_valid_job(msg):
         return True
-    return isinstance(msg, dict) and msg.get("type") in ("chat", "apps")
+    return isinstance(msg, dict) and msg.get("type") in ("chat", "apps", "upload")
 
 
 def job_argv(kind: str, params: dict | None = None) -> list[str]:

@@ -121,6 +121,7 @@ def test_relayable_from_ui():
     assert P.is_relayable_from_ui(P.job_msg("1", "run"))
     assert P.is_relayable_from_ui(P.chat_msg("1", "có app nào?"))
     assert P.is_relayable_from_ui(P.apps_req())
+    assert P.is_relayable_from_ui({"type": "upload", "uid": "x", "i": 0, "n": 1, "data": "AA"})
     assert not P.is_relayable_from_ui({"type": "job", "kind": "rm", "id": "1"})
     assert not P.is_relayable_from_ui({"type": "log", "line": "x"})
 
@@ -216,6 +217,33 @@ def test_runner_folds_uploaded_doc_into_requirement():
     assert p["requirement"].startswith("base ask")
     assert "A guestbook that persists." in p["requirement"]
     assert "spec.md" in p["requirement"] and note and "spec.md" in note
+
+
+def test_runner_reassembles_chunked_doc_upload():
+    import base64
+
+    import area.runner as R
+
+    raw = b"# Big spec\n" + b"persist durably. " * 30  # larger than one chunk would be
+    b64 = base64.b64encode(raw).decode()
+    mid = len(b64) // 2
+    uploads: dict = {}
+    R._store_chunk(uploads, {"uid": "u1", "i": 0, "n": 2, "name": "spec.md", "data": b64[:mid]})
+    R._store_chunk(uploads, {"uid": "u1", "i": 1, "n": 2, "name": "spec.md", "data": b64[mid:]})
+    p, note = R.fold_requirement_doc({"requirement": "base", "name": "g", "doc_uid": "u1"}, uploads)
+    assert "doc_uid" not in p
+    assert "persist durably." in p["requirement"] and "spec.md" in p["requirement"]
+    assert note and "spec.md" in note
+    assert "u1" not in uploads  # consumed after folding
+
+
+def test_runner_incomplete_upload_is_left_untouched():
+    import area.runner as R
+
+    uploads: dict = {}
+    R._store_chunk(uploads, {"uid": "u2", "i": 0, "n": 3, "name": "x.md", "data": "QQ=="})
+    p, note = R.fold_requirement_doc({"requirement": "base", "doc_uid": "u2"}, uploads)
+    assert note is None and p["requirement"] == "base" and "doc_uid" not in p
 
 
 def test_runner_handle_control_chat_and_apps(monkeypatch):

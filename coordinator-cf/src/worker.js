@@ -43,7 +43,7 @@ export function channelFor(url, env) {
 export function relayable(raw) {
   try {
     const m = JSON.parse(raw);
-    if (m.type === "chat" || m.type === "apps") return true;
+    if (m.type === "chat" || m.type === "apps" || m.type === "upload") return true;
     return m.type === "job" && ALLOWED.has(m.kind) && !!m.id;
   } catch (_) {
     return false;
@@ -119,9 +119,11 @@ export class CoordChannel {
     }
 
     server.addEventListener("message", (ev) => {
-      // DoS guards: cap frame size in both directions; rate-limit UI command
-      // frames (not the runner's legitimately bursty log stream).
-      if (!admitFrame(meter, frameSize(ev.data), Date.now(), role === "ui").ok) return;
+      // DoS guards: cap frame size in both directions; rate-limit UI COMMAND frames
+      // — but not the runner's bursty logs, nor a UI's chunked upload stream (still
+      // size-capped per frame, and the runner bounds how many chunks it buffers).
+      const isUpload = typeof ev.data === "string" && ev.data.startsWith('{"type":"upload"');
+      if (!admitFrame(meter, frameSize(ev.data), Date.now(), role === "ui" && !isUpload).ok) return;
       if (role === "ui") {
         if (relayable(ev.data) && this.runner) {
           try { this.runner.send(ev.data); } catch (_) { /* dead runner */ }

@@ -82,34 +82,72 @@ def job_argv_for(kind: str, params: dict | None) -> list[str]:
     return argv
 
 
-def fold_requirement_doc(params: dict | None) -> tuple[dict, str | None]:
-    """If a run job carries an uploaded requirement doc (base64), extract its text
-    and fold it into `requirement`. The UI and runner are on different machines, so
-    the file rides in the job; the runner extracts here, reusing the same parser the
-    local dashboard uses (text formats need no deps; PDF/docx use pypdf/python-docx
-    if present, else a clear marker). Returns (params, note_or_None); never raises."""
-    p = dict(params or {})
-    if not p.get("doc_b64"):
-        return p, None
+def _store_chunk(uploads: dict, msg: dict, *, max_chunks: int = 1024) -> None:
+    """Accumulate one base64 chunk of a requirement-doc upload, keyed by its uid.
+    So an upload of ANY size crosses the relay as a sequence of small frames (each
+    under the coordinator's per-frame cap) and is reassembled here."""
+    uid = str(msg.get("uid") or "")
+    if not uid:
+        return
+    try:
+        i, n = int(msg.get("i")), int(msg.get("n"))
+    except (TypeError, ValueError):
+        return
+    rec = uploads.setdefault(uid, {"name": str(msg.get("name") or "document"), "n": n, "parts": {}})
+    rec["n"] = n
+    if len(rec["parts"]) < max_chunks:
+        rec["parts"][i] = str(msg.get("data") or "")
+
+
+def _decode_doc(p: dict, uploads: dict | None) -> tuple[str | None, bytes | None]:
+    """Resolve an attached requirement doc to (name, bytes): either a chunked upload
+    (doc_uid, reassembled from `uploads`) or a small inline base64 (doc_b64). Pops
+    the doc keys from p. Returns (None, None) if absent/incomplete."""
     import base64
 
+    if p.get("doc_uid") and uploads is not None:
+        rec = uploads.pop(str(p.pop("doc_uid")), None)
+        if not rec:
+            return None, None
+        n = rec.get("n") or len(rec["parts"])
+        if len(rec["parts"]) < n:
+            return None, None  # incomplete — missing chunks
+        b64 = "".join(rec["parts"].get(i, "") for i in range(n))
+        return (rec.get("name") or "document"), base64.b64decode(b64)
+    if p.get("doc_b64"):
+        name = str(p.pop("doc_name", "document"))
+        return name, base64.b64decode(p.pop("doc_b64"))
+    p.pop("doc_name", None)
+    return None, None
+
+
+def fold_requirement_doc(params: dict | None, uploads: dict | None = None) -> tuple[dict, str | None]:
+    """Fold an uploaded requirement doc (chunked upload or inline base64) into the
+    run job's `requirement`, extracting text with the same parser the local
+    dashboard uses. Returns (params, note_or_None); never raises."""
+    p = dict(params or {})
+    try:
+        doc_name, raw = _decode_doc(p, uploads)
+    except Exception as e:  # noqa: BLE001
+        return p, f"doc parse warn: {e}"
+    if raw is None:
+        return p, None
     from area.web.upload import parse_file
 
-    doc_name = str(p.pop("doc_name", "document"))
     try:
-        text = parse_file(doc_name, base64.b64decode(p.pop("doc_b64"))).strip()
+        text = parse_file(doc_name, raw).strip()
     except Exception as e:  # noqa: BLE001 — never fail a job on doc parsing
         return p, f"doc parse warn: {e}"
     if text:
         base = (p.get("requirement") or "").strip()
         p["requirement"] = f"{base}\n\n=== {doc_name} ===\n{text}".strip()
-        return p, f"đọc tài liệu {doc_name}: {len(text)} ký tự"
+        return p, f"đọc tài liệu {doc_name}: {len(text)} ký tự ({len(raw)//1024}KB)"
     return p, None
 
 
-async def _exec_job(ws, job: dict) -> None:
+async def _exec_job(ws, job: dict, uploads: dict | None = None) -> None:
     jid = job["id"]
-    params, note = fold_requirement_doc(job.get("params"))
+    params, note = fold_requirement_doc(job.get("params"), uploads)
     if note:
         await ws.send(encode(log_msg(jid, f"[runner] {note}")))
     try:
@@ -135,14 +173,18 @@ async def _serve_once(url: str, token: str | None) -> None:
     socket closes (raises on any connection problem so the caller can reconnect)."""
     import websockets
 
+    uploads: dict = {}  # in-flight requirement-doc uploads, reassembled by uid
     async with websockets.connect(url, max_size=None) as ws:
         await ws.send(encode(hello_msg("runner", token)))
         print("[runner] connected — waiting for jobs (Ctrl-C to stop)", flush=True)
         async for raw in ws:
             msg = decode(raw)
+            if msg.get("type") == "upload":
+                _store_chunk(uploads, msg)
+                continue
             if is_valid_job(msg):
                 print(f"[runner] job {msg.get('id')} · {msg.get('kind')}", flush=True)
-                await _exec_job(ws, msg)
+                await _exec_job(ws, msg, uploads)
                 continue
             reply = handle_control(msg)
             if reply is not None:

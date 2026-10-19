@@ -59,6 +59,7 @@ test("relayable: whitelisted jobs with an id pass; everything else is dropped", 
   assert.equal(relayable(JSON.stringify({ type: "job", kind: "run" })), false);             // no id
   assert.equal(relayable(JSON.stringify({ type: "chat", id: "1", text: "hi" })), true);
   assert.equal(relayable(JSON.stringify({ type: "apps" })), true);
+  assert.equal(relayable(JSON.stringify({ type: "upload", uid: "x", i: 0, n: 2, data: "AA" })), true);
   assert.equal(relayable(JSON.stringify({ type: "log", line: "x" })), false);
   assert.equal(relayable("not json"), false);
 });
