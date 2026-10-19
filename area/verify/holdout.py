@@ -4,35 +4,368 @@ PLAN §1 warns: do not let the implementing LLM certify itself by writing the
 tests it must pass. `area/build` lets the agent write its own quick tests to
 iterate — fine for getting something working, but NOT a trustworthy "done".
 
-This module adds an INDEPENDENT gate:
+This module adds an INDEPENDENT acceptance oracle:
   1. a separate VERIFIER agent writes acceptance tests from acceptance.yaml,
   2. those tests are CHECKSUM-LOCKED under __tests__/_holdout/,
-  3. a FIXER agent must make them pass by editing APP CODE ONLY; the oracle
-     rejects any run where the holdout files changed.
+  3. the oracle rejects any run where the holdout files changed.
 
-So "done" means an independently-authored, unmodified test suite passes.
+Two ways to use it:
+- **Post-build gate** (`holdout_verify`): build first (agent's own tests), then
+  an independent suite is authored + a FIXER agent makes it pass editing APP
+  CODE ONLY. "Done" = an independently-authored, unmodified suite passes.
+- **TDD, tests-first** (`author_and_lock` + `tdd_build_oracle`): author + lock
+  the independent suite BEFORE build (the "red" step), then the BUILD loop's
+  oracle IS that locked suite. This fuses TDD with anti-self-certification: the
+  build is driven by tests the implementer never wrote and cannot touch.
 """
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from area._util import safe_name
-from area.engine import VerifyResult, build_agent, run_once, run_until
+from area.engine import Verifier, VerifyResult, build_agent, run_once, run_until
 from area.pipeline import WORKSPACE
 
 HOLDOUT_DIR = "__tests__/_holdout"
+# The ONE file the builder may write inside the locked dir: a challenge that a
+# locked test is wrong. It is never executed (not a test) and is excluded from
+# the lock, so raising it is sanctioned, not "tampering". An independent
+# verifier — never the builder — adjudicates it (see `readjudicate`).
+CHALLENGE_FILE = "_CHALLENGE.md"
 
 
 def _lock(holdout: Path) -> dict:
     return {
         str(f.relative_to(holdout)): hashlib.sha256(f.read_bytes()).hexdigest()
         for f in sorted(holdout.rglob("*"))
-        if f.is_file()
+        if f.is_file() and f.name != CHALLENGE_FILE
     }
 
+
+def _parity_preamble(reference: str) -> str:
+    return (
+        "=== CLONE PARITY MODE ===\n"
+        "This is a CLONE of a reference app — 'correct' means BEHAVIORAL PARITY "
+        "with it, not just generic criteria. Reference:\n"
+        f"  {reference}\n"
+        "The reverse-engineer stage may have cloned its source into ./_sample/ "
+        "(read it if present). Ground EACH acceptance test in the reference's "
+        "OBSERVED behavior — concrete input -> output examples you can evidence "
+        "from it — so that passing the suite means the clone reproduces the "
+        "original's behavior. Do not invent behavior the reference does not show.\n\n"
+    )
+
+
+def _author_prompt(acc_yaml: str, *, tdd: bool, reference: Optional[str] = None) -> str:
+    parity = _parity_preamble(reference) if reference else ""
+    # In parity mode the ONE thing the agent may read is the reference (./_sample).
+    may_read = "Read ./_sample/ (the reference) if present, but " if reference else ""
+    if tdd:
+        # TDD: the app does NOT exist yet, so the tests DEFINE the contract the
+        # implementation must satisfy (import paths + function signatures).
+        return (
+            parity
+            + "You are an INDEPENDENT acceptance verifier (NOT the implementer). "
+            "This is TEST-DRIVEN DEVELOPMENT and you are in an EMPTY project "
+            "directory. Your ONLY job, RIGHT NOW, is to CREATE test files — "
+            f"{may_read}do NOT look for or read existing app/source code (there is "
+            "none yet), do NOT scaffold the app, do NOT create package.json, do "
+            "NOT explore unrelated directories, do NOT explain. Start writing "
+            "files immediately.\n"
+            f"Under {HOLDOUT_DIR}/ write Vitest acceptance tests that assert EACH "
+            "acceptance criterion below AND, in doing so, DEFINE the module "
+            "contract the implementation must satisfy: import from stable, "
+            "predictable paths (e.g. `../../lib/<entity>`) and call explicitly "
+            "named functions with explicit argument/return shapes. One `describe` "
+            "per AC (tag it AC-<id>), strict and faithful to the spec. Also write "
+            f"a short {HOLDOUT_DIR}/CONTRACT.md listing every module path and "
+            "function signature your tests import. Create files ONLY under "
+            f"{HOLDOUT_DIR}/. After writing, STOP.\n\n"
+            f"=== acceptance.yaml ===\n{acc_yaml}"
+        )
+    return (
+        parity
+        + "You are an INDEPENDENT acceptance verifier (NOT the implementer). "
+        f"Write Vitest acceptance tests under {HOLDOUT_DIR}/ that assert EACH "
+        "acceptance criterion below against the app's REAL modules (import its "
+        "lib/domain functions as the app exposes them). One `describe` per AC, "
+        "strict and faithful. Do NOT modify any app source code — ONLY create "
+        f"test files under {HOLDOUT_DIR}/. After writing, STOP.\n\n"
+        f"=== acceptance.yaml ===\n{acc_yaml}"
+    )
+
+
+def _has_tests(holdout: Path) -> bool:
+    return any(holdout.rglob("*.ts")) or any(holdout.rglob("*.js"))
+
+
+def _ac_ids(acc_yaml: str) -> list[str]:
+    try:
+        data = yaml.safe_load(acc_yaml) or {}
+        return [str(c["id"]) for c in data.get("criteria", []) if c.get("id")]
+    except Exception:
+        return []
+
+
+def _test_text(holdout: Path) -> str:
+    out = []
+    for f in sorted(holdout.rglob("*")):
+        if f.is_file() and f.suffix.lower() in (".ts", ".tsx", ".js", ".jsx"):
+            try:
+                out.append(f.read_text(errors="ignore"))
+            except OSError:
+                pass
+    return "\n".join(out)
+
+
+def _fingerprint(holdout: Path) -> frozenset:
+    return frozenset(
+        (str(f.relative_to(holdout)), f.stat().st_size)
+        for f in holdout.rglob("*")
+        if f.is_file()
+    )
+
+
+def _authoring_oracle(
+    holdout: Path, acc_yaml: str, *, require_contract: bool
+) -> tuple[bool, str]:
+    """Quality gate on the authored suite (not just 'a file exists').
+
+    Checks, in order of severity: tests exist, a CONTRACT.md exists (TDD),
+    every acceptance criterion id is covered, and assertions are present.
+    Returns (ok, specific-feedback). Pure + deterministic — no agent, no npm.
+    """
+    problems: list[str] = []
+    if not _has_tests(holdout):
+        return False, (
+            f"No Vitest test file exists under {HOLDOUT_DIR}/. Create the .test.ts "
+            "files now — write files, do not explore the repo."
+        )
+    text = _test_text(holdout)
+    if require_contract and not (holdout / "CONTRACT.md").exists():
+        problems.append(
+            f"Missing {HOLDOUT_DIR}/CONTRACT.md — list every module path + function "
+            "signature your tests import."
+        )
+    missing = [
+        ac for ac in _ac_ids(acc_yaml)
+        if not re.search(rf"\b{re.escape(ac)}\b", text)
+    ]
+    if missing:
+        problems.append(
+            "These acceptance criteria are NOT covered by any test (add one "
+            f"`describe`/`it` each, tagged with the id): {', '.join(missing)}."
+        )
+    if "expect(" not in text and "assert" not in text:
+        problems.append(
+            "The tests contain no assertions (`expect(...)`) — they must assert "
+            "concrete outcomes, not be empty."
+        )
+    return (not problems), " ".join(problems)
+
+
+def author_until(
+    app: Path, acc_yaml: str, *, backend: str, model: Optional[str], tdd: bool,
+    reference: Optional[str] = None, attempts: int = 4, max_no_progress: int = 2,
+) -> tuple[Path, dict]:
+    """Author the holdout suite under its OWN oracle-loop.
+
+    On the keyless ACP backend we cannot strip the agent's terminal, so the
+    verifier may wander (explore instead of write). Instead of trusting a single
+    shot, we gate the OUTPUT with `_authoring_oracle` and re-prompt with its
+    SPECIFIC feedback (a just-in-time reminder) until the suite is complete —
+    with a no-progress detector and a recorded stop reason as backstops.
+    """
+    holdout = app / HOLDOUT_DIR
+    holdout.mkdir(parents=True, exist_ok=True)
+    label = "holdout:author" + (":tdd" if tdd else "") + (":parity" if reference else "")
+    base = _author_prompt(acc_yaml, tdd=tdd, reference=reference)
+
+    prev_fp: Optional[frozenset] = None
+    stalls = 0
+    stop = "exhausted attempts"
+    feedback = ""
+    for attempt in range(1, attempts + 1):
+        prompt = base if attempt == 1 else (
+            "Your previous attempt did not finish the suite. Fix EXACTLY this, by "
+            f"writing files under {HOLDOUT_DIR}/ now — do not explore other "
+            f"directories, do not explain:\n{feedback}\n\n" + base
+        )
+        vagent = build_agent(backend, model=model)
+        try:
+            run_once(vagent, app, prompt, label=label)
+        finally:
+            vagent.close()
+
+        ok, feedback = _authoring_oracle(holdout, acc_yaml, require_contract=tdd)
+        if ok:
+            stop = "ok"
+            break
+        fp = _fingerprint(holdout)
+        if fp == prev_fp:
+            stalls += 1
+            if stalls >= max_no_progress:
+                stop = f"no progress for {stalls} attempts"
+                break
+        else:
+            stalls = 0
+        prev_fp = fp
+        print(f"[area] holdout: author attempt {attempt}/{attempts} not complete "
+              f"— {feedback[:140]}")
+
+    ok, feedback = _authoring_oracle(holdout, acc_yaml, require_contract=tdd)
+    if not ok:
+        raise RuntimeError(
+            f"holdout authoring failed ({stop}) after {attempts} attempts: {feedback}"
+        )
+    lock = _lock(holdout)
+    print(f"[area] holdout: locked {len(lock)} file(s) under {HOLDOUT_DIR}/ "
+          f"(all {len(_ac_ids(acc_yaml))} AC covered)")
+    return holdout, lock
+
+
+def _holdout_oracle(
+    app: Path, holdout: Path, lock: dict, *, cmd: Optional[list[str]] = None
+) -> Verifier:
+    """A Verifier that (1) rejects any change to the locked suite, then (2) runs
+    it. `cmd` defaults to just the holdout tests; TDD passes a build+test cmd."""
+    test_cmd = cmd or ["bash", "-lc", f"npx vitest run {HOLDOUT_DIR}"]
+
+    def oracle() -> VerifyResult:
+        if _lock(holdout) != lock:
+            return VerifyResult(
+                False,
+                f"FORBIDDEN: files under {HOLDOUT_DIR}/ were modified. Those are "
+                "the locked acceptance tests — revert them and fix APP CODE only.",
+            )
+        try:
+            proc = subprocess.run(test_cmd, cwd=str(app), capture_output=True, text=True)
+        except OSError as e:
+            return VerifyResult(False, f"holdout runner failed: {e}")
+        out = (proc.stdout + "\n" + proc.stderr).strip()
+        return VerifyResult(proc.returncode == 0, out[-4000:])
+
+    return oracle
+
+
+# --- TDD, tests-first API (used by the pipeline when --tdd is set) ------------
+
+def author_and_lock(
+    name: str,
+    *,
+    backend: str = "acp",
+    model: Optional[str] = None,
+    acc_yaml: Optional[str] = None,
+    app: Optional[str | Path] = None,
+    reference: Optional[str] = None,
+) -> tuple[Path, dict]:
+    """TDD 'red' step: author + checksum-lock the holdout suite BEFORE any build.
+
+    Returns (holdout_dir, lock). The app dir may be otherwise empty — the suite
+    defines the contract the subsequent build must satisfy. Pass `app` to target
+    a non-default workspace (otherwise WORKSPACE/apps/<name>). Pass `reference`
+    (a clone's source) to author tests that assert BEHAVIORAL PARITY with it.
+    """
+    name = safe_name(name)
+    app = Path(app) if app else WORKSPACE / "apps" / name
+    app.mkdir(parents=True, exist_ok=True)
+    if acc_yaml is None:
+        acc_path = WORKSPACE / "specs" / name / "acceptance.yaml"
+        if not acc_path.exists():
+            raise RuntimeError(f"no acceptance.yaml at {acc_path}")
+        acc_yaml = acc_path.read_text()
+    return author_until(
+        app, acc_yaml, backend=backend, model=model, tdd=True, reference=reference
+    )
+
+
+def tdd_build_oracle(
+    app: str | Path, holdout: Path, lock: dict, *, target: str = "cloudflare"
+) -> Verifier:
+    """The BUILD loop's oracle in --tdd mode: production build is green AND the
+    locked holdout suite passes AND the locked files are untouched."""
+    app = Path(app)
+    build = "npm run build:cf" if target == "cloudflare" else "npm run build"
+    cmd = [
+        "bash",
+        "-lc",
+        "[ -d node_modules ] || npm install --no-audit --no-fund; "
+        f"{build} && npx vitest run {HOLDOUT_DIR}",
+    ]
+    return _holdout_oracle(app, holdout, lock, cmd=cmd)
+
+
+def pending_challenge(holdout: Path) -> Optional[str]:
+    """Return the text of an unresolved builder challenge, if any.
+
+    A challenge the independent verifier already rejected starts with 'REJECTED'
+    and is treated as resolved (no re-adjudication).
+    """
+    f = holdout / CHALLENGE_FILE
+    if not f.exists():
+        return None
+    text = f.read_text(errors="ignore").strip()
+    if not text or text.upper().startswith("REJECTED"):
+        return None
+    return text
+
+
+def readjudicate(
+    app: str | Path,
+    holdout: Path,
+    acc_yaml: str,
+    *,
+    backend: str = "acp",
+    model: Optional[str] = None,
+) -> tuple[bool, dict]:
+    """Escape hatch for a WRONG locked test (evolving-tests-under-governance).
+
+    The builder cannot edit locked tests; if it believes one is wrong it raises
+    a `_CHALLENGE.md`. Here an INDEPENDENT verifier (never the implementer)
+    adjudicates that challenge against acceptance.yaml:
+      - valid   -> it corrects ONLY the disputed test to match the spec,
+      - invalid -> it leaves tests unchanged and writes 'REJECTED: <why>'.
+    Either way the suite is RE-LOCKED. Returns (tests_changed, new_lock).
+    """
+    app = Path(app)
+    challenge = pending_challenge(holdout)
+    if challenge is None:
+        return False, _lock(holdout)
+    before = _lock(holdout)
+    task = (
+        "You are the INDEPENDENT acceptance verifier (NOT the implementer). The "
+        f"builder challenges the locked tests under {HOLDOUT_DIR}/ as wrong. "
+        "Adjudicate STRICTLY against the acceptance criteria below.\n"
+        "- If the challenge is VALID (a test contradicts the spec or is "
+        "impossible), correct ONLY the disputed test so it faithfully matches "
+        "the spec. Do NOT weaken coverage to make the app pass.\n"
+        "- If the challenge is INVALID, change NO test and overwrite "
+        f"{HOLDOUT_DIR}/{CHALLENGE_FILE} with a single line 'REJECTED: <reason>'.\n"
+        f"Touch only files under {HOLDOUT_DIR}/. After deciding, STOP.\n\n"
+        f"=== builder challenge ===\n{challenge}\n\n"
+        f"=== acceptance.yaml ===\n{acc_yaml}"
+    )
+    agent = build_agent(backend, model=model)
+    try:
+        run_once(agent, app, task, label="holdout:readjudicate")
+    finally:
+        agent.close()
+    after = _lock(holdout)
+    changed = after != before
+    print(
+        f"[area] holdout: re-adjudicated challenge -> "
+        f"{'tests CORRECTED + re-locked' if changed else 'challenge REJECTED (tests stand)'}"
+    )
+    return changed, after
+
+
+# --- Post-build gate API (unchanged behavior) --------------------------------
 
 def holdout_verify(
     name: str,
@@ -53,54 +386,18 @@ def holdout_verify(
         raise RuntimeError(f"no app at {app}")
     if not acc_path.exists():
         raise RuntimeError(f"no acceptance.yaml at {acc_path}")
-    acc_yaml = acc_path.read_text()
-    holdout = app / HOLDOUT_DIR
-    holdout.mkdir(parents=True, exist_ok=True)
 
-    # 1) VERIFIER agent authors holdout tests only
-    vtask = (
-        "You are an INDEPENDENT acceptance verifier (NOT the implementer). "
-        f"Write Vitest acceptance tests under {HOLDOUT_DIR}/ that assert EACH "
-        "acceptance criterion below against the app's REAL modules (import its "
-        "lib/domain functions as the app exposes them). One `describe` per AC, "
-        "strict and faithful. Do NOT modify any app source code — ONLY create "
-        f"test files under {HOLDOUT_DIR}/. After writing, STOP.\n\n"
-        f"=== acceptance.yaml ===\n{acc_yaml}"
+    holdout, lock = author_until(
+        app, acc_path.read_text(), backend=backend, model=model, tdd=False
     )
-    vagent = build_agent(backend, model=model)
-    try:
-        run_once(vagent, app, vtask, label="holdout:author")
-    finally:
-        vagent.close()
-    if not any(holdout.rglob("*.ts")) and not any(holdout.rglob("*.js")):
-        raise RuntimeError("verifier agent produced no holdout tests")
-    lock = _lock(holdout)
-    print(f"[area] holdout: locked {len(lock)} test file(s) under {HOLDOUT_DIR}/")
-
-    test_cmd = ["bash", "-lc", f"npx vitest run {HOLDOUT_DIR}"]
-
-    def oracle() -> VerifyResult:
-        if _lock(holdout) != lock:
-            return VerifyResult(
-                False,
-                f"FORBIDDEN: files under {HOLDOUT_DIR}/ were modified. Those are "
-                "the locked acceptance tests — revert them and fix APP CODE only.",
-            )
-        try:
-            proc = subprocess.run(
-                test_cmd, cwd=str(app), capture_output=True, text=True
-            )
-        except OSError as e:
-            return VerifyResult(False, f"holdout runner failed: {e}")
-        out = (proc.stdout + "\n" + proc.stderr).strip()
-        return VerifyResult(proc.returncode == 0, out[-4000:])
+    oracle = _holdout_oracle(app, holdout, lock)
 
     # Already passing? (the honest, best case)
     if oracle().ok:
         print("[area] holdout: PASS on first check (app already satisfies ACs)")
         return True
 
-    # 2) FIXER agent: make holdout pass, APP CODE ONLY (holdout locked)
+    # FIXER agent: make holdout pass, APP CODE ONLY (holdout locked)
     ftask = (
         f"Independent acceptance tests under {HOLDOUT_DIR}/ are FAILING. Fix the "
         f"APP CODE so they pass. You MUST NOT edit, delete, rename, or weaken "

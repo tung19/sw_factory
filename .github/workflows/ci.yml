@@ -1,0 +1,49 @@
+name: CI
+
+# AREA's own CI: run the dogfood test suite (pure orchestrator logic — no live
+# agents, no network, no npm) on every push / PR to main. This is the automated
+# regression guard called for in PLAN §11 (PR4 "CI cho AREA", PR8 bus-factor):
+# the oracle-policy tests (lock/challenge ordering, gate wiring, deploy routing,
+# auth gate, iterate composition) must stay green before anything merges.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch/PR cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies (pinned)
+        run: |
+          python -m pip install --upgrade pip
+          # Pinned runtime deps (engine + dashboard + parsing). The suite imports
+          # area.* which transitively touches these; openhands-sdk is pinned here.
+          pip install -r requirements.lock
+          # The `area` package itself (editable) — needed so `import area` resolves
+          # and the `area` console script exists. Deps already satisfied above.
+          pip install -e . --no-deps
+          # Dev-only (not in the runtime lock).
+          pip install pytest==9.1.1
+
+      - name: Syntax check
+        run: python -m compileall -q area tests
+
+      - name: Run test suite
+        run: python -m pytest

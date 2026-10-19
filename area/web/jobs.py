@@ -68,21 +68,51 @@ class JobManager:
         except Exception:
             pass
 
+    @staticmethod
+    def _flags(p: dict) -> list[str]:
+        """TDD + gate + deploy flags shared by run/clone/intake."""
+        f: list[str] = []
+        if p.get("tdd"):
+            f.append("--tdd")
+        if p.get("clarify"):
+            f.append("--clarify")
+        if p.get("expected"):
+            f += ["--expect", str(p["expected"])]
+        if p.get("design"):
+            f.append("--design")
+        if p.get("all"):
+            f.append("--all")
+        else:
+            for g in ("verify", "audit", "e2e", "chaos"):
+                if p.get(g):
+                    f.append("--" + g)
+        if p.get("deploy"):
+            f += ["--deploy", "--yes"]
+        return f
+
     def _cmd(self, kind: str, p: dict) -> list[str]:
         b = str(AREA_BIN)
+        target = p.get("target", "cloudflare")
         if kind == "run":
-            c = [b, "run", p["requirement"], "--name", p["name"],
-                 "--target", p.get("target", "cloudflare")]
-            if p.get("deploy"):
-                c += ["--deploy", "--yes"]
-            return c
+            return [b, "run", p["requirement"], "--name", p["name"],
+                    "--target", target] + self._flags(p)
         if kind == "clone":
-            c = [b, "clone", p["source"], "--name", p["name"],
-                 "--kind", p.get("srcKind", "auto"),
-                 "--target", p.get("target", "cloudflare")]
-            if p.get("deploy"):
-                c += ["--deploy", "--yes"]
-            return c
+            return [b, "clone", p["source"], "--name", p["name"],
+                    "--kind", p.get("srcKind", "auto"),
+                    "--target", target] + self._flags(p)
+        if kind == "intake":
+            return [b, "intake", p["artifacts"], "--name", p["name"],
+                    "--target", target] + self._flags(p)
+        if kind == "iterate":
+            # The "command box": fold a NL change request into the spec + rebuild.
+            # TDD is on by default in the CLI; only pass --no-tdd on explicit opt-out.
+            # Drop --tdd from shared flags (iterate's parser uses --no-tdd instead).
+            cmd = [b, "iterate", p["name"], p["instruction"]]
+            if p.get("target"):
+                cmd += ["--target", p["target"]]
+            if p.get("tdd") is False:
+                cmd.append("--no-tdd")
+            return cmd + [f for f in self._flags(p) if f != "--tdd"]
         if kind == "deploy":
             return [b, "deploy", p["name"], "--yes"]
         raise ValueError(f"unknown job kind: {kind}")

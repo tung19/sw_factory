@@ -15,31 +15,42 @@
   header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
   header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
   header .tag{color:var(--muted);font-size:12px}
-  .wrap{display:grid;grid-template-columns:360px 1fr;gap:16px;padding:16px;max-width:1400px;margin:0 auto}
-  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px}
+  html,body{height:100%}
+  .wrap{display:grid;grid-template-columns:330px 350px 1fr;gap:12px;padding:12px;height:calc(100vh - 52px)}
+  @media(max-width:1100px){.wrap{grid-template-columns:1fr;height:auto}}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0}
+  @media(max-width:1100px){.col{min-height:auto}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:0}
+  .fill{flex:1;min-height:0;display:flex;flex-direction:column}
+  .fill .list,.fill pre.log{flex:1;min-height:0;overflow:auto}
   .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 10px}
   label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
   input,select,textarea{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--fg);
     border-radius:7px;padding:8px 10px;font:inherit}
-  textarea{resize:vertical;min-height:70px}
+  textarea{resize:vertical;min-height:64px}
   .row{display:flex;gap:8px}.row>*{flex:1}
   .tabs{display:flex;gap:6px;margin-bottom:10px}
   .tabs button{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--muted);
-    padding:7px;border-radius:7px;cursor:pointer}
+    padding:7px;border-radius:7px;cursor:pointer;font-size:12px}
   .tabs button.active{color:var(--fg);border-color:var(--accent);background:#132135}
-  .chk{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--muted);font-size:13px}
+  .chk{display:flex;align-items:center;gap:8px;margin-top:8px;color:var(--muted);font-size:13px}
   .chk input{width:auto}
+  .chks{display:flex;flex-wrap:wrap;gap:6px 16px}
+  .drop{border:1.5px dashed var(--border);border-radius:8px;padding:16px;text-align:center;color:var(--muted);
+    cursor:pointer;background:var(--panel2);font-size:13px}
+  .drop.over{border-color:var(--accent);color:var(--fg);background:#132135}
+  .files{list-style:none;padding:0;margin:8px 0 0;font-size:12px}
+  .files li{display:flex;justify-content:space-between;padding:4px 8px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:6px;margin-top:4px}
   button.go{margin-top:12px;width:100%;background:var(--accent);border:0;color:#fff;padding:10px;
     border-radius:8px;font-weight:600;cursor:pointer}
   button.go:disabled{opacity:.5;cursor:not-allowed}
   .btn{background:var(--panel2);border:1px solid var(--border);color:var(--fg);padding:5px 10px;
     border-radius:6px;cursor:pointer;font-size:12px}
-  .list{display:flex;flex-direction:column;gap:6px}
-  .item{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--panel2);
-    border:1px solid var(--border);border-radius:7px;cursor:pointer}
-  .item:hover{border-color:var(--accent)}
-  .item.sel{border-color:var(--accent)}
+  .list{display:flex;flex-direction:column;gap:4px}
+  .item{display:flex;align-items:center;gap:8px;padding:5px 9px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12.5px}
+  .item:hover{border-color:var(--accent)}.item.sel{border-color:var(--accent)}
   .dot{width:8px;height:8px;border-radius:50%;flex:none}
   .running{background:var(--amber);animation:pulse 1s infinite}
   .green{background:var(--green)}.failed{background:var(--red)}.interrupted{background:var(--muted)}
@@ -48,9 +59,22 @@
   .meta{color:var(--muted);font-size:11px}
   .badge{font-size:11px;padding:1px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
   a{color:var(--accent)}
+  /* pipeline timeline */
+  .pipe{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+  .stage{flex:1;min-width:92px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:3px;
+    background:var(--panel2);position:relative}
+  .stage .sname{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+  .stage .sstat{font-size:12px;margin-top:3px;color:var(--fg)}
+  .stage.active{border-color:var(--amber)} .stage.active .sstat{color:var(--amber)}
+  .stage.done{border-color:var(--green)} .stage.done .sstat{color:var(--green)}
+  .stage.failed{border-color:var(--red)} .stage.failed .sstat{color:var(--red)}
+  .stage.retry{border-color:var(--amber)}
+  .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:20px;margin-left:6px;
+    border:1px solid var(--red);color:var(--red)}
   pre.log{background:#010409;border:1px solid var(--border);border-radius:8px;padding:12px;
-    font-family:var(--mono);font-size:12px;height:62vh;overflow:auto;white-space:pre-wrap;margin:0}
+    font-family:var(--mono);font-size:12px;min-height:160px;overflow:auto;white-space:pre-wrap;margin:0}
   .loghead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  iframe.preview{width:100%;height:40vh;border:1px solid var(--border);border-radius:8px;background:#fff}
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:20px}
   .modal.open{display:flex}
   .modal .box{background:var(--panel);border:1px solid var(--border);border-radius:10px;max-width:760px;width:100%;
@@ -62,49 +86,102 @@
 </head>
 <body>
 <header>
-  <h1>⚙︎ AREA</h1><span class="tag">internal AI software factory · requirement / clone → spec → build → deploy</span>
+  <h1>⚙︎ AREA</h1><span class="tag">AI software factory nội bộ · requirement / doc / clone → spec → <b>TDD</b> → build → gates → deploy</span>
 </header>
 
 <div class="wrap">
-  <div>
+  <div class="col">
     <div class="card">
-      <h2>New job</h2>
+      <h2>Tạo job</h2>
       <div class="tabs">
-        <button id="tabRun" class="active" onclick="setTab('run')">Run (requirement)</button>
-        <button id="tabClone" onclick="setTab('clone')">Clone (app)</button>
+        <button id="tabRun" class="active" onclick="setTab('run')">Run</button>
+        <button id="tabIntake" onclick="setTab('intake')">Intake (tài liệu)</button>
+        <button id="tabClone" onclick="setTab('clone')">Clone</button>
+        <button id="tabIterate" onclick="setTab('iterate')">Iterate (ra lệnh)</button>
       </div>
+
       <div id="paneRun">
         <label>Requirement</label>
-        <textarea id="requirement" placeholder="A minimal todo web app: add, list, mark done, delete…"></textarea>
+        <textarea id="requirement" placeholder="VD: web todo tối giản: thêm, liệt kê, đánh dấu xong, xoá…"></textarea>
+        <label>…hoặc đính kèm tài liệu (tùy chọn) — PDF / Word / Markdown</label>
+        <div class="drop" id="dropRun">kéo-thả file vào đây, hoặc bấm để chọn</div>
+        <input type="file" id="fileRun" multiple accept=".pdf,.docx,.md,.markdown,.txt,.yaml,.yml,.json" style="display:none"/>
+        <ul class="files" id="filesRun"></ul>
       </div>
+
+      <div id="paneIntake" style="display:none">
+        <label>Tài liệu requirement — PDF / Word / Markdown (nhận cả AI-DLC artifacts)</label>
+        <div class="drop" id="dropIntake">kéo-thả file vào đây, hoặc bấm để chọn</div>
+        <input type="file" id="fileIntake" multiple accept=".pdf,.docx,.md,.markdown,.txt,.yaml,.yml,.json" style="display:none"/>
+        <ul class="files" id="filesIntake"></ul>
+        <label>Mô tả thêm (tùy chọn)</label>
+        <textarea id="descIntake" placeholder="Thêm gì ngoài tài liệu…"></textarea>
+      </div>
+
       <div id="paneClone" style="display:none">
-        <label>Sample app source (git URL / local path / http URL)</label>
-        <input id="source" placeholder="https://github.com/user/app  or  https://someapp.com"/>
-        <label>Source kind</label>
+        <label>Nguồn app mẫu (git URL / local path / http URL)</label>
+        <input id="source" placeholder="https://github.com/user/app  hoặc  https://someapp.com"/>
+        <label>Loại nguồn</label>
         <select id="srcKind"><option>auto</option><option>repo</option><option>path</option><option>url</option></select>
       </div>
-      <div class="row">
-        <div><label>Name</label><input id="name" placeholder="myapp"/></div>
-        <div><label>Target</label><select id="target"><option>cloudflare</option><option>plain</option></select></div>
+
+      <div id="paneIterate" style="display:none">
+        <label>App đang có</label>
+        <select id="iterApp"><option value="">— chọn app —</option></select>
+        <label>Ra lệnh cho AREA (yêu cầu thay đổi, bằng lời)</label>
+        <textarea id="iterInstruction" placeholder="VD: thêm nút xoá note · đổi sang dark mode · signup phải chặn username trùng…"></textarea>
+        <p class="meta" style="margin:6px 0 0">Lệnh được gộp vào <b>spec</b> rồi <b>khóa lại test (oracle)</b> và build — không đưa thẳng cho agent. Target tự nhận theo app. Tên ở dưới bị bỏ qua.</p>
       </div>
-      <div class="chk"><input type="checkbox" id="deploy"/><label for="deploy" style="margin:0">Deploy after green build (Cloudflare)</label></div>
-      <button class="go" id="goBtn" onclick="startJob()">Start</button>
+
+      <label>Expected results / ví dụ (tùy chọn — thành acceptance criteria)</label>
+      <textarea id="expected" placeholder="VD: calcTip(100,15)=15 · user A post note X → user B KHÔNG thấy X"></textarea>
+
+      <div class="row">
+        <div><label>Tên</label><input id="name" placeholder="myapp"/></div>
+        <div><label>Target</label><select id="target"><option>cloudflare</option><option>vercel</option><option>plain</option></select></div>
+      </div>
+
+      <label>Pipeline</label>
+      <div class="chks">
+        <span class="chk"><input type="checkbox" id="tdd" checked/><label for="tdd" style="margin:0">TDD (khóa test trước)</label></span>
+        <span class="chk"><input type="checkbox" id="clarify"/><label for="clarify" style="margin:0">clarify (hỏi nếu mơ hồ)</label></span>
+        <span class="chk"><input type="checkbox" id="gateAll"/><label for="gateAll" style="margin:0">Tất cả gates</label></span>
+        <span class="chk"><input type="checkbox" id="audit" checked/><label for="audit" style="margin:0">audit</label></span>
+        <span class="chk"><input type="checkbox" id="e2e" checked/><label for="e2e" style="margin:0">e2e</label></span>
+        <span class="chk"><input type="checkbox" id="chaos" checked/><label for="chaos" style="margin:0">chaos</label></span>
+        <span class="chk"><input type="checkbox" id="deploy"/><label for="deploy" style="margin:0">deploy</label></span>
+      </div>
+      <button class="go" id="goBtn" onclick="startJob()">Bắt đầu build</button>
     </div>
 
-    <div class="card">
+    <div class="card fill">
       <h2>Apps <button class="btn" style="float:right" onclick="refreshApps()">↻</button></h2>
-      <div class="list" id="apps"><div class="empty">no apps yet</div></div>
+      <div class="list" id="apps"><div class="empty">chưa có app nào</div></div>
     </div>
   </div>
 
-  <div>
-    <div class="card">
+  <div class="col">
+    <div class="card fill">
       <h2>Jobs <button class="btn" style="float:right" onclick="refreshJobs()">↻</button></h2>
-      <div class="list" id="jobs"><div class="empty">no jobs yet</div></div>
+      <div class="list" id="jobs"><div class="empty">chưa có job nào</div></div>
     </div>
+  </div>
+
+  <div class="col">
     <div class="card">
-      <div class="loghead"><h2 style="margin:0">Live log</h2><span class="meta" id="logTitle">— select or start a job —</span></div>
+      <h2>Pipeline <span class="meta" id="pipeTitle">— tiến trình trực tiếp —</span>
+        <a id="traceLink" href="#" target="_blank" style="float:right;display:none;font-size:12px">Langfuse trace ↗</a></h2>
+      <div class="pipe" id="pipe"></div>
+    </div>
+
+    <div class="card fill">
+      <div class="loghead"><h2 style="margin:0">Log trực tiếp</h2><span class="meta" id="logTitle">— chọn hoặc tạo một job —</span></div>
       <pre class="log" id="log"></pre>
+    </div>
+
+    <div class="card" id="previewCard" style="display:none">
+      <h2>Preview <a id="previewOpen" href="#" target="_blank" style="float:right;font-size:12px">mở ↗</a></h2>
+      <iframe class="preview" id="preview"></iframe>
     </div>
   </div>
 </div>
@@ -117,44 +194,160 @@
 </div>
 
 <script>
-let tab='run', es=null, selJob=null;
+let tab='run', es=null, selJob=null, logBuf='';
 const $=id=>document.getElementById(id);
-function setTab(t){tab=t;$('tabRun').classList.toggle('active',t==='run');$('tabClone').classList.toggle('active',t==='clone');
-  $('paneRun').style.display=t==='run'?'':'none';$('paneClone').style.display=t==='clone'?'':'none';}
-function fmtTime(s){if(!s)return'';const d=new Date(s*1000);return d.toLocaleTimeString();}
+const sel={run:[], intake:[]}; // chosen File objects per pane
+
+function setTab(t){
+  tab=t;
+  ['run','intake','clone','iterate'].forEach(k=>{
+    $('tab'+k[0].toUpperCase()+k.slice(1)).classList.toggle('active',k===t);
+    $('pane'+k[0].toUpperCase()+k.slice(1)).style.display=k===t?'':'none';
+  });
+  $('goBtn').textContent = t==='clone'?'Bắt đầu clone'
+    :(t==='intake'?'Ingest & build':(t==='iterate'?'Ra lệnh & rebuild':'Bắt đầu build'));
+}
+function fmtTime(s){if(!s)return'';return new Date(s*1000).toLocaleTimeString();}
+function esc(t){return (t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+// ---- file pickers (click + drag/drop) ----
+function wireDrop(dropId,inputId,pane){
+  const d=$(dropId),inp=$(inputId);
+  d.onclick=()=>inp.click();
+  inp.onchange=()=>{sel[pane]=[...inp.files];renderFiles(pane);};
+  ['dragover','dragenter'].forEach(e=>d.addEventListener(e,ev=>{ev.preventDefault();d.classList.add('over');}));
+  ['dragleave','drop'].forEach(e=>d.addEventListener(e,ev=>{ev.preventDefault();d.classList.remove('over');}));
+  d.addEventListener('drop',ev=>{sel[pane]=[...ev.dataTransfer.files];renderFiles(pane);});
+}
+function renderFiles(pane){
+  const ul=$('files'+pane[0].toUpperCase()+pane.slice(1));
+  ul.innerHTML=sel[pane].map(f=>`<li><span>${esc(f.name)}</span><span class="meta">${(f.size/1024|0)} KB</span></li>`).join('');
+}
+wireDrop('dropRun','fileRun','run');
+wireDrop('dropIntake','fileIntake','intake');
+
+function gates(){
+  const p={tdd:$('tdd').checked, deploy:$('deploy').checked};
+  if($('clarify').checked) p.clarify=true;
+  const exp=$('expected').value.trim(); if(exp) p.expected=exp;
+  if($('gateAll').checked) p.all=true;
+  else { for(const g of ['audit','e2e','chaos']) if($(g).checked) p[g]=true; }
+  return p;
+}
+
+async function doUpload(name,files,description){
+  const fd=new FormData();
+  fd.append('name',name); if(description) fd.append('description',description);
+  files.forEach(f=>fd.append('file',f));
+  const r=await fetch('/api/upload',{method:'POST',body:fd});
+  return r.json();
+}
 
 async function startJob(){
-  const name=$('name').value.trim();
-  if(!name){alert('Name required');return;}
-  const params={name,target:$('target').value,deploy:$('deploy').checked};
-  if(tab==='run'){params.requirement=$('requirement').value.trim();if(!params.requirement){alert('Requirement required');return;}}
-  else{params.source=$('source').value.trim();params.srcKind=$('srcKind').value;if(!params.source){alert('Source required');return;}}
+  let name=$('name').value.trim();
+  if(tab==='iterate') name=$('iterApp').value;
+  if(!name){alert(tab==='iterate'?'Chọn một app để ra lệnh':'Cần nhập Tên');return;}
+  const params={name,target:$('target').value,...gates()};
+  let kind=tab;
   $('goBtn').disabled=true;
   try{
+    if(tab==='iterate'){
+      const ins=$('iterInstruction').value.trim();
+      if(!ins){alert('Nhập lệnh / yêu cầu thay đổi');return;}
+      params.instruction=ins;
+      delete params.target;   // iterate auto-detects target from the existing app
+    } else if(tab==='run'){
+      let req=$('requirement').value.trim();
+      if(sel.run.length){
+        const u=await doUpload(name,sel.run,'');
+        if(u.error){alert(u.error);return;}
+        req=(u.text?u.text+'\n\n':'')+req;
+      }
+      if(!req){alert('Cần Requirement (hoặc một tài liệu)');return;}
+      params.requirement=req;
+    } else if(tab==='intake'){
+      if(!sel.intake.length && !$('descIntake').value.trim()){alert('Hãy upload tài liệu hoặc gõ mô tả');return;}
+      const u=await doUpload(name,sel.intake,$('descIntake').value.trim());
+      if(u.error){alert(u.error);return;}
+      params.artifacts=u.dir;
+    } else {
+      params.source=$('source').value.trim();params.srcKind=$('srcKind').value;
+      if(!params.source){alert('Cần nhập nguồn');return;}
+    }
     const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({kind:tab,params})});
+      body:JSON.stringify({kind,params})});
     const j=await r.json();
-    if(j.id){openLog(j.id);refreshJobs();}
-    else alert(j.error||'failed');
+    if(j.id){openLog(j.id);refreshJobs();} else alert(j.error||'thất bại');
   }finally{$('goBtn').disabled=false;}
 }
 
 async function deployApp(name){
-  if(!confirm('Deploy "'+name+'" to Cloudflare production?'))return;
+  if(!confirm('Deploy "'+name+'" lên Cloudflare production?'))return;
   const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
     body:JSON.stringify({kind:'deploy',params:{name}})});
   const j=await r.json(); if(j.id){openLog(j.id);refreshJobs();}
 }
 
+// ---- pipeline timeline (parsed from the streamed [area] markers) ----
+const STAGES=[['spec','Spec'],['tests','Lock tests'],['build','Build'],['gates','Gates'],['deploy','Deploy']];
+function parseStages(t){
+  const s={spec:'',tests:'',build:'',gates:'',deploy:'',challenge:false,note:{}};
+  const has=re=>re.test(t);
+  if(has(/\[area\] (spec|re-spec|intake)\b/)) s.spec='active';
+  if(has(/spec OK:/)) s.spec='done';
+  if(has(/tdd\s*:.*author \+ lock|holdout: author/)) s.tests='active';
+  if(has(/author attempt \d+.*not complete/)) {s.tests='retry';}
+  if(has(/holdout: locked .* file/)) s.tests='done';
+  const m=t.match(/all (\d+) AC covered/); if(m) s.note.tests=m[1]+' AC';
+  if(has(/\[area\] build :/)) s.build='active';
+  if(has(/build GREEN/)) s.build='done';
+  if(has(/NOT green|build NOT green/)) s.build='failed';
+  if(has(/holdout: re-adjudicat|FORBIDDEN/)) s.challenge=true;
+  const gm=[...t.matchAll(/=== gate: (\w+) ===/g)].map(x=>x[1]);
+  if(gm.length){ s.gates='active'; s.note.gates=gm.join(' ');
+    if(has(/gate '\w+' failed/)) s.gates='failed'; }
+  if(has(/Deploy .*PRODUCTION|deploy_with_gate|\[area\] deploy/i)) s.deploy='active';
+  if(has(/workers\.dev|pages\.dev/)) s.deploy='done';
+  if(has(/✅ GREEN —/) && s.gates==='active') s.gates='done';
+  return s;
+}
+function renderPipe(){
+  const s=parseStages(logBuf), box=$('pipe');
+  box.innerHTML=STAGES.map(([k,label])=>{
+    const st=s[k]||''; const stat={active:'đang chạy…',done:'xong',failed:'lỗi',retry:'thử lại…'}[st]||'—';
+    const extra=s.note[k]?` <span class="meta">${esc(s.note[k])}</span>`:'';
+    const pill=(k==='tests'&&s.challenge)?'<span class="pill">challenge</span>':'';
+    return `<div class="stage ${st}"><div class="sname">${label}${pill}</div><div class="sstat">${stat}${extra}</div></div>`;
+  }).join('');
+}
+
 function openLog(jid){
   selJob=jid; if(es)es.close();
-  $('log').textContent=''; $('logTitle').textContent='job '+jid;
-  renderJobs(lastJobs);
+  logBuf=''; $('log').textContent=''; $('logTitle').textContent='job '+jid;
+  $('previewCard').style.display='none'; $('traceLink').style.display='none';
+  renderPipe(); renderJobs(lastJobs);
   es=new EventSource('/api/jobs/'+jid+'/stream');
-  es.onmessage=e=>{const el=$('log');el.textContent+=e.data+'\n';el.scrollTop=el.scrollHeight;};
+  es.onmessage=e=>{logBuf+=e.data+'\n';const el=$('log');el.textContent=logBuf;el.scrollTop=el.scrollHeight;
+    const tm=logBuf.match(/\[area\] trace : (\S+)/);
+    if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}
+    renderPipe();};
   es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();
-    try{const j=JSON.parse(e.data);if(j.url)$('log').textContent+='\n🌐 '+j.url+'\n';}catch(_){ }});
+    try{const j=JSON.parse(e.data);if(j.url){logBuf+='\n🌐 '+j.url+'\n';$('log').textContent=logBuf;showPreview(j.url);}}catch(_){ }
+    renderPipe();});
   es.onerror=()=>{es.close();};
+}
+function showPreview(url){
+  $('previewCard').style.display='';$('preview').src=url;$('previewOpen').href=url;
+}
+// one-shot render of a job (no live SSE) — used by ?job=X&snapshot=1
+function openSnapshot(jid){
+  selJob=jid; logBuf=''; $('previewCard').style.display='none'; $('traceLink').style.display='none';
+  $('logTitle').textContent='job '+jid+' (snapshot)'; renderJobs(lastJobs);
+  fetch('/api/jobs/'+jid+'/log').then(r=>r.text()).then(t=>{
+    logBuf=t; const el=$('log'); el.textContent=t; el.scrollTop=el.scrollHeight;
+    const tm=t.match(/\[area\] trace : (\S+)/); if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}
+    renderPipe();
+  }).catch(()=>{});
 }
 
 let lastJobs=[];
@@ -165,8 +358,9 @@ function renderJobs(jobs){
   jobs.forEach(j=>{
     const d=document.createElement('div');d.className='item'+(j.id===selJob?' sel':'');
     d.onclick=()=>openLog(j.id);
+    const flags=(j.params&&(j.params.tdd?' ·tdd':'')||'')+(j.params&&j.params.all?' ·gates':'');
     d.innerHTML=`<span class="dot ${j.status}"></span>
-      <span class="grow"><b>${j.kind}</b> · ${j.name||''} <span class="meta">${fmtTime(j.started)}</span></span>
+      <span class="grow"><b>${j.kind}</b> · ${esc(j.name||'')}<span class="meta">${flags} ${fmtTime(j.started)}</span></span>
       ${j.url?`<a href="${j.url}" target="_blank" onclick="event.stopPropagation()">open ↗</a>`:''}
       <span class="badge">${j.status}</span>`;
     box.appendChild(d);
@@ -176,15 +370,23 @@ async function refreshJobs(){const r=await fetch('/api/jobs');renderJobs(await r
 
 async function refreshApps(){
   const r=await fetch('/api/apps');const apps=await r.json();const box=$('apps');
+  // keep the Iterate app-selector in sync (preserve the current choice)
+  const selEl=$('iterApp'); if(selEl){const cur=selEl.value;
+    selEl.innerHTML='<option value="">— chọn app —</option>'+
+      apps.map(a=>`<option value="${esc(a.name)}">${esc(a.name)}</option>`).join('');
+    selEl.value=cur;}
   if(!apps.length){box.innerHTML='<div class="empty">no apps yet</div>';return;}
   box.innerHTML='';
   apps.forEach(a=>{
     const d=document.createElement('div');d.className='item';
-    d.innerHTML=`<span class="grow"><b>${a.name}</b> ${a.built?'<span class="badge">built</span>':''}
+    d.innerHTML=`<span class="grow"><b>${esc(a.name)}</b> ${a.built?'<span class="badge">đã build</span>':''}
       ${a.url?`<a href="${a.url}" target="_blank">live ↗</a>`:''}</span>`;
     const spec=document.createElement('button');spec.className='btn';spec.textContent='spec';
     spec.onclick=()=>viewSpec(a.name);d.appendChild(spec);
-    if(a.built){const dep=document.createElement('button');dep.className='btn';dep.textContent='deploy';
+    if(a.built){const it=document.createElement('button');it.className='btn';it.textContent='ra lệnh';
+      it.onclick=()=>{setTab('iterate');$('iterApp').value=a.name;$('iterInstruction').focus();};
+      d.appendChild(it);
+      const dep=document.createElement('button');dep.className='btn';dep.textContent='deploy';
       dep.onclick=()=>deployApp(a.name);d.appendChild(dep);}
     box.appendChild(d);
   });
@@ -193,14 +395,23 @@ async function refreshApps(){
 async function viewSpec(name){
   const r=await fetch('/api/apps/'+name+'/spec');const s=await r.json();
   $('mTitle').textContent=name+' — spec';
-  $('mBody').innerHTML=`<label>spec.yaml</label><pre>${esc(s.spec||'(none)')}</pre>
-    <label>acceptance.yaml</label><pre>${esc(s.acceptance||'(none)')}</pre>`;
+  $('mBody').innerHTML=`<label>spec.yaml</label><pre>${esc(s.spec||'(trống)')}</pre>
+    <label>acceptance.yaml</label><pre>${esc(s.acceptance||'(trống)')}</pre>`;
   $('modal').classList.add('open');
 }
-function esc(t){return t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 function closeModal(){$('modal').classList.remove('open');}
 
-refreshJobs();refreshApps();setInterval(()=>{if(!es||es.readyState===2)refreshJobs();},4000);
+refreshJobs();refreshApps();renderPipe();
+setInterval(()=>{if(!es||es.readyState===2)refreshJobs();},4000);
+// deep-link: /?job=<id> or /?job=latest auto-opens that job's live view
+(function(){
+  const sp=new URLSearchParams(location.search); const p=sp.get('job'); if(!p)return;
+  fetch('/api/jobs').then(r=>r.json()).then(js=>{
+    const j = p==='latest' ? (js.find(x=>x.status==='running')||js[0]) : js.find(x=>x.id===p);
+    if(!j) return;
+    if(sp.get('snapshot')) openSnapshot(j.id); else openLog(j.id);
+  }).catch(()=>{});
+})();
 </script>
 </body>
 </html>

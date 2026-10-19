@@ -1,7 +1,8 @@
 # AREA — Kế hoạch kiến trúc & trạng thái
 
 > **Loại:** Sản phẩm **nội bộ** (internal tool).
-> **Cập nhật:** 2026-10-18 (đồng bộ với hệ thống đã ship + chaos-audit).
+> **Cập nhật:** 2026-10-19.
+> **▶ RESUME (session mới):** đọc memory `area-session-handoff` + §11 bên dưới. Tóm tắt: shipped --tdd/clone-parity/intake/author-oracle-loop/dashboard/Langfuse/expected-results+clarify/**multi-provider deploy (cloudflare+vercel)**; live: gb-d1 ✅, notes-cf (signup vỡ — bug server-action intent), dashboard :8787, Langfuse :3000. Next: Vercel live-deploy (cần `VERCEL_TOKEN`), Vercel pha-b (Postgres/KV), xác nhận gate E2E cứu signup, PR1–PR8.
 > **Repo:** github.com/tung19/sw_factory (private).
 >
 > **Nhật ký quyết định:**
@@ -9,6 +10,7 @@
 > - **Deploy = Cloudflare Workers (vinext + `@vinext/cloudflare`)**; auth keyless bằng **`cf auth login`** (Cloudflare CLI — KHÔNG phải wrangler), hoặc `CLOUDFLARE_API_TOKEN`. `vinext` beta. ✅ Đã deploy thật: `guestbook.monbkel.workers.dev` (HTTP 200).
 > - **Self-correct = oracle-bằng-test (`run_until`)**, KHÔNG dùng `run_goal`+judge (judge cần key). *(Xem gap P1: oracle hiện bị agent tự-chấm.)*
 > - **KHÔNG lấy nguyên Specora** (khóa stack Docker/FastAPI, alpha, patent) → chỉ "đào" ý tưởng contract-schema + healer-loop, cài lại trên stack Cloudflare.
+> - **Xương sống = HYBRID 2 lớp** (2026-10-18): AREA (engine tự trị oracle-loop) làm Construction+Validation core; **AI-DLC (`awslabs/aidlc-workflows`)** làm front-end quy trình (Inception: requirement→stories→Units of Work + Testing Posture, truy vết/audit). Nối qua **artifact seam** ở `area/intake/aidlc.py` (map artifact AI-DLC → spec.yaml/acceptance.yaml), **KHÔNG wiring runtime in-process** (TS↔Python quá đắt). Hút thêm từ AI-DLC: bản đồ phase/stage + "reviewer as adversary" (= holdout). **Audit/truy vết + harness-neutral + cộng đồng/bus-factor lấy bằng cách DEPEND + EMIT (AREA ghi evidence vào trail AI-DLC), KHÔNG migrate code** — fork sẽ phá chính bus-factor/cộng đồng và không mang được tính harness-neutral (đó là kiến trúc, không phải module).
 
 AREA = một **orchestrator do ta tự viết** (~1000 dòng keo) điều phối OpenHands SDK. Không repo đơn lẻ nào là "toàn bộ lõi".
 
@@ -22,7 +24,12 @@ LUỒNG A (Requirement):  Requirement (NL) ─┐
 LUỒNG B (Clone app):    App mẫu ──────────┘  (artifact)  (self-correct)           (lỗi→sửa spec→regen)
 ```
 
-Nguyên tắc bất biến: **mọi spec phải sinh acceptance criteria + test chạy được** = "oracle". ⚠️ PLAN yêu cầu **không phó mặc LLM tự sinh test** — hiện chưa đạt (gap **P1**).
+**Xương sống = vòng hội tụ theo oracle** (không phải tooling). Nguyên tắc bất biến:
+- Mọi spec phải sinh acceptance criteria + test chạy được = "oracle"; **không phó mặc LLM tự sinh+tự chấm** (holdout độc lập — P1 ✅).
+- Vòng lặp chỉ hội tụ tới **"oracle xanh"**, không tới "perfect" trừu tượng → *chất lượng ≤ độ mạnh + độ độc lập của oracle*.
+- **TDD = đặt oracle ra TRƯỚC code** (vòng có đích từ iteration 0; build bị lái bởi test implementer không viết/không sửa được). Chế độ `--tdd` (xem §10).
+- Clone/RE: **app gốc LÀ oracle vàng** → "perfect" = parity hành vi; build-to-parity.
+- "Loop tới perfect" phải có cửa DỪNG: oracle xanh | budget/iteration cap (P2) | phát hiện kẹt; + human gate tầng trên ("oracle có đúng không" là bài toán spec).
 
 ---
 
@@ -101,7 +108,7 @@ SW_Factory/
 │   ├── heal.py    ✅ spec-level healer
 │   ├── pipeline.py / cli.py / _util.py  ✅
 │   ├── web/       ✅ GUI (Starlette + SSE)
-│   ├── intake/    ⬜ rỗng (gộp vào spec/re)
+│   ├── intake/    ✅ aidlc.py (Hybrid seam: AI-DLC artifact→spec + emit evidence)
 │   ├── verify/    ⬜ rỗng (gộp vào engine oracle; CHƯA có E2E/holdout)
 │   └── memory/    ⬜ rỗng (CHƯA có experience store)
 ├── workspace/     (gitignored) apps + specs sinh ra
@@ -139,3 +146,39 @@ SW_Factory/
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
 **Đã xong P1–P6 + design.** **Rigor thêm:** security/static gate (`area audit`) + chaos/resilience (`area chaos`). **Prod-monitoring + self-heal loop** (`area monitor/status/watch`: probe→heal→rebuild→gate→redeploy) ✅. Còn (tùy chọn): perf/load gate, NFR, CI/CD. **Tự động:** `area run ... --all [--deploy]` chạy mọi gate (verify→audit→e2e→chaos) sau build, chặn deploy nếu fail; audit/chaos tự ghi memory.
+
+**Command box (`area iterate` + dashboard tab "Iterate (ra lệnh)")** ✅ (2026-10-19): user ra lệnh NL cho app ĐANG CÓ ("thêm nút xoá", "đổi dark mode") → lệnh được **gộp vào spec** (`compose_amended_requirement`, không raw-to-agent) → **re-lock oracle (TDD mặc định)** → rebuild + gate; target tự nhận theo app. Giữ nguyên xương sống oracle-loop. Chạy qua job-manager (SSE timeline) + sau auth PR6. `area/pipeline.py:iterate_pipeline`, `area/cli.py` lệnh `iterate`, `area/web` kind `iterate`. 11 test.
+
+### Lộ trình Hybrid + TDD (2026-10-18, đang làm theo thứ tự)
+| # | Việc | Done khi |
+|---|---|---|
+| **T1** | 🟢 `--tdd` (run+clone+intake): khóa holdout TRƯỚC build; oracle = test đã khóa (TDD + chống tự-chấm hợp nhất). **Escape-hatch** `_CHALLENGE.md`→verifier độc lập tái-thẩm→re-lock (evolving-under-governance, có cận). **Clone build-to-parity** (neo test vào hành vi app gốc). ✅ **validated live**: `run --tdd` (counter) + `clone --tdd` **parity** (tip-calc, test neo vào app gốc) đều GREEN; author-wander được retry cứu | `area run/clone --tdd` build xanh *qua* test độc lập đã khóa |
+| **T2** | ✅ **Test suite dogfood cho AREA** (`tests/`, 41 tests, logic thuần, không agent): lock/challenge, thứ tự pipeline+vòng challenge, CLI, safe_name, memory, intake, parity, author-retry | `python -m pytest` xanh |
+| **T3** | 🟢 **Adapter `area/intake/aidlc.py`** + `area intake`: artifact AI-DLC → spec/acceptance (Testing Posture→AC); **emit evidence** ngược vào trail AI-DLC (`aidlc_trace.jsonl`) cho audit end-to-end. ✅ **validated live** (temp-converter GREEN; Testing Posture→6 AC đúng từng số; trail 3 event cùng trace id) | `area intake <path> --tdd` ra app từ artifact AI-DLC |
+| **T4** | 🟢 **Author oracle-loop** (`author_until` + `_authoring_oracle`): trị gốc "author-wander" (keyless ACP KHÔNG cắt được tool → ép chất lượng output: phủ mọi AC + CONTRACT + assertion, no-progress detect, feedback cụ thể). ✅ **validated live** (locked "all 3 AC covered", author 1 lượt 64s) | author không fail vì wander, phủ đủ AC |
+| **T5** | 🟢 **Dashboard nâng cấp** (`area/web`): tab **Intake** upload PDF/Word/MD (`pypdf`/`python-docx`) + describe → `area intake`; toggle **TDD + gates**; **pipeline timeline** live (parse marker SSE); preview iframe app deploy. ✅ smoke live (index/jobs/upload) | upload doc → build; xem tiến trình trực quan |
+| **T6** | 🟢 **Langfuse process-viz** (`area/trace.py`): 1 **trace/pipeline**, 1 **span/agent-run** (cost/latency/outcome lấy từ `area/obs`); emit TRỰC TIẾP (không phụ thuộc OTel-từ-ACP). Optional + no-op nếu thiếu SDK/keys (giữ keyless sạch). URL trace in ra log → link trên dashboard. ✅ tested fake-sink 63/63. Kích hoạt: `pip install 'area[trace]'` + `LANGFUSE_PUBLIC_KEY/SECRET_KEY[/HOST]` | thấy cây trace cost/latency mỗi stage |
+
+---
+
+## 11. Production readiness — đánh giá & kế hoạch (2026-10-18)
+
+**Trạng thái:** POC đã validated end-to-end trên app NHỎ tự-chứa. **Chưa production** cho phần mềm thật.
+
+### Blocker (theo mức nghiêm trọng)
+| # | Blocker | Kế hoạch |
+|---|---|---|
+| ~~**PR1**~~ | **Scope build = app đồ chơi** (prompt hardcode "in-memory, no auth, single user") | ✅ **MỞ + validated live** (plain/`node:sqlite`): `prod_notes` — signup/login + **password hash** (AC "không plaintext"), **per-user isolation** (user A không thấy note user B), **durable qua restart** (test `vi.resetModules()` + reopen cùng file DB), holdout 6 file/**8 AC**, build GREEN (~$5.2). ⏳ còn: **cloudflare D1** (target deploy thật) + 2–3 app nữa (PR5) |
+| **PR2** | Phụ thuộc beta/mong manh (OpenHands weekly-break, vinext beta, REA lỗi) | pin + adapter đã có; cần fallback vinext ổn định; khoanh/bỏ REA |
+| **PR3** | Không tất định + chi phí ($2–6/run, có wander) | model-tiering, cap chặt, đo tỉ lệ retry; author oracle-loop ✅ đã giảm |
+| **PR4** | Thiếu gate **perf/load, NFR, CI/CD**; security gate cơ bản. **E2E gate CHỨNG MINH là BẮT BUỘC** (2026-10-19): notes_cf holdout-logic GREEN nhưng **signup VỠ live** (server-action intent không tới formData) — Playwright E2E bắt trong vài giây, logic-holdout không thể | **bật `--e2e`/`--all` trước deploy mọi app có auth/session/form** ✅ (validated live notes_cf). **CI/CD cho AREA ✅ DONE** (`.github/workflows/ci.yml`: pin deps từ requirements.lock + `pip install -e .` + pytest 126 trên push/PR→main; compileall; concurrency-cancel). Còn: perf/load + NFR gate |
+| **PR5** | Chỉ test app bé; chưa có app thật (DB+auth+multi-page) | mốc tiếp: 2–3 app thật có DB+auth |
+| ~~**PR6**~~ | ✅ **DONE**: dashboard có **token-auth** (`area/web/auth.py`, kiểu Jupyter). Mọi request phải có token qua `?token=`/Bearer/cookie; `?token=` set cookie HttpOnly+SameSite=Strict để fetch/SSE tự authed. Token = `AREA_GUI_TOKEN` hoặc tự sinh (in URL kèm token khi `area gui`); escape-hatch `AREA_GUI_NO_AUTH=1`. Pure-ASGI (không phá SSE). 9 test + smoke live (401 thiếu/sai token, 200 khi có). Còn (tùy): HTTPS/reverse-proxy nếu expose ngoài localhost | thêm auth + không expose công khai |
+| **PR7** | Deploy/rollback/monitor mới validate 1 lần (guestbook) | ✅ **DEPLOY D1 LIVE validated**: `area deploy gb_d1` → auto-provision D1 (`wrangler d1 create gb-d1: ok`) → deploy vinext/cf → **https://gb-d1.monbkel.workers.dev HTTP 200**. **Persist proven live** (Playwright: post message → reload → vẫn còn trong D1). Handshake wrangler-D1 ↔ vinext `bindings.d1()` **OK, không cần chỉnh** (table tạo lazy). Còn: rollback/monitor nhiều lần |
+| **PR8** | Bus factor (~2500 dòng, 1 người); Hybrid front-end chưa dựng | dựng AI-DLC front-end thật + emit evidence nối trail |
+
+### "Production-ready" = done khi
+- [ ] Build được app **persistence thật + auth + multi-user**, validated live trên 2–3 app.
+- [ ] Gate **perf/load + NFR + security sâu** + **CI/CD** cho AREA.
+- [ ] Phụ thuộc beta có fallback; chi phí/độ tất định đo & kiểm soát được.
+- [ ] Dashboard có auth; deploy/rollback/monitor validated nhiều lần.

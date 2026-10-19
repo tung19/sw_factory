@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from area.engine import build_agent, run_until
-from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier
+from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier, expected_block
 from area.spec.models import Acceptance, Spec, load_acceptance, load_spec
 
 
@@ -41,6 +41,7 @@ def spec_from_source(
     *,
     kind: str = "auto",
     use_rea: bool = False,
+    expected: Optional[str] = None,
     backend: str = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
@@ -72,7 +73,7 @@ def spec_from_source(
         "Work out the app's observable FEATURES and DATA MODEL. Capture ONLY what "
         "you can evidence; do not invent scope. Target stack for the clone is "
         "Next.js, so describe features in a framework-neutral way.\n\n"
-        f"=== OUTPUT FORMAT ===\n{_SCHEMA_GUIDE}"
+        f"{expected_block(expected)}=== OUTPUT FORMAT ===\n{_SCHEMA_GUIDE}"
     )
 
     mcp = rea_mcp_config() if use_rea else None

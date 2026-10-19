@@ -53,6 +53,14 @@ def log_run(
     c = f"${cost:.4f}" if cost is not None else "$?"
     verdict = "ok" if passed else ("fail" if passed is not None else "-")
     print(f"[obs] {label}: {duration:.1f}s · {c} · {verdict}")
+    # Optional: mirror this run as a Langfuse span under the current pipeline.
+    try:
+        from area import trace
+
+        trace.log_span(label, duration=duration, cost=cost, passed=passed,
+                       backend=backend, metadata={"outer_iters": outer_iters})
+    except Exception:
+        pass
 
 
 def summary() -> dict:

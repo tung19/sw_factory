@@ -1,7 +1,7 @@
 """area.pipeline — Flow A (requirement) and Flow B (clone) end to end."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -21,6 +21,34 @@ class PipelineResult:
     spec_dir: Path
     app_dir: Path
     passed: bool
+    clarify_needed: bool = False
+    questions: list = field(default_factory=list)
+
+
+def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict]:
+    """In --clarify mode, return the MATERIAL assumptions the spec stage had to
+    make (ambiguities worth asking the user about before building)."""
+    if not clarify:
+        return []
+    from area.spec.extract import load_assumptions
+
+    return [
+        a for a in load_assumptions(root / "specs" / name)
+        if str(a.get("material")).lower() == "true"
+    ]
+
+
+def _clarify_result(name, spec, acc, root, questions) -> PipelineResult:
+    spec_dir = root / "specs" / name
+    print(f"\n[area] ⚠ CLARIFICATION NEEDED — {len(questions)} material "
+          "assumption(s); NOT building. Confirm/override then re-run:")
+    for q in questions:
+        print(f"  • {q.get('question')}\n      assumed → {q.get('assumption')}")
+    print("[area] Update the requirement, or pass --expect \"<examples>\", then re-run.")
+    return PipelineResult(
+        name, spec, acc, spec_dir, root / "apps" / name,
+        passed=False, clarify_needed=True, questions=questions,
+    )
 
 
 def _maybe_design(name, backend, model, design) -> None:
@@ -32,17 +60,76 @@ def _maybe_design(name, backend, model, design) -> None:
     design_stage(name, backend=backend, model=model)
 
 
-def _build(name, spec, acc, root, target, backend, model, build_iters) -> PipelineResult:
+def _build(
+    name, spec, acc, root, target, backend, model, build_iters, tdd=False,
+    reference=None,
+) -> PipelineResult:
     app_dir = root / "apps" / name
     design_path = root / "specs" / name / "design.md"
     design_text = design_path.read_text() if design_path.exists() else ""
-    print(f"[area] build : target={target} -> {app_dir}")
-    passed = build_app(
-        spec, acc, app_dir, target=target, backend=backend, model=model,
-        max_iters=build_iters, design=design_text,
-    )
+
+    if tdd:
+        passed = _tdd_build(
+            name, spec, acc, app_dir, target, backend, model, build_iters,
+            design_text, reference=reference,
+        )
+    else:
+        print(f"[area] build : target={target} -> {app_dir}")
+        passed = build_app(
+            spec, acc, app_dir, target=target, backend=backend, model=model,
+            max_iters=build_iters, design=design_text,
+        )
     print(f"[area]        build {'GREEN' if passed else 'NOT green'}")
     return PipelineResult(name, spec, acc, root / "specs" / name, app_dir, passed)
+
+
+def _tdd_build(
+    name, spec, acc, app_dir, target, backend, model, build_iters, design_text,
+    *, reference=None, max_challenges: int = 1,
+) -> bool:
+    """TDD: lock the independent acceptance suite FIRST, then build-to-green
+    against it. If the build fails because the builder challenges a locked test
+    as wrong, an independent verifier re-adjudicates + re-locks, and we rebuild
+    once more (bounded by max_challenges) — tests evolve only under governance.
+
+    `reference` (a clone's source) switches the locked suite to BEHAVIORAL
+    PARITY with the original: build-to-parity, the golden oracle for clones.
+    """
+    import yaml as _yaml
+
+    from area.verify.holdout import (
+        author_and_lock,
+        readjudicate,
+        tdd_build_oracle,
+    )
+
+    acc_yaml = _yaml.safe_dump(acc.model_dump(), sort_keys=False)
+    red = "author + lock PARITY tests" if reference else "author + lock acceptance tests"
+    print(f"[area] tdd   : {red} BEFORE build (red)")
+    app_dir.mkdir(parents=True, exist_ok=True)
+    holdout, lock = author_and_lock(
+        name, backend=backend, model=model, app=app_dir, acc_yaml=acc_yaml,
+        reference=reference,
+    )
+
+    for attempt in range(max_challenges + 1):
+        oracle = tdd_build_oracle(app_dir, holdout, lock, target=target)
+        print(f"[area] build : target={target} tdd=True (round {attempt + 1}) -> {app_dir}")
+        if build_app(
+            spec, acc, app_dir, target=target, backend=backend, model=model,
+            max_iters=build_iters, design=design_text, oracle=oracle, tdd=True,
+        ):
+            return True
+        if attempt == max_challenges:
+            break
+        # Build failed — did the builder raise a legitimate test challenge?
+        changed, lock = readjudicate(
+            app_dir, holdout, acc_yaml, backend=backend, model=model
+        )
+        if not changed:
+            break  # no challenge, or it was rejected: the app genuinely failed
+        print("[area] tdd   : test corrected + re-locked; rebuilding")
+    return False
 
 
 def run_pipeline(
@@ -55,19 +142,150 @@ def run_pipeline(
     spec_iters: int = 3,
     build_iters: int = 3,
     design: bool = False,
+    tdd: bool = False,
+    expected: Optional[str] = None,
+    clarify: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
-    """Flow A: requirement -> spec -> [design] -> build."""
+    """Flow A: requirement -> spec -> [design] -> [lock tests] -> build."""
     name = safe_name(name)
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] spec   : {requirement!r}")
     spec, acc = extract_spec(
-        requirement, root / "specs" / name, backend=backend, model=model,
-        max_iters=spec_iters,
+        requirement, root / "specs" / name, expected=expected, backend=backend,
+        model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    qs = _clarify_gate(root, name, clarify)
+    if qs:
+        return _clarify_result(name, spec, acc, root, qs)
     _maybe_design(name, backend, model, design)
-    return _build(name, spec, acc, root, target, backend, model, build_iters)
+    return _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
+
+
+def _prior_spec_text(root: Path, name: str) -> str:
+    """The existing app's spec + acceptance as plain text (the current oracle),
+    fed back in as context when iterating. Empty if the app has no spec yet."""
+    sd = root / "specs" / safe_name(name)
+    chunks = []
+    for fn in ("spec.yaml", "acceptance.yaml"):
+        p = sd / fn
+        if p.exists():
+            chunks.append(f"# {fn}\n{p.read_text(errors='ignore').strip()}")
+    return "\n\n".join(chunks)
+
+
+def _detect_iterate_target(app_dir: Path) -> str:
+    """Build target for an iteration: match the existing app (cloudflare|plain)."""
+    try:
+        from area.deploy import detect_provider
+
+        return "cloudflare" if detect_provider(app_dir) == "cloudflare" else "plain"
+    except Exception:  # noqa: BLE001
+        return "cloudflare"
+
+
+def compose_amended_requirement(prior_spec: str, change_request: str) -> str:
+    """Fold a natural-language change request INTO the current spec so it re-enters
+    the spec stage as a requirement — the request never goes raw to the build agent.
+    This is what keeps the oracle-loop spine: the box edits the SPEC, not the code."""
+    cr = (change_request or "").strip()
+    if not prior_spec.strip():
+        return cr
+    return (
+        "You are ITERATING on an existing app. Its CURRENT specification (the behavior "
+        "already shipped and asserted by its acceptance tests) is given first. Produce an "
+        "UPDATED spec that keeps all current behavior and acceptance criteria EXCEPT where "
+        "the change request below modifies them; do not silently drop existing criteria.\n\n"
+        "=== CURRENT SPEC (keep unless the change overrides it) ===\n"
+        f"{prior_spec}\n\n"
+        "=== CHANGE REQUEST (apply on top of the current spec) ===\n"
+        f"{cr}"
+    )
+
+
+def iterate_pipeline(
+    name: str,
+    change_request: str,
+    *,
+    target: Optional[str] = None,
+    backend: str = "acp",
+    model: Optional[str] = None,
+    spec_iters: int = 3,
+    build_iters: int = 3,
+    design: bool = False,
+    tdd: bool = True,
+    expected: Optional[str] = None,
+    clarify: bool = False,
+    workspace: Optional[str | Path] = None,
+) -> PipelineResult:
+    """Flow A⁺ — the "command box": amend an EXISTING app from a natural-language
+    change request. The request is folded into the current spec (not handed raw to
+    the agent), the oracle is re-locked (TDD on by default), and the app is rebuilt
+    to green. Governed, not free-form: same spec→lock→build→gate spine as `run`.
+    """
+    name = safe_name(name)
+    root = Path(workspace) if workspace else WORKSPACE
+    prior = _prior_spec_text(root, name)
+    if target is None:
+        target = _detect_iterate_target(root / "apps" / name)
+    amended = compose_amended_requirement(prior, change_request)
+    print(f"[area] iterate: {name} ← {change_request!r}")
+    return run_pipeline(
+        amended, name=name, target=target, backend=backend, model=model,
+        spec_iters=spec_iters, build_iters=build_iters, design=design, tdd=tdd,
+        expected=expected, clarify=clarify, workspace=root,
+    )
+
+
+def intake_pipeline(
+    artifacts: str,
+    *,
+    name: str = "intake",
+    target: str = "cloudflare",
+    backend: str = "acp",
+    model: Optional[str] = None,
+    spec_iters: int = 3,
+    build_iters: int = 3,
+    design: bool = False,
+    tdd: bool = False,
+    expected: Optional[str] = None,
+    clarify: bool = False,
+    workspace: Optional[str | Path] = None,
+) -> PipelineResult:
+    """Hybrid seam: ingest AI-DLC Inception artifacts -> spec -> [design] -> build.
+
+    AI-DLC's Testing Posture becomes acceptance criteria, so `--tdd` locks those
+    as the build oracle. Construction evidence is emitted back to the AI-DLC
+    trail (aidlc_trace.jsonl) for end-to-end audit.
+    """
+    from area.intake import emit_evidence, new_trace_id, spec_from_aidlc
+
+    name = safe_name(name)
+    root = Path(workspace) if workspace else WORKSPACE
+    spec_dir = root / "specs" / name
+    trace_id = new_trace_id()
+    print(f"[area] intake : {artifacts!r} (AI-DLC, trace={trace_id})")
+    spec, acc = spec_from_aidlc(
+        artifacts, spec_dir, expected=expected, backend=backend, model=model,
+        max_iters=spec_iters, trace_id=trace_id,
+    )
+    print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    qs = _clarify_gate(root, name, clarify)
+    if qs:
+        emit_evidence(spec_dir, trace_id, "clarify.needed", {"questions": len(qs)})
+        return _clarify_result(name, spec, acc, root, qs)
+    _maybe_design(name, backend, model, design)
+    res = _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
+    emit_evidence(spec_dir, trace_id, "construction.done", {"passed": res.passed})
+    return res
+
+
+def _resolve_clone_reference(source: str, spec_dir: Path) -> str:
+    """What the parity verifier should look at: the RE stage may have cloned the
+    source into <spec_dir>/_sample; point there if present, else the raw source."""
+    sample = spec_dir / "_sample"
+    return f"{source} (local copy at: {sample})" if sample.exists() else source
 
 
 def clone_pipeline(
@@ -82,6 +300,9 @@ def clone_pipeline(
     spec_iters: int = 3,
     build_iters: int = 3,
     design: bool = False,
+    tdd: bool = False,
+    expected: Optional[str] = None,
+    clarify: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
     """Flow B: reverse-engineer a sample app -> spec -> [design] -> build."""
@@ -90,8 +311,16 @@ def clone_pipeline(
     print(f"[area] re-spec: {source!r} (kind={kind}, rea={use_rea})")
     spec, acc = spec_from_source(
         source, root / "specs" / name, kind=kind, use_rea=use_rea,
-        backend=backend, model=model, max_iters=spec_iters,
+        expected=expected, backend=backend, model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    qs = _clarify_gate(root, name, clarify)
+    if qs:
+        return _clarify_result(name, spec, acc, root, qs)
     _maybe_design(name, backend, model, design)
-    return _build(name, spec, acc, root, target, backend, model, build_iters)
+    # TDD clone: author tests for behavioral PARITY with the reference app.
+    reference = _resolve_clone_reference(source, root / "specs" / name) if tdd else None
+    return _build(
+        name, spec, acc, root, target, backend, model, build_iters, tdd=tdd,
+        reference=reference,
+    )

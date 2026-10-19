@@ -7,10 +7,13 @@ from pathlib import Path
 
 from sse_starlette.sse import EventSourceResponse
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
+from area.web.auth import TokenAuthMiddleware
 from area.web.jobs import MANAGER, app_tree, list_apps, read_spec
+from area.web.upload import save_intake
 
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -24,11 +27,12 @@ async def api_jobs(request):
         body = await request.json()
         kind = body.get("kind")
         params = body.get("params", {})
-        if kind not in ("run", "clone", "deploy"):
+        if kind not in ("run", "clone", "intake", "deploy", "iterate"):
             return JSONResponse({"error": "bad kind"}, status_code=400)
         if not params.get("name"):
             return JSONResponse({"error": "name required"}, status_code=400)
-        required = {"run": "requirement", "clone": "source"}.get(kind)
+        required = {"run": "requirement", "clone": "source",
+                    "intake": "artifacts", "iterate": "instruction"}.get(kind)
         if required and not params.get(required):
             return JSONResponse({"error": f"{required} required"}, status_code=400)
         try:
@@ -37,6 +41,28 @@ async def api_jobs(request):
             return JSONResponse({"error": str(e)}, status_code=400)
         return JSONResponse({"id": jid})
     return JSONResponse(MANAGER.list())
+
+
+async def api_upload(request):
+    """Parse an uploaded requirement doc (PDF/Word/MD) + optional description
+    into intake artifacts. Returns {dir, files, text, chars}."""
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    description = form.get("description") or ""
+    files = [
+        (u.filename, await u.read())
+        for u in form.getlist("file")
+        if getattr(u, "filename", None)
+    ]
+    if not files and not description.strip():
+        return JSONResponse({"error": "upload a file or type a description"},
+                            status_code=400)
+    try:
+        return JSONResponse(save_intake(name, files, description))
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=400)
 
 
 async def api_job(request):
@@ -75,6 +101,15 @@ async def api_stream(request):
     return EventSourceResponse(gen())
 
 
+async def api_job_log(request):
+    """One-shot full log of a job (for snapshot rendering — no live stream)."""
+    logp = MANAGER.log_path(request.path_params["id"])
+    text = logp.read_text(errors="ignore") if logp.exists() else ""
+    from starlette.responses import PlainTextResponse
+
+    return PlainTextResponse(text)
+
+
 async def api_apps(request):
     apps = list_apps()
     urls = {}
@@ -94,12 +129,19 @@ async def api_tree(request):
     return JSONResponse(app_tree(request.path_params["name"]))
 
 
-app = Starlette(routes=[
-    Route("/", index),
-    Route("/api/jobs", api_jobs, methods=["GET", "POST"]),
-    Route("/api/jobs/{id}", api_job),
-    Route("/api/jobs/{id}/stream", api_stream),
-    Route("/api/apps", api_apps),
-    Route("/api/apps/{name}/spec", api_spec),
-    Route("/api/apps/{name}/tree", api_tree),
-])
+app = Starlette(
+    routes=[
+        Route("/", index),
+        Route("/api/upload", api_upload, methods=["POST"]),
+        Route("/api/jobs", api_jobs, methods=["GET", "POST"]),
+        Route("/api/jobs/{id}", api_job),
+        Route("/api/jobs/{id}/stream", api_stream),
+        Route("/api/jobs/{id}/log", api_job_log),
+        Route("/api/apps", api_apps),
+        Route("/api/apps/{name}/spec", api_spec),
+        Route("/api/apps/{name}/tree", api_tree),
+    ],
+    # PR6: the dashboard drives agent runs + deploys, so gate every request on a
+    # token (Jupyter-style). Disable only with AREA_GUI_NO_AUTH=1.
+    middleware=[Middleware(TokenAuthMiddleware)],
+)

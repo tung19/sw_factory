@@ -31,7 +31,7 @@ def _confirm_fn(assume_yes: bool):
 
 def _add_common(sp):
     sp.add_argument("--name", default=None, help="project name / output folder")
-    sp.add_argument("--target", default="cloudflare", choices=["cloudflare", "plain"])
+    sp.add_argument("--target", default="cloudflare", choices=["cloudflare", "vercel", "plain"])
     sp.add_argument("--backend", default="acp", choices=["acp", "llm"])
     sp.add_argument("--model", default=None)
     sp.add_argument("--spec-iters", type=int, default=3)
@@ -42,6 +42,17 @@ def _add_common(sp):
                     help="max steps per agent run (default 80)")
     sp.add_argument("--design", action="store_true",
                     help="run the architect stage (design.md) before build")
+    sp.add_argument("--tdd", action="store_true",
+                    help="TDD: lock independent acceptance tests BEFORE build; "
+                         "the build oracle IS that locked suite (implies verify)")
+    sp.add_argument("--expect", default=None,
+                    help="expected results / examples — authoritative, become "
+                         "acceptance criteria (you supply part of the oracle)")
+    sp.add_argument("--expect-file", default=None,
+                    help="file containing expected results / examples")
+    sp.add_argument("--clarify", action="store_true",
+                    help="stop at spec and surface MATERIAL ambiguities (assumptions) "
+                         "before building, instead of guessing silently")
     sp.add_argument("--verify", action="store_true",
                     help="independent holdout acceptance check after a green build")
     sp.add_argument("--audit", action="store_true", help="security/static gate after build")
@@ -54,6 +65,11 @@ def _add_common(sp):
 
 
 def _finish(res, args) -> int:
+    if getattr(res, "clarify_needed", False):
+        print(f"\n[area] ⏸ CLARIFICATION NEEDED — {res.name} (spec: {res.spec_dir}); "
+              "not built. Confirm/override the assumptions above, then re-run "
+              "(update the requirement or pass --expect).")
+        return 2
     status = "✅ GREEN" if res.passed else "❌ NOT green"
     print(f"\n[area] {status} — {res.name}")
     print(f"[area] spec: {res.spec_dir}\n[area] app : {res.app_dir}")
@@ -65,6 +81,12 @@ def _finish(res, args) -> int:
         g for g in ("verify", "audit", "e2e", "chaos")
         if all_ or getattr(args, g, False)
     ]
+    # --tdd already builds against the locked holdout suite, so the post-build
+    # 'verify' gate is redundant (it would re-author a fresh suite). Skip it.
+    if getattr(args, "tdd", False) and "verify" in gates:
+        gates.remove("verify")
+        print("[area] (--tdd) holdout already enforced as the build oracle — "
+              "skipping redundant 'verify' gate")
     for g in gates:
         print(f"\n[area] === gate: {g} ===")
         if not _run_gate(g, res.name, args):
@@ -109,6 +131,46 @@ def main(argv=None) -> int:
                    help="Tier 2: use REA MCP for deep RE (authorized targets only)")
     _add_common(c)
 
+    ig = sub.add_parser(
+        "intake",
+        help="Hybrid: ingest AI-DLC Inception artifacts -> spec -> app",
+    )
+    ig.add_argument("artifacts", help="path to AI-DLC artifact file or directory")
+    _add_common(ig)
+
+    it = sub.add_parser(
+        "iterate",
+        help="Iterate an existing app: fold a change request into its spec, "
+             "re-lock the oracle (TDD), and rebuild (the 'command box')",
+    )
+    it.add_argument("name", help="existing app name")
+    it.add_argument("request", help="natural-language change request, in quotes")
+    it.add_argument("--target", default=None, choices=["cloudflare", "vercel", "plain"],
+                    help="build target (default: auto-detect from the existing app)")
+    it.add_argument("--no-tdd", action="store_true",
+                    help="do NOT re-lock an independent holdout before building "
+                         "(NOT recommended — drops the oracle guarantee)")
+    it.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    it.add_argument("--model", default=None)
+    it.add_argument("--spec-iters", type=int, default=3)
+    it.add_argument("--build-iters", type=int, default=3)
+    it.add_argument("--budget", type=float, default=None,
+                    help="max USD spend per agent run (cost cap)")
+    it.add_argument("--agent-iters", type=int, default=None)
+    it.add_argument("--design", action="store_true")
+    it.add_argument("--expect", default=None,
+                    help="expected results / examples (authoritative, become AC)")
+    it.add_argument("--expect-file", default=None)
+    it.add_argument("--clarify", action="store_true",
+                    help="stop at spec and surface MATERIAL ambiguities before rebuilding")
+    it.add_argument("--verify", action="store_true")
+    it.add_argument("--audit", action="store_true")
+    it.add_argument("--e2e", action="store_true")
+    it.add_argument("--chaos", action="store_true")
+    it.add_argument("--all", action="store_true", help="run all gates after rebuild")
+    it.add_argument("--deploy", action="store_true")
+    it.add_argument("--yes", action="store_true", help="skip the deploy human gate")
+
     d = sub.add_parser("deploy", help="Deploy a built app to Cloudflare (human gate)")
     d.add_argument("name")
     d.add_argument("--yes", action="store_true", help="skip the human gate")
@@ -127,7 +189,7 @@ def main(argv=None) -> int:
     h.add_argument("--error", default=None, help="error text / stack trace")
     h.add_argument("--error-file", default=None, help="file containing the error/log")
     h.add_argument("--no-rebuild", action="store_true")
-    h.add_argument("--target", default="cloudflare", choices=["cloudflare", "plain"])
+    h.add_argument("--target", default="cloudflare", choices=["cloudflare", "vercel", "plain"])
     h.add_argument("--backend", default="acp", choices=["acp", "llm"])
     h.add_argument("--model", default=None)
     h.add_argument("--spec-iters", type=int, default=3)
@@ -206,28 +268,80 @@ def main(argv=None) -> int:
     if getattr(args, "agent_iters", None) is not None:
         os.environ["AREA_AGENT_ITERS"] = str(args.agent_iters)
 
+    expected = getattr(args, "expect", None)
+    if getattr(args, "expect_file", None):
+        try:
+            expected = Path(args.expect_file).read_text()
+        except OSError as e:
+            print(f"[area] could not read --expect-file: {e}")
+            return 1
+
     if args.cmd == "run":
+        from area import trace
         from area.pipeline import run_pipeline
 
+        trace.start_pipeline(args.name or "app", "run",
+                             inputs={"requirement": args.requirement[:500], "tdd": args.tdd})
         res = run_pipeline(
             args.requirement, name=args.name or "app", target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design,
+            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify,
         )
-        return _finish(res, args)
+        rc = _finish(res, args)
+        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+        return rc
 
     if args.cmd == "clone":
+        from area import trace
         from area.pipeline import clone_pipeline
 
+        trace.start_pipeline(args.name or "clone", "clone",
+                             inputs={"source": args.source, "tdd": args.tdd})
         res = clone_pipeline(
             args.source, name=args.name or "clone", kind=args.kind,
             use_rea=args.rea, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design,
+            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify,
         )
-        return _finish(res, args)
+        rc = _finish(res, args)
+        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+        return rc
+
+    if args.cmd == "iterate":
+        from area import trace
+        from area.pipeline import iterate_pipeline
+
+        tdd = not args.no_tdd
+        args.tdd = tdd  # so _finish's redundant-verify-skip logic sees it
+        trace.start_pipeline(args.name, "iterate",
+                             inputs={"request": args.request[:500], "tdd": tdd})
+        res = iterate_pipeline(
+            args.name, args.request, target=args.target,
+            backend=args.backend, model=args.model,
+            spec_iters=args.spec_iters, build_iters=args.build_iters,
+            design=args.design, tdd=tdd, expected=expected, clarify=args.clarify,
+        )
+        rc = _finish(res, args)
+        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+        return rc
+
+    if args.cmd == "intake":
+        from area import trace
+        from area.pipeline import intake_pipeline
+
+        trace.start_pipeline(args.name or "intake", "intake",
+                             inputs={"artifacts": args.artifacts, "tdd": args.tdd})
+        res = intake_pipeline(
+            args.artifacts, name=args.name or "intake", target=args.target,
+            backend=args.backend, model=args.model,
+            spec_iters=args.spec_iters, build_iters=args.build_iters,
+            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify,
+        )
+        rc = _finish(res, args)
+        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+        return rc
 
     if args.cmd == "deploy":
         from area.deploy import deploy_with_gate
@@ -266,9 +380,20 @@ def main(argv=None) -> int:
     if args.cmd == "gui":
         import uvicorn
 
+        from area.web.auth import auth_disabled, get_token, is_auto_token
         from area.web.server import app as webapp
 
-        print(f"[area] GUI → http://{args.host}:{args.port}")
+        base = f"http://{args.host}:{args.port}"
+        if auth_disabled():
+            print(f"[area] GUI → {base}   ⚠ auth DISABLED (AREA_GUI_NO_AUTH)", flush=True)
+        else:
+            print(f"[area] GUI → {base}/?token={get_token()}", flush=True)
+            if is_auto_token():
+                print("[area] (auto-generated token — pin one with AREA_GUI_TOKEN. "
+                      "Keep this URL private: it grants full control.)", flush=True)
+        if args.host not in ("127.0.0.1", "localhost", "::1"):
+            print(f"[area] ⚠ host {args.host} exposes the dashboard beyond localhost "
+                  "— keep the token secret.", flush=True)
         uvicorn.run(webapp, host=args.host, port=args.port, log_level="warning")
         return 0
 

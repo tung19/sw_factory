@@ -14,6 +14,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest==9.1.1"]
+# Dashboard requirement-doc upload (PDF/Word) parsing.
+gui = ["pypdf>=5", "python-docx>=1"]
+# Optional deep process-visualization: a Langfuse trace per pipeline run, one
+# span per agent run (cost/latency/outcome). Set LANGFUSE_PUBLIC_KEY +
+# LANGFUSE_SECRET_KEY (+ LANGFUSE_HOST for self-host) to activate; no-op otherwise.
+trace = ["langfuse>=2,<3"]
 
 [project.scripts]
 area = "area.cli:main"
@@ -21,6 +27,11 @@ area = "area.cli:main"
 [tool.uv]
 # Reproducibility guard: don't resolve to packages newer than this when locking.
 # exclude-newer = "2026-10-17"
+
+[tool.pytest.ini_options]
+# AREA's own (dogfood) test suite. Pure orchestrator logic — no live agents.
+testpaths = ["tests"]
+addopts = "-q"
 
 [build-system]
 requires = ["hatchling"]

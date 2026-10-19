@@ -14,8 +14,31 @@ from typing import Optional
 
 import yaml
 
-from area.engine import build_agent, command_verifier, run_until
+from area.engine import Verifier, build_agent, command_verifier, run_until
 from area.spec.models import Acceptance, Spec
+
+# TDD preamble: an independent, locked acceptance suite already exists and IS
+# the build oracle. Prepended to the build prompt when target is test-first.
+_TDD_PREAMBLE = """\
+=== TEST-DRIVEN DEVELOPMENT (read first) ===
+Independent acceptance tests ALREADY EXIST and are LOCKED under __tests__/_holdout/
+(see __tests__/_holdout/CONTRACT.md for the exact module paths + function
+signatures they import). They were written by a separate verifier, not by you.
+- Implement APP CODE so those locked tests pass. Honor the contract exactly
+  (same import paths, same function names/signatures). Fixing/refactoring APP
+  CODE is unrestricted — that is your job.
+- You MUST NOT edit, rename, delete, or weaken any TEST under __tests__/_holdout/.
+  The oracle rejects any run where a locked test changed.
+- If (and only if) you are convinced a locked test is itself WRONG — it
+  contradicts the spec or is impossible to satisfy — do NOT edit it. Instead
+  write __tests__/_holdout/_CHALLENGE.md naming the exact test and why it is
+  wrong, then keep fixing everything else. An INDEPENDENT verifier (not you)
+  will adjudicate the challenge and, if valid, correct and re-lock that test.
+- The oracle = production build is green AND `npx vitest run __tests__/_holdout`
+  passes. Keep your OWN scratch tests elsewhere if you want; they are not the gate.
+
+"""
+
 
 # --- Oracles (guarded install + build + tests; exit 0 = pass) ---
 _ORACLE_PLAIN = [
@@ -37,8 +60,18 @@ _COMMON_RULES = """\
 - Wire a minimal UI (app/page.tsx) to those functions using Server Actions.
 - Use Vitest. Under __tests__/, write tests that assert EACH acceptance
   criterion (AC-*) at the logic/API level (no browser/E2E).
-- A simple in-memory store is fine (no external services, no auth, single user).
-Keep it minimal and faithful to the spec. Do not invent scope.
+- PERSISTENCE: if the spec needs data to survive restarts, use a REAL durable
+  store behind a small store INTERFACE (so the domain logic stays pure and the
+  holdout tests run against an in-memory or sqlite test double — no external
+  service at test time). plain target: node:sqlite (built-in) or better-sqlite3.
+  cloudflare target: Cloudflare D1 (SQL) or KV. On cloudflare, keep any
+  node:sqlite store TEST-ONLY so it never enters the build:cf Workers bundle.
+- AUTH: if the spec needs sign-in, implement session-based auth with HASHED
+  passwords, and keep auth + permission checks in a pure, testable module.
+  Enforce per-user data isolation wherever the spec requires it.
+- Add persistence / auth / external services ONLY when the spec calls for them;
+  if the spec is a single-user in-memory tool, keep it that. Do not invent scope.
+Keep it faithful to the spec.
 """
 
 
@@ -108,11 +141,17 @@ def build_app(
     model: Optional[str] = None,
     max_iters: int = 3,
     design: str = "",
+    oracle: Optional[Verifier] = None,
+    tdd: bool = False,
 ) -> bool:
-    """Scaffold + self-correct a Next.js app until build + Vitest pass.
+    """Scaffold + self-correct a Next.js app until the oracle passes.
 
     target="cloudflare" (default) builds a Workers-deployable app (vinext);
     target="plain" builds vanilla Next.js (`next build`).
+
+    By default the oracle is `build + agent's own vitest`. In --tdd mode the
+    caller passes `oracle=` (the locked holdout suite + build) and tdd=True, so
+    the build loop is driven by an independent, unmodifiable test suite.
     """
     app = Path(app_dir)
     app.mkdir(parents=True, exist_ok=True)
@@ -122,10 +161,13 @@ def build_app(
 
     if target == "cloudflare":
         prompt, oracle_cmd = _prompt_cloudflare(spec_yaml, acc_yaml), _ORACLE_CF
-    elif target == "plain":
+    elif target in ("plain", "vercel"):
+        # vercel == vanilla Next.js (`next build`); deploy provider is Vercel.
         prompt, oracle_cmd = _prompt_plain(spec_yaml, acc_yaml), _ORACLE_PLAIN
     else:
-        raise ValueError(f"unknown target: {target!r} (use 'cloudflare' or 'plain')")
+        raise ValueError(
+            f"unknown target: {target!r} (use 'cloudflare', 'vercel', or 'plain')"
+        )
 
     # P6 memory: prepend known pitfalls; design stage (if any) as architecture.
     from area.memory import as_prompt, recall
@@ -135,13 +177,16 @@ def build_app(
     )
     if design:
         prompt = f"=== Architecture (follow this design) ===\n{design}\n\n" + prompt
+    if tdd:
+        prompt = _TDD_PREAMBLE + prompt
     prompt = as_prompt(recall(tags=tags, text=spec_yaml)) + prompt
 
-    oracle = command_verifier(oracle_cmd, cwd=app)
+    oracle = oracle or command_verifier(oracle_cmd, cwd=app)
+    label = f"build:{target}" + (":tdd" if tdd else "")
     agent = build_agent(backend, model=model)
     try:
         passed, _ = run_until(
-            agent, app, prompt, oracle, max_iters=max_iters, label=f"build:{target}"
+            agent, app, prompt, oracle, max_iters=max_iters, label=label
         )
     finally:
         agent.close()
