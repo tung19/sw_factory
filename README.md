@@ -8,6 +8,23 @@ Internal AI software factory. Two entry flows, one shared pipeline:
 **Execution core:** [OpenHands `software-agent-sdk`](https://github.com/OpenHands/software-agent-sdk) (pinned, wrapped by `area/engine`).
 Full design + rationale (and why not MetaGPT / Specora / REA-as-core): see [PLAN.md](PLAN.md).
 
+## Quickstart (local-first)
+
+AREA runs on **your** machine with **your** accounts — your Claude, your
+Cloudflare/Vercel. Nothing (code, credentials) leaves your machine. See
+[docs/adr/0001](docs/adr/0001-local-first-byo-everything.md) for why.
+
+```bash
+git clone <this repo> && cd SW_Factory
+bash scripts/install.sh      # venv + install + environment check
+area doctor                  # re-check anytime (Python/Node/git/Claude/deploy)
+area gui                     # dashboard at http://127.0.0.1:8787 (auto-opens)
+```
+
+Then: log in to **your** Claude (Claude Code keyless, or `export ANTHROPIC_API_KEY=…`),
+and — when you deploy — **your** Cloudflare/Vercel. Export a finished app as its
+own repo with `area export <app> --repo <your-url> --push`.
+
 ## Phase 0 — setup
 
 Prereqs installed so far: `uv`, project skeleton, pinned engine deps.

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>AREA — Nhà máy phần mềm AI</title>
+<meta name="description" content="AREA biến yêu cầu bằng lời thành app chạy được, có kiểm chứng độc lập, deploy thật — chạy trên máy bạn, dùng tài khoản của bạn."/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* Dark, engineering-grade distribution page for a local-first dev tool.
+     Palette: near-black blue-biased neutral + a single blue accent, plus a
+     green reserved for the "oracle green" success semantic. */
+  :root{
+    --bg:#0a0d13; --surface:#11151e; --surface2:#161c27; --border:#242c3a;
+    --fg:#e9eef6; --muted:#8893a6; --accent:#4c8dff; --accent-soft:#1a2740;
+    --green:#3fb27f; --amber:#d8a541;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;
+    padding-left:max(20px,env(safe-area-inset-left,0px));
+    padding-right:max(20px,env(safe-area-inset-right,0px))}
+  .wrap{max-width:980px;margin:0 auto}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,kbd{font-family:var(--mono)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  h1,h2,h3{text-wrap:balance;margin:0;font-weight:700;letter-spacing:-.01em}
+
+  /* nav */
+  nav{display:flex;align-items:center;gap:14px;padding:20px 0;border-bottom:1px solid var(--border)}
+  nav .logo{font-family:var(--mono);font-weight:600;font-size:15px}
+  nav .logo b{color:var(--accent)}
+  nav .sp{flex:1}
+  nav a.nl{color:var(--muted);font-size:14px}
+
+  /* hero */
+  .hero{padding:68px 0 44px}
+  .hero h1{font-size:clamp(34px,6vw,60px);line-height:1.04}
+  .hero .lead{font-size:clamp(17px,2.4vw,21px);color:var(--muted);max-width:60ch;margin:18px 0 0}
+  .hero .flow{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:14px}
+  .hero .flow b{color:var(--fg)}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px;align-items:center}
+  .term{background:#05080e;border:1px solid var(--border);border-radius:10px;padding:14px 16px;
+    font-family:var(--mono);font-size:13.5px;color:var(--fg);display:flex;align-items:center;gap:10px;overflow-x:auto}
+  .term .p{color:var(--green);user-select:none}
+  .btn{display:inline-block;background:var(--accent);color:#06101f;font-weight:600;padding:11px 18px;
+    border-radius:9px;font-size:14px}
+  .btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--border)}
+
+  section{padding:46px 0;border-top:1px solid var(--border)}
+  section h2{font-size:clamp(22px,3.4vw,30px)}
+  section .sub{color:var(--muted);margin-top:8px;max-width:64ch}
+
+  /* BYO table */
+  .byo{width:100%;border-collapse:collapse;margin-top:26px;font-size:15px}
+  .byo td,.byo th{text-align:left;padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:top}
+  .byo th{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .byo td:first-child{color:var(--fg)}
+  .byo .you{color:var(--accent);font-weight:600}
+  .byo .zero{color:var(--green);font-weight:600}
+  .note{margin-top:16px;color:var(--muted);font-size:14px}
+
+  /* pipeline */
+  .pipe{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:26px}
+  @media(max-width:760px){.pipe{grid-template-columns:1fr 1fr}}
+  .stage{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .stage .n{font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .stage h3{font-size:15px;margin-top:6px}
+  .stage p{font-size:13px;color:var(--muted);margin:6px 0 0;line-height:1.5}
+
+  /* commands */
+  .cmds{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:24px}
+  @media(max-width:680px){.cmds{grid-template-columns:1fr}}
+  .cmd{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+  .cmd code{display:block;color:var(--accent);font-size:13.5px;margin-bottom:6px}
+  .cmd span{color:var(--muted);font-size:13.5px}
+
+  /* why cards */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:24px}
+  @media(max-width:760px){.cards{grid-template-columns:1fr}}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px}
+  .card h3{font-size:16px;color:var(--fg)}
+  .card p{font-size:14px;color:var(--muted);margin:8px 0 0}
+
+  footer{padding:36px 0 54px;border-top:1px solid var(--border);color:var(--muted);font-size:14px;
+    display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  footer .sp{flex:1}
+  .badge{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--green);
+    border:1px solid var(--border);border-radius:20px;padding:2px 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav>
+    <span class="logo">⚙︎ <b>AREA</b></span>
+    <span class="sp"></span>
+    <a class="nl" href="#local">Local-first</a>
+    <a class="nl" href="#how">Cách chạy</a>
+    <a class="nl" href="#install">Cài đặt</a>
+  </nav>
+
+  <header class="hero">
+    <div class="eyebrow">Nhà máy phần mềm AI · local-first</div>
+    <h1>Từ một câu mô tả → app chạy thật, có kiểm chứng độc lập.</h1>
+    <p class="lead">AREA biến yêu cầu (hoặc lệnh bằng lời) thành phần mềm: sinh spec, <b>khoá bộ test làm oracle TRƯỚC khi code</b>, build tới khi "oracle xanh", chạy các gate bảo mật/E2E/chaos, rồi deploy. Bằng Claude — <b>chạy trên máy bạn, dùng tài khoản của bạn</b>.</p>
+    <p class="flow">requirement / tài liệu / clone → <b>spec</b> → <b>khoá oracle (TDD)</b> → <b>build</b> → <b>gates</b> → <b>deploy</b></p>
+    <div class="cta">
+      <div class="term"><span class="p">$</span> bash scripts/install.sh&nbsp;&amp;&amp;&nbsp;area gui</div>
+      <a class="btn ghost" href="#install">Hướng dẫn cài</a>
+    </div>
+  </header>
+
+  <section id="local">
+    <div class="eyebrow">Mô hình</div>
+    <h2>Mọi thứ nằm ở phía bạn. Chi phí vận hành ≈ 0.</h2>
+    <p class="sub">Không có server chung, không multi-tenant. Mỗi người chạy AREA trên máy mình với tài khoản của mình — nên cô lập giữa người dùng là <em>tự nhiên</em>, và không ai giữ credential của ai.</p>
+    <table class="byo">
+      <thead><tr><th>Thành phần</th><th>Chạy ở đâu / tài khoản ai</th></tr></thead>
+      <tbody>
+        <tr><td>Agent, source code, workspace</td><td class="you">Máy của bạn</td></tr>
+        <tr><td>LLM — Claude</td><td class="you">Claude của bạn (Claude Code keyless, hoặc API key)</td></tr>
+        <tr><td>Deploy</td><td class="you">Cloudflare / Vercel của bạn</td></tr>
+        <tr><td>Chi phí server / LLM cho người phát hành</td><td class="zero">≈ 0</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Code do AI sinh ra chỉ chạy trên máy của chính người yêu cầu nó — an toàn theo thiết kế. Quyết định kiến trúc đầy đủ: <a href="https://github.com/tung19/sw_factory/blob/main/docs/adr/0001-local-first-byo-everything.md">ADR&nbsp;0001</a>.</p>
+  </section>
+
+  <section id="how">
+    <div class="eyebrow">Xương sống</div>
+    <h2>Vòng hội tụ theo oracle — không để LLM tự chấm.</h2>
+    <p class="sub">Bộ test được một tác nhân độc lập viết và <b>khoá checksum TRƯỚC khi build</b>; tác nhân sửa code không được chạm vào test. Vòng lặp chỉ dừng khi "oracle xanh".</p>
+    <div class="pipe">
+      <div class="stage"><div class="n">01</div><h3>Spec</h3><p>Requirement / tài liệu → spec + acceptance criteria chạy được.</p></div>
+      <div class="stage"><div class="n">02</div><h3>Khoá oracle</h3><p>Viết + khoá holdout độc lập (TDD) làm đích từ iteration&nbsp;0.</p></div>
+      <div class="stage"><div class="n">03</div><h3>Build</h3><p>Agent build → test → fix, lặp tới khi qua bộ test đã khoá.</p></div>
+      <div class="stage"><div class="n">04</div><h3>Gates</h3><p>Security 2-tầng · E2E (Playwright) · chaos · SLSA provenance.</p></div>
+      <div class="stage"><div class="n">05</div><h3>Deploy</h3><p>Provision + deploy lên Cloudflare/Vercel của bạn, có human gate.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Lệnh</div>
+    <h2>Dùng từ dòng lệnh hoặc dashboard.</h2>
+    <div class="cmds">
+      <div class="cmd"><code>area gui</code><span>Dashboard: pipeline trực tiếp + box chat ra lệnh (tự mở trình duyệt).</span></div>
+      <div class="cmd"><code>area run "mô tả app"</code><span>Yêu cầu bằng lời → app, qua oracle-loop.</span></div>
+      <div class="cmd"><code>area iterate &lt;app&gt; "thêm X"</code><span>Ra lệnh sửa: gộp vào spec → khoá lại oracle → rebuild.</span></div>
+      <div class="cmd"><code>area export &lt;app&gt; --repo &lt;url&gt; --push</code><span>Giao app thành repo git riêng của bạn.</span></div>
+      <div class="cmd"><code>area doctor</code><span>Kiểm tra môi trường local (Python/Node/git/Claude).</span></div>
+      <div class="cmd"><code>area clone &lt;git|url&gt;</code><span>Reverse-engineer app mẫu → spec → build-to-parity.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Vì sao local-first</div>
+    <h2>Đổi "một URL tiện" lấy an toàn và sở hữu thật.</h2>
+    <div class="cards">
+      <div class="card"><h3>Cô lập tự nhiên</h3><p>Không server chung → không cần sandbox multi-tenant. Mỗi người là máy của mình.</p></div>
+      <div class="card"><h3>Bạn sở hữu tất cả</h3><p>Workspace, repo (qua <code>area export</code>), và bản deploy đều thuộc tài khoản của bạn.</p></div>
+      <div class="card"><h3>Không giữ secret của ai</h3><p>Key Claude và credential deploy không bao giờ rời máy bạn.</p></div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="eyebrow">Cài đặt</div>
+    <h2>Ba bước, trên máy bạn.</h2>
+    <div class="term" style="margin-top:22px;display:block;line-height:2">
+      <div><span class="p">$</span> git clone &lt;repo&gt; &amp;&amp; cd SW_Factory</div>
+      <div><span class="p">$</span> bash scripts/install.sh&nbsp;&nbsp;<span style="color:var(--muted)"># venv + cài + kiểm tra môi trường</span></div>
+      <div><span class="p">$</span> area gui&nbsp;&nbsp;<span style="color:var(--muted)"># http://127.0.0.1:8787</span></div>
+    </div>
+    <p class="note">Rồi đăng nhập <b>Claude của bạn</b> (Claude Code keyless, hoặc <code>export ANTHROPIC_API_KEY=…</code>) và — khi deploy — <b>Cloudflare/Vercel của bạn</b>.</p>
+  </section>
+
+  <footer>
+    <span class="badge">local-first · BYO-everything</span>
+    <span class="sp"></span>
+    <a href="https://github.com/tung19/sw_factory">GitHub</a>
+    <a href="https://github.com/tung19/sw_factory/blob/main/PLAN.md">Kiến trúc</a>
+    <a href="https://github.com/tung19/sw_factory/blob/main/docs/adr/0001-local-first-byo-everything.md">ADR 0001</a>
+  </footer>
+
+</div>
+</body>
+</html>

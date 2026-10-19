@@ -228,6 +228,8 @@ def main(argv=None) -> int:
     g.add_argument("--port", type=int, default=8787)
     g.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
 
+    sub.add_parser("doctor", help="Check the local setup (Python/Node/git/Claude/deploy creds)")
+
     h = sub.add_parser("heal", help="Fix a built app at the SPEC level from an error, then regen")
     h.add_argument("name")
     h.add_argument("--error", default=None, help="error text / stack trace")
@@ -465,6 +467,24 @@ def main(argv=None) -> int:
         print(out[-1000:])
         print(f"[area] rollback: {'✅ done' if ok else '❌ failed'} — {args.name}")
         return 0 if ok else 1
+
+    if args.cmd == "doctor":
+        from area.doctor import report
+
+        icon = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
+        rows = report()
+        print("[area] doctor — kiểm tra môi trường local (local-first):\n")
+        for name, status, detail, fix in rows:
+            print(f"  {icon.get(status, '?')} {name}" + (f" — {detail}" if detail else ""))
+            if fix:
+                print(f"       ↳ {fix}")
+        fails = [r for r in rows if r[1] == "fail"]
+        print()
+        if fails:
+            print(f"[area] {len(fails)} thứ BẮT BUỘC còn thiếu — cài xong chạy lại `area doctor`.")
+            return 1
+        print("[area] ✅ Sẵn sàng. Chạy:  area gui")
+        return 0
 
     if args.cmd == "gui":
         import uvicorn
