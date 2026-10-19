@@ -130,14 +130,11 @@ async def _exec_job(ws, job: dict) -> None:
     await ws.send(encode(status_msg(jid, "done" if rc == 0 else "failed", rc)))
 
 
-async def _run(coord_url: str, token: str | None) -> None:
+async def _serve_once(url: str, token: str | None) -> None:
+    """One live connection: dial in, announce, then serve jobs/control until the
+    socket closes (raises on any connection problem so the caller can reconnect)."""
     import websockets
-    from urllib.parse import quote
 
-    url = coord_url.rstrip("/") + "/ws/runner"
-    if token:
-        url += "?token=" + quote(token)
-    print(f"[runner] connecting to {coord_url.rstrip('/')}/ws/runner …", flush=True)
     async with websockets.connect(url, max_size=None) as ws:
         await ws.send(encode(hello_msg("runner", token)))
         print("[runner] connected — waiting for jobs (Ctrl-C to stop)", flush=True)
@@ -150,6 +147,36 @@ async def _run(coord_url: str, token: str | None) -> None:
             reply = handle_control(msg)
             if reply is not None:
                 await ws.send(encode(reply))
+
+
+async def _run(coord_url: str, token: str | None, *,
+               max_attempts: int | None = None, _sleep=asyncio.sleep) -> None:
+    """Keep a runner connected. Reconnects with capped exponential backoff after a
+    dropped/closed socket (e.g. a coordinator redeploy) — the UI already auto-
+    reconnects, so now the data plane does too. max_attempts bounds the loop (for
+    tests); None = run until Ctrl-C."""
+    from urllib.parse import quote
+
+    base = coord_url.rstrip("/") + "/ws/runner"
+    url = base + ("?token=" + quote(token) if token else "")
+    delay, attempts = 1.0, 0
+    while True:
+        attempts += 1
+        try:
+            print(f"[runner] connecting to {base} …", flush=True)
+            await _serve_once(url, token)
+            print("[runner] disconnected.", flush=True)
+            delay = 1.0  # we were connected → reset backoff
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — refused/dropped/closed: reconnect
+            print(f"[runner] connection lost: {e}", flush=True)
+        if max_attempts is not None and attempts >= max_attempts:
+            return
+        wait = min(delay, 15.0)
+        print(f"[runner] reconnecting in {wait:.0f}s… (Ctrl-C to stop)", flush=True)
+        await _sleep(wait)
+        delay = min(delay * 2, 15.0)
 
 
 def run_runner(coord_url: str, token: str | None = None) -> int:

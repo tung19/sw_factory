@@ -147,6 +147,24 @@ def test_runner_job_argv_backend_passthrough(monkeypatch):
     assert "--backend" not in R.job_argv_for("deploy", {"name": "t"})
 
 
+def test_runner_reconnects_with_backoff(monkeypatch):
+    import area.runner as R
+
+    calls = {"serve": 0, "sleeps": []}
+
+    async def fake_serve(url, token):
+        calls["serve"] += 1
+        raise ConnectionError("dropped")
+
+    async def fake_sleep(d):
+        calls["sleeps"].append(d)
+
+    monkeypatch.setattr(R, "_serve_once", fake_serve)
+    asyncio.run(R._run("wss://c.example", "tok", max_attempts=3, _sleep=fake_sleep))
+    assert calls["serve"] == 3            # retried after each drop
+    assert calls["sleeps"] == [1.0, 2.0]  # exponential backoff, no sleep after the last
+
+
 def test_runner_chat_hybrid_routes_fast_vs_llm(monkeypatch):
     import area.runner as R
     import area.web.chat as C
