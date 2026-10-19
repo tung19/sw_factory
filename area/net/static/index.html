@@ -15,8 +15,18 @@
   .rdot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block;margin-right:6px}
   .rdot.on{background:var(--green)}
   .wrap{flex:1;display:grid;grid-template-columns:330px 1fr;gap:12px;padding:12px;min-height:0}
-  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
   .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto}
+  /* mobile / narrow: drop the fixed-viewport app layout → normal scrolling page,
+     so the chat thread + composer stack instead of collapsing onto each other */
+  @media(max-width:900px){
+    body{height:auto;display:block}
+    .wrap{grid-template-columns:1fr;height:auto;min-height:0;flex:none}
+    .col{overflow:visible;min-height:0}
+    .fill{flex:none}
+    .thread{max-height:46vh}
+    pre.log{max-height:55vh}
+    #pipe{max-height:none !important}
+  }
   .card{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:13px}
   .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 9px}
   label{display:block;font-size:12px;color:var(--muted);margin:7px 0 3px}
