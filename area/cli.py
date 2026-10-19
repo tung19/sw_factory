@@ -230,6 +230,15 @@ def main(argv=None) -> int:
 
     sub.add_parser("doctor", help="Check the local setup (Python/Node/git/Claude/deploy creds)")
 
+    co = sub.add_parser("coord", help="Run the coordinator (control plane; relays jobs UI↔runner) — ADR 0002")
+    co.add_argument("--host", default="127.0.0.1")
+    co.add_argument("--port", type=int, default=8900)
+
+    rn = sub.add_parser("runner", help="Run the runner on YOUR infra: dial a coordinator + execute jobs locally")
+    rn.add_argument("--connect", required=True, metavar="URL",
+                    help="coordinator URL, e.g. ws://127.0.0.1:8900 or wss://coord.example.com")
+    rn.add_argument("--token", default=None, help="pairing token (used from P2)")
+
     h = sub.add_parser("heal", help="Fix a built app at the SPEC level from an error, then regen")
     h.add_argument("name")
     h.add_argument("--error", default=None, help="error text / stack trace")
@@ -485,6 +494,21 @@ def main(argv=None) -> int:
             return 1
         print("[area] ✅ Sẵn sàng. Chạy:  area gui")
         return 0
+
+    if args.cmd == "coord":
+        import uvicorn
+
+        from area.net.server import app as coapp
+
+        print(f"[area] coordinator → http://{args.host}:{args.port}", flush=True)
+        print(f"[area] runner nối tới:  ws://{args.host}:{args.port}/ws/runner", flush=True)
+        uvicorn.run(coapp, host=args.host, port=args.port, log_level="warning")
+        return 0
+
+    if args.cmd == "runner":
+        from area.runner import run_runner
+
+        return run_runner(args.connect, args.token)
 
     if args.cmd == "gui":
         import uvicorn

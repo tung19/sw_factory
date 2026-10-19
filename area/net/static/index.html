@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AREA Coordinator</title>
+<style>
+  :root{--bg:#0b0e14;--panel:#12161f;--panel2:#161c27;--border:#242c3a;--fg:#e9eef6;
+    --muted:#8893a6;--accent:#4c8dff;--green:#3fb27f;--red:#f0564a;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--border)}
+  header b{font-family:var(--mono)} header .sp{flex:1}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block;margin-right:6px}
+  .dot.on{background:var(--green)}
+  .wrap{max-width:900px;margin:0 auto;padding:18px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  select,input{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--fg);
+    border-radius:8px;padding:9px 11px;font:inherit}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  button{margin-top:12px;background:var(--accent);border:0;color:#06101f;font-weight:600;
+    padding:10px 16px;border-radius:9px;cursor:pointer}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  pre{background:#05080e;border:1px solid var(--border);border-radius:10px;padding:12px;
+    font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;min-height:220px;max-height:60vh;overflow:auto;margin:0}
+  .hint{color:var(--muted);font-size:12px;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <b>⚙︎ AREA Coordinator</b>
+  <span class="sp"></span>
+  <span><span class="dot" id="rdot"></span><span id="rstat" class="hint">runner: offline</span></span>
+</header>
+<div class="wrap">
+  <div class="card">
+    <label>Lệnh (chạy trên runner của bạn — hạ tầng của bạn)</label>
+    <div class="row">
+      <select id="kind">
+        <option value="doctor">doctor — kiểm tra môi trường</option>
+        <option value="run">run — tạo app từ mô tả</option>
+        <option value="iterate">iterate — ra lệnh sửa app</option>
+        <option value="deploy">deploy — deploy app</option>
+        <option value="export">export — giao app thành repo</option>
+      </select>
+      <input id="f1" placeholder="tên app (run/iterate/deploy/export)"/>
+    </div>
+    <input id="f2" placeholder="mô tả (run) / lệnh sửa (iterate) / repo url (export)" style="margin-top:10px"/>
+    <button id="go" onclick="sendJob()">Gửi tới runner</button>
+    <div class="hint">Coordinator chỉ chuyển tiếp. Mọi compute/LLM/deploy chạy trên runner của bạn.</div>
+  </div>
+  <div class="card">
+    <label>Log trực tiếp (từ runner)</label>
+    <pre id="log">— chờ —</pre>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let ws, logBuf='';
+function setRunner(on){$('rdot').classList.toggle('on',on);$('rstat').textContent='runner: '+(on?'online':'offline');$('go').disabled=!on;}
+function append(t){logBuf+=t+'\n';const el=$('log');el.textContent=logBuf;el.scrollTop=el.scrollHeight;}
+function connect(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(proto+'://'+location.host+'/ws/ui');
+  ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(_){return;}
+    if(m.type==='coord'){setRunner(!!m.runner);return;}
+    if(m.type==='log'){append(m.line);return;}
+    if(m.type==='status'){append('— status: '+m.status+(m.exit!=null?' (exit '+m.exit+')':'')+' —');return;}
+  };
+  ws.onclose=()=>{setRunner(false);setTimeout(connect,1500);};
+}
+function sendJob(){
+  if(!ws||ws.readyState!==1)return;
+  const kind=$('kind').value, name=$('f1').value.trim(), v=$('f2').value.trim();
+  const p={};
+  if(kind==='run'){p.requirement=v;p.name=name||'app';p.tdd=true;}
+  else if(kind==='iterate'){p.name=name;p.instruction=v;}
+  else if(kind==='deploy'){p.name=name;}
+  else if(kind==='export'){p.name=name;if(v)p.repo=v,p.push=true;}
+  const id=Math.random().toString(36).slice(2,10);
+  logBuf=''; append('▶ gửi job '+kind+' (id '+id+')…');
+  ws.send(JSON.stringify({type:'job',id,kind,params:p}));
+}
+connect();
+</script>
+</body>
+</html>
