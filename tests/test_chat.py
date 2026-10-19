@@ -23,9 +23,17 @@ def test_classify_question():
         assert C.classify_intent(m) == "question", m
 
 
-def test_classify_bare_imperative_defaults_to_change():
-    # no clear question cue, no build phrase -> treated as a command (confirmed later)
-    assert C.classify_intent("dark mode") == "change"
+def test_classify_greetings_are_smalltalk():
+    for m in ["hello", "hi", "chào bạn", "bạn khoẻ ko", "cảm ơn nhé", "thanks"]:
+        assert C.classify_intent(m) == "smalltalk", m
+
+
+def test_classify_short_unknown_is_unknown_not_build():
+    # a short, unrecognized utterance must NOT become a surprise "create app"
+    assert C.classify_intent("dark mode") == "unknown"
+    assert C.classify_intent("xyz abc") == "unknown"
+    # but a substantive description still reads as a build
+    assert C.classify_intent("một trang web bán cà phê có giỏ hàng") == "build"
 
 
 # ---- answer_from_state (no model call) --------------------------------------
@@ -86,3 +94,21 @@ def test_route_question_answers(monkeypatch):
     _patch_state(monkeypatch, apps=[{"name": "lf_real"}])
     r = C.route("có app nào?", app="")
     assert r["action"] == "answer" and "lf_real" in r["reply"]
+
+
+def test_route_greeting_is_friendly_not_build(monkeypatch):
+    _patch_state(monkeypatch)
+    r = C.route("hello", app="")
+    assert r["action"] == "answer" and "tạo app mới" not in r["reply"]
+
+
+def test_route_unknown_without_app_guides_not_build(monkeypatch):
+    _patch_state(monkeypatch)
+    r = C.route("dark mode", app="")
+    assert r["action"] == "answer" and "chưa rõ" in r["reply"]
+
+
+def test_route_unknown_with_app_iterates(monkeypatch):
+    _patch_state(monkeypatch)
+    r = C.route("dark mode", app="notes_cf")      # short command on a selected app
+    assert r["action"] == "iterate" and r["app"] == "notes_cf"

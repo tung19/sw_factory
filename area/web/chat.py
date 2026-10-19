@@ -34,22 +34,35 @@ _QUESTION = re.compile(
     r"là gì|sao|tại sao|thế nào|bao nhiêu|giải thích|liệt kê|xem|có phải|đang|chưa|rồi chưa)\b",
     re.I,
 )
+# Greetings / small talk — so "hello" / "bạn khoẻ ko" don't fall through to a
+# weird "create app" response.
+_GREET = re.compile(
+    r"^\s*(hi|hello|hey|yo|helo|alo|a lô|ê|chào|xin chào|hế lô)\b|"
+    r"\b(khoẻ|khỏe|how are you|cảm ơn|cám ơn|thank you|thanks|thank|tạm biệt|bye|"
+    r"good morning|good night|ok thôi)\b",
+    re.I,
+)
 
 
 def classify_intent(msg: str) -> str:
-    """Return 'build' | 'change' | 'question'. Build and change win over question
-    cues, because a mis-routed change is confirmed before spending anyway, while a
-    mis-answered question costs nothing."""
+    """Return 'smalltalk' | 'build' | 'change' | 'question' | 'unknown'. Build/change
+    win over question cues (a mis-routed change is confirmed before spending), but an
+    unrecognized SHORT utterance is 'unknown' (answered with guidance) rather than a
+    surprise 'create app'."""
     m = (msg or "").strip()
     if not m:
         return "question"
+    if _GREET.search(m):
+        return "smalltalk"
     if _BUILD.search(m):
         return "build"
     if _CHANGE.search(m):
         return "change"
     if _QUESTION.search(m):
         return "question"
-    return "change"  # a bare imperative ("dark mode") -> treat as a command (confirmed)
+    # Unrecognized: a substantive phrase reads as a software description → build;
+    # a short one is genuinely unclear → guidance, never an auto-build.
+    return "build" if len(m.split()) >= 4 else "unknown"
 
 
 def answer_from_state(msg: str, app: str = "") -> str:
@@ -89,15 +102,29 @@ def answer_from_state(msg: str, app: str = "") -> str:
             "hoặc hỏi về spec/app/job/URL.")
 
 
+_SMALLTALK = ("Chào 👋 Mình là trợ lý của nhà máy AREA (governed, keyless). Mình giúp: "
+              "**mô tả phần mềm** để build, **hỏi** về app/spec/job/URL, hoặc **ra lệnh sửa** "
+              "(chọn app rồi 'thêm/xoá/đổi …'). Bạn muốn làm gì?")
+_HELP = ("Mình chưa rõ ý 🤔 Mình có thể: mô tả một phần mềm để build, trả lời về "
+         "app/spec/job/URL đã có, hoặc nhận lệnh sửa (chọn app trước rồi 'thêm/đổi/xoá …'). "
+         "Bạn diễn đạt rõ hơn giúp mình nhé.")
+
+
 def route(message: str, app: str = "") -> dict:
     """Classify + build the chat response the dashboard acts on."""
     intent = classify_intent(message)
-    if intent == "change" and app:
+    if intent == "smalltalk":
+        return {"action": "answer", "reply": _SMALLTALK}
+    # A change command, or a short unclear utterance WHILE an app is selected, is
+    # treated as an edit on that app (routed through the governed iterate pipeline).
+    if app and intent in ("change", "unknown"):
         return {
             "action": "iterate", "app": app, "instruction": message,
             "reply": (f"→ Sẽ sửa app «{app}» qua iterate: gộp lệnh vào spec → khoá lại oracle "
                       "(TDD) → rebuild + gates. Xác nhận chạy? (~$1–3, 1–3 phút)"),
         }
+    if intent == "unknown":  # no app selected + unclear → guide, don't auto-build
+        return {"action": "answer", "reply": _HELP}
     if intent in ("build", "change"):
         return {
             "action": "run", "instruction": message,
