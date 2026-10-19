@@ -147,6 +147,40 @@ def test_runner_job_argv_backend_passthrough(monkeypatch):
     assert "--backend" not in R.job_argv_for("deploy", {"name": "t"})
 
 
+def test_runner_chat_hybrid_routes_fast_vs_llm(monkeypatch):
+    import area.runner as R
+    import area.web.chat as C
+    import area.web.intake as I
+
+    monkeypatch.setattr(C.J, "list_apps", lambda: [{"name": "a1"}])
+    calls = {"llm": 0}
+
+    def fake_intake(history, message):
+        calls["llm"] += 1
+        return {"reply": "Bạn muốn web hay mobile?", "ready": False, "requirement": None}
+
+    monkeypatch.setattr(I, "intake_turn", fake_intake)
+
+    # a factory-state question → fast, free path (no LLM call)
+    r = R.handle_control(P.chat_msg("1", "có app nào?"))
+    assert r["action"] == "answer" and "a1" in r["reply"] and calls["llm"] == 0
+
+    # a new-app idea → keyless forcing-intake (LLM)
+    r2 = R.handle_control({"type": "chat", "id": "2",
+                           "message": "tôi muốn một app bán cà phê có giỏ hàng", "app": ""})
+    assert calls["llm"] == 1 and r2["action"] == "intake"
+
+
+def test_runner_chat_spec_ready_carries_requirement(monkeypatch):
+    import area.runner as R
+    import area.web.intake as I
+
+    monkeypatch.setattr(I, "intake_turn",
+                        lambda h, m: {"reply": "xong", "ready": True, "requirement": "app X"})
+    r = R.handle_control({"type": "chat", "id": "9", "message": "làm cho tôi app X đi", "app": ""})
+    assert r["action"] == "spec_ready" and r["requirement"] == "app X"
+
+
 def test_runner_folds_uploaded_doc_into_requirement():
     import base64
 

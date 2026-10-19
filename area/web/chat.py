@@ -44,6 +44,19 @@ _GREET = re.compile(
 )
 
 
+_FACTORY_Q = re.compile(
+    r"\b(app|ứng dụng|spec|acceptance|tiêu chí|yêu cầu|job|deploy|url|live|địa chỉ|"
+    r"link|llm|model|claude|mô hình|trạng thái|gate|status|danh sách)\b",
+    re.I,
+)
+
+
+def is_factory_question(msg: str) -> bool:
+    """True if a question is about the factory's OWN state (apps/spec/job/URL/LLM) —
+    answerable instantly + free from stored data, so it needn't hit the LLM."""
+    return bool(_FACTORY_Q.search(msg or ""))
+
+
 def classify_intent(msg: str) -> str:
     """Return 'smalltalk' | 'build' | 'change' | 'question' | 'unknown'. Build/change
     win over question cues (a mis-routed change is confirmed before spending), but an

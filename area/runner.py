@@ -23,10 +23,30 @@ def handle_control(msg: dict) -> dict | None:
     this runner's workspace). Returns a reply dict, or None if not a control msg."""
     t = msg.get("type")
     if t == "chat":
+        from area.web.chat import classify_intent, is_factory_question
         from area.web.chat import route as chat_route
 
-        r = chat_route(str(msg.get("message", "")), str(msg.get("app") or ""))
-        return {"type": "chat_reply", "id": msg.get("id"), **r}
+        message = str(msg.get("message", ""))
+        app = str(msg.get("app") or "")
+        intent = classify_intent(message)
+        # Fast, free, governed paths: greetings, factory-state questions, and a
+        # change command on a selected app. Everything else (a new-app idea, an
+        # unclear ask, free-form talk) goes to the KEYLESS forcing-intake LLM, which
+        # converges on a spec and then hands BACK to the oracle-loop via `run`.
+        fast = (intent == "smalltalk"
+                or (intent == "change" and app)
+                or (intent == "question" and is_factory_question(message)))
+        if fast:
+            return {"type": "chat_reply", "id": msg.get("id"), **chat_route(message, app)}
+        from area.web.intake import intake_turn
+
+        res = intake_turn(msg.get("history") or [], message)
+        out = {"type": "chat_reply", "id": msg.get("id"),
+               "action": "spec_ready" if res["ready"] else "intake",
+               "reply": res["reply"]}
+        if res["ready"]:
+            out["requirement"] = res["requirement"]
+        return out
     if t == "apps":
         from area.web.jobs import list_apps
 

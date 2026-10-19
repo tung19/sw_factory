@@ -148,17 +148,25 @@
 </div>
 <script>
 const $=id=>document.getElementById(id);
-let ws, logBuf='', activeJob=null, RUNNER=false, pendingDoc=null;
+let ws, logBuf='', activeJob=null, RUNNER=false, pendingDoc=null, chatHistory=[], thinking=null;
 const esc=t=>(t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const rid=()=>Math.random().toString(36).slice(2,10);
 
+// Pairing token: a token in the URL wins and is remembered; otherwise reuse the
+// one saved in localStorage so refreshes / new tabs stay on the SAME channel as
+// the runner (instead of minting a fresh channel each visit). Localhost stays
+// tokenless on the 'local' channel.
 const TOKEN=(function(){
   const url=new URL(location.href); let t=(url.searchParams.get('token')||'').trim();
   const local=location.protocol==='file:'||/^(localhost|127\.|0\.0\.0\.0|\[?::1\]?$)/.test(location.hostname);
-  if(!t&&!local){ t=(self.crypto&&crypto.randomUUID)?crypto.randomUUID()
-      :(Date.now().toString(36)+Math.random().toString(36).slice(2)).padEnd(24,'0');
+  if(local) return t||'';
+  const LS='area_coord_token';
+  if(!t){ try{ t=(localStorage.getItem(LS)||'').trim(); }catch(_){}
+    if(!t){ t=(self.crypto&&crypto.randomUUID)?crypto.randomUUID()
+        :(Date.now().toString(36)+Math.random().toString(36).slice(2)).padEnd(24,'0'); }
     url.searchParams.set('token',t); history.replaceState(null,'',url); }
-  return t||'';
+  try{ localStorage.setItem(LS,t); }catch(_){}
+  return t;
 })();
 
 // Connection only toggles the runner indicator + pair hint. Inputs stay usable so
@@ -234,13 +242,28 @@ function addChat(who,text){const t=$('thread'),d=document.createElement('div');d
   const a=document.createElement('div');a.className='mava';a.textContent=who==='user'?'🧑':'✦';
   const b=document.createElement('div');b.className='bubble';b.textContent=text;d.appendChild(a);d.appendChild(b);
   t.appendChild(d);t.scrollTop=t.scrollHeight;return d;}
-function sendChat(){const msg=$('cmsg').value.trim();if(!msg)return;$('cmsg').value='';addChat('user',msg);
+function think(on){if(on){thinking=addChat('bot','✦ …đang nghĩ');}else if(thinking){thinking.remove();thinking=null;}}
+function sendChat(){const msg=$('cmsg').value.trim();if(!msg)return;$('cmsg').value='';addChat('user',msg);chatHistory.push({role:'user',text:msg});
   if(!RUNNER){addChat('bot','Cần runner để hỏi/ra lệnh — xem phần kết nối phía trên.');return;}
-  send({type:'chat',id:rid(),message:msg,app:$('chatApp').value});}
-function onChatReply(m){
-  if(m.action==='answer'){addChat('bot',m.reply);return;}
-  if(m.action==='run'){addChat('bot',m.reply);$('req').value=m.instruction||$('req').value;return;}
-  if(m.action==='iterate'){const d=addChat('bot',m.reply);const b=document.createElement('button');b.className='go';b.textContent='Xác nhận chạy';
+  think(true);
+  send({type:'chat',id:rid(),message:msg,app:$('chatApp').value,history:chatHistory.slice(-10)});}
+function botSay(text){addChat('bot',text);chatHistory.push({role:'assistant',text});}
+function onChatReply(m){think(false);
+  // plain answer (fast factory reply) or an intake clarifying question (keyless LLM)
+  if(m.action==='answer'||m.action==='intake'){botSay(m.reply);return;}
+  // the forcing-intake converged → show the spec + a button that hands it to the LOOP
+  if(m.action==='spec_ready'){const d=addChat('bot',m.reply);chatHistory.push({role:'assistant',text:m.reply});
+    const req=m.requirement||'';
+    const box=document.createElement('div');box.style.cssText='margin-top:7px;font-size:11px;color:var(--muted);white-space:pre-wrap;border-top:1px solid var(--border);padding-top:6px;max-height:140px;overflow:auto';
+    box.textContent=req;
+    const b=document.createElement('button');b.className='go';b.textContent='🏭 Tạo phần mềm với spec này →';
+    b.onclick=()=>{b.disabled=true;$('req').value=req;const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
+      send({type:'job',id,kind:'run',params:{requirement:req,name:($('name').value.trim()||'app'),tdd:true}});
+      addChat('bot','▶ Đã đưa spec vào vòng lặp oracle — xem Chu trình bên phải.');};
+    d.querySelector('.bubble').appendChild(box);d.querySelector('.bubble').appendChild(b);return;}
+  if(m.action==='run'){botSay(m.reply);$('req').value=m.instruction||$('req').value;return;}
+  if(m.action==='iterate'){const d=addChat('bot',m.reply);chatHistory.push({role:'assistant',text:m.reply});
+    const b=document.createElement('button');b.className='go';b.textContent='Xác nhận chạy';
     b.onclick=()=>{b.disabled=true;const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
       send({type:'job',id,kind:'iterate',params:{name:m.app,instruction:m.instruction,tdd:true}});
       addChat('bot','▶ Đang chạy iterate — xem Chu trình bên phải.');};
