@@ -99,11 +99,23 @@
   .modal pre{background:#010409;border:1px solid var(--border);border-radius:7px;padding:10px;
     font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto}
   .empty{color:var(--muted);font-size:13px;padding:8px 0}
-  /* ---- chat bar (full-width, bottom) ---- */
-  .chatbar{margin:0 12px 12px;padding:12px 16px 14px;display:flex;flex-direction:column;gap:10px;flex:none;
+  /* ---- bottom row: chat (left) + apps/export (right) ---- */
+  .bottombar{display:grid;grid-template-columns:1fr 300px;gap:12px;margin:0 12px 12px;flex:none}
+  @media(max-width:1100px){.bottombar{grid-template-columns:1fr}}
+  .sidepanel{display:flex;flex-direction:column;gap:8px;min-height:0;padding:12px 14px}
+  .sidepanel h2{margin:0 0 4px}
+  .applist{display:flex;flex-direction:column;gap:5px;overflow:auto;max-height:168px}
+  .approw{display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:7px;font-size:12.5px}
+  .approw .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .approw .mini{background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:6px;
+    padding:3px 8px;font-size:11px;cursor:pointer}
+  .approw .mini:hover{color:var(--fg);border-color:var(--accent)}
+  .approw .mini.exp{color:var(--accent2);border-color:rgba(88,166,255,.5)}
+  .chatbar{padding:12px 16px 14px;display:flex;flex-direction:column;gap:10px;min-height:0;
     background:var(--chat-bg);border:1px solid var(--border);border-radius:14px;
     box-shadow:0 -8px 28px -16px rgba(0,0,0,.7)}
-  .chatbar-head{display:flex;align-items:center;gap:11px}
+  .chatbar-head{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
   .chatbar-ava{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;
     justify-content:center;font-size:15px;background:rgba(88,166,255,.14);border:1px solid rgba(88,166,255,.42)}
   .chatbar-title{font-size:14px;font-weight:650;color:var(--fg);line-height:1.2}
@@ -240,21 +252,28 @@
   </div>
 </div>
 
-<div class="chatbar">
-  <div class="chatbar-head">
-    <div class="chatbar-ava">💬</div>
-    <div>
-      <div class="chatbar-title">Chat với AREA</div>
-      <div class="chatbar-sub">Ra lệnh bằng lời hoặc hỏi về nhà máy · keyless · lệnh sửa đi qua spec → oracle → rebuild</div>
+<div class="bottombar">
+  <div class="chatbar">
+    <div class="chatbar-head">
+      <div class="chatbar-ava">💬</div>
+      <div style="flex:1;min-width:0">
+        <div class="chatbar-title">Chat với AREA</div>
+        <div class="chatbar-sub">Ra lệnh bằng lời · hỏi về nhà máy · keyless, governed</div>
+      </div>
+      <select id="chatApp"><option value="">— (tùy chọn) app để sửa —</option></select>
     </div>
-    <select id="chatApp"><option value="">— (tùy chọn) app để ra lệnh sửa —</option></select>
+    <div class="thread" id="chatThread">
+      <div class="msg bot"><div class="mava">✦</div><div class="bubble">Gõ lệnh (vd "thêm nút xoá") để sửa app đã chọn qua iterate, hoặc hỏi (vd "spec của notes_cf?", "lf_real deploy chưa?"). Lệnh sửa cần xác nhận trước khi chạy; câu hỏi trả lời ngay từ dữ liệu.</div></div>
+    </div>
+    <div class="composer">
+      <input id="chatMsg" placeholder="Nhắn cho AREA… (Enter để gửi)" onkeydown="if(event.key==='Enter')sendChat()"/>
+      <button class="send" onclick="sendChat()" title="Gửi" aria-label="Gửi">↑</button>
+    </div>
   </div>
-  <div class="thread" id="chatThread">
-    <div class="msg bot"><div class="mava">✦</div><div class="bubble">Gõ lệnh (vd "thêm nút xoá") để sửa app đã chọn ở trên qua iterate, hoặc hỏi (vd "spec của notes_cf?", "có app nào?", "lf_real deploy chưa?"). Lệnh sửa cần xác nhận trước khi chạy; câu hỏi trả lời ngay từ dữ liệu.</div></div>
-  </div>
-  <div class="composer">
-    <input id="chatMsg" placeholder="Nhắn cho AREA… (Enter để gửi)" onkeydown="if(event.key==='Enter')sendChat()"/>
-    <button class="send" onclick="sendChat()" title="Gửi" aria-label="Gửi">↑</button>
+
+  <div class="sidepanel card">
+    <h2>Apps &amp; Export <button class="btn" style="float:right;padding:2px 7px" onclick="refreshApps()">↻</button></h2>
+    <div class="applist" id="appsList"><div class="empty">chưa có app</div></div>
   </div>
 </div>
 </div>
@@ -530,7 +549,35 @@ async function refreshApps(){
   const selEl=$('iterApp'); if(selEl){const cur=selEl.value;
     selEl.innerHTML='<option value="">— chọn app —</option>'+opts; selEl.value=cur;}
   const chEl=$('chatApp'); if(chEl){const cur=chEl.value;
-    chEl.innerHTML='<option value="">— (tùy chọn) app để ra lệnh sửa —</option>'+opts; chEl.value=cur;}
+    chEl.innerHTML='<option value="">— (tùy chọn) app để sửa —</option>'+opts; chEl.value=cur;}
+  // Apps & Export side panel
+  const box=$('appsList'); if(box){
+    if(!apps.length){box.innerHTML='<div class="empty">chưa có app</div>';return;}
+    box.innerHTML='';
+    apps.forEach(a=>{
+      const d=document.createElement('div');d.className='approw';
+      d.innerHTML=`<span class="grow"><b>${esc(a.name)}</b>${a.url?` <a href="${a.url}" target="_blank" onclick="event.stopPropagation()">↗</a>`:''}</span>`;
+      const mk=(txt,fn,cls)=>{const b=document.createElement('button');b.className='mini'+(cls?' '+cls:'');b.textContent=txt;b.onclick=fn;return b;};
+      d.appendChild(mk('spec',()=>viewSpec(a.name)));
+      d.appendChild(mk('export',()=>exportApp(a.name),'exp'));
+      if(a.built) d.appendChild(mk('deploy',()=>deployApp(a.name)));
+      box.appendChild(d);
+    });
+  }
+}
+
+async function exportApp(name){
+  const repo=prompt('Export "'+name+'" thành repo git.\n\nDán URL remote để push (vd https://github.com/ban/'+name+'.git),\nhoặc để trống = chỉ tạo repo git local:','');
+  if(repo===null)return; // cancelled
+  const push=!!repo.trim();
+  const r=await fetch('/api/export',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({app:name,repo:repo.trim()||null,push})});
+  const j=await r.json();
+  if(j.error){alert('Export lỗi: '+j.error);return;}
+  $('mTitle').textContent=name+' — export';
+  $('mBody').innerHTML=`<pre>${esc(j.log||'')}</pre>`+
+    (push?'':'<p class="meta">Đã tạo repo git local. Để push: <code>area export '+esc(name)+' --repo &lt;url&gt; --push</code></p>');
+  $('modal').classList.add('open');
 }
 
 async function viewSpec(name){

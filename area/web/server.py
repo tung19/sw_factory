@@ -82,6 +82,24 @@ async def api_chat(request):
         return JSONResponse({"action": "answer", "reply": f"Lỗi: {e}"})
 
 
+async def api_export(request):
+    """Hand a generated app off as its own git repo (git init + commit; optional
+    remote + push). Factory output becomes a separate, user-owned repository."""
+    body = await request.json()
+    app = safe_name(body.get("app") or "")
+    if not app:
+        return JSONResponse({"error": "app required"}, status_code=400)
+    repo = (body.get("repo") or "").strip() or None
+    push = bool(body.get("push"))
+    try:
+        from area.export import export_app
+
+        ok, log = export_app(app, repo=repo, push=push)
+        return JSONResponse({"ok": ok, "log": log})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 async def api_job(request):
     j = MANAGER.get(request.path_params["id"])
     return JSONResponse(j or {}, status_code=200 if j else 404)
@@ -151,6 +169,7 @@ app = Starlette(
         Route("/", index),
         Route("/api/upload", api_upload, methods=["POST"]),
         Route("/api/chat", api_chat, methods=["POST"]),
+        Route("/api/export", api_export, methods=["POST"]),
         Route("/api/jobs", api_jobs, methods=["GET", "POST"]),
         Route("/api/jobs/{id}", api_job),
         Route("/api/jobs/{id}/stream", api_stream),

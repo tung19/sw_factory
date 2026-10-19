@@ -226,6 +226,7 @@ def main(argv=None) -> int:
     g = sub.add_parser("gui", help="Launch the AREA web GUI")
     g.add_argument("--host", default="127.0.0.1")
     g.add_argument("--port", type=int, default=8787)
+    g.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
 
     h = sub.add_parser("heal", help="Fix a built app at the SPEC level from an error, then regen")
     h.add_argument("name")
@@ -482,6 +483,25 @@ def main(argv=None) -> int:
         if args.host not in ("127.0.0.1", "localhost", "::1"):
             print(f"[area] ⚠ host {args.host} exposes the dashboard beyond localhost "
                   "— keep the token secret.", flush=True)
+        if not args.no_open:
+            import threading
+            import webbrowser
+
+            open_host = "127.0.0.1" if args.host in ("0.0.0.0", "::", "") else args.host
+            url = f"http://{open_host}:{args.port}/"
+            if not auth_disabled():
+                url += f"?token={get_token()}"
+
+            def _open():
+                import time
+
+                time.sleep(1.2)  # let uvicorn bind first
+                try:
+                    webbrowser.open(url)
+                except Exception:  # noqa: BLE001
+                    pass
+
+            threading.Thread(target=_open, daemon=True).start()
         uvicorn.run(webapp, host=args.host, port=args.port, log_level="warning")
         return 0
 
