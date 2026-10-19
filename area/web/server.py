@@ -11,7 +11,9 @@ from starlette.middleware import Middleware
 from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
+from area._util import safe_name
 from area.web.auth import TokenAuthMiddleware
+from area.web.chat import route as chat_route
 from area.web.jobs import MANAGER, app_tree, list_apps, read_spec
 from area.web.upload import save_intake
 
@@ -63,6 +65,21 @@ async def api_upload(request):
         return JSONResponse(save_intake(name, files, description))
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=400)
+
+
+async def api_chat(request):
+    """Governed, keyless chat box: classify the message and return an action
+    (answer from state, or a proposed iterate/run the UI confirms). Never pipes
+    raw instructions to the model — changes flow through the oracle pipeline."""
+    body = await request.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        return JSONResponse({"error": "empty message"}, status_code=400)
+    app = safe_name(body.get("app") or "")
+    try:
+        return JSONResponse(chat_route(msg, app))
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"action": "answer", "reply": f"Lỗi: {e}"})
 
 
 async def api_job(request):
@@ -133,6 +150,7 @@ app = Starlette(
     routes=[
         Route("/", index),
         Route("/api/upload", api_upload, methods=["POST"]),
+        Route("/api/chat", api_chat, methods=["POST"]),
         Route("/api/jobs", api_jobs, methods=["GET", "POST"]),
         Route("/api/jobs/{id}", api_job),
         Route("/api/jobs/{id}/stream", api_stream),

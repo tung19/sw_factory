@@ -9,6 +9,7 @@
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
     --fg:#e6edf3; --muted:#8b949e; --accent:#2f81f7; --green:#3fb950;
     --red:#f85149; --amber:#d29922; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+    --chat-bg:#121a28; --accent2:#58a6ff;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
@@ -16,9 +17,10 @@
   header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
   header .tag{color:var(--muted);font-size:12px}
   html,body{height:100%}
-  .wrap{display:grid;grid-template-columns:330px 350px 1fr;gap:12px;padding:12px;height:calc(100vh - 52px)}
+  .page{display:flex;flex-direction:column;height:calc(100vh - 52px)}
+  .wrap{display:grid;grid-template-columns:340px 1fr 300px;gap:12px;padding:12px 12px 0;flex:1;min-height:0}
   @media(max-width:1100px){.wrap{grid-template-columns:1fr;height:auto}}
-  .col{display:flex;flex-direction:column;gap:12px;min-height:0}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto}
   @media(max-width:1100px){.col{min-height:auto}}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:0}
   .fill{flex:1;min-height:0;display:flex;flex-direction:column}
@@ -59,18 +61,33 @@
   .meta{color:var(--muted);font-size:11px}
   .badge{font-size:11px;padding:1px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
   a{color:var(--accent)}
-  /* pipeline timeline */
-  .pipe{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
-  .stage{flex:1;min-width:92px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin:3px;
-    background:var(--panel2);position:relative}
-  .stage .sname{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-  .stage .sstat{font-size:12px;margin-top:3px;color:var(--fg)}
-  .stage.active{border-color:var(--amber)} .stage.active .sstat{color:var(--amber)}
-  .stage.done{border-color:var(--green)} .stage.done .sstat{color:var(--green)}
-  .stage.failed{border-color:var(--red)} .stage.failed .sstat{color:var(--red)}
-  .stage.retry{border-color:var(--amber)}
-  .pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:20px;margin-left:6px;
-    border:1px solid var(--red);color:var(--red)}
+  /* pipeline visualization — vertical flow of the whole dev cycle */
+  .flow{display:flex;flex-direction:column;gap:0}
+  .pstage{display:flex;gap:12px}
+  .prail{display:flex;flex-direction:column;align-items:center}
+  .pnode{width:28px;height:28px;border-radius:50%;border:2px solid var(--border);display:flex;
+    align-items:center;justify-content:center;font-size:14px;color:var(--muted);background:var(--panel2);flex:none}
+  .pline{flex:1;width:2px;min-height:14px;background:var(--border);margin:3px 0}
+  .pstage:last-child .pline{display:none}
+  .pstage.active .pnode{border-color:var(--amber);color:var(--amber);box-shadow:0 0 0 4px rgba(210,153,34,.12);animation:pulse 1.3s infinite}
+  .pstage.done .pnode{border-color:var(--green);color:var(--green)}
+  .pstage.failed .pnode{border-color:var(--red);color:var(--red)}
+  .pstage.active .pline,.pstage.done .pline{background:linear-gradient(var(--green),var(--border))}
+  .pbody{flex:1;min-width:0;padding-bottom:14px}
+  .ptitle{font-size:13px;font-weight:600;color:var(--muted)}
+  .pstage.active .ptitle{color:var(--amber)} .pstage.done .ptitle,.pstage.failed .ptitle{color:var(--fg)}
+  .pdetail{font-size:12px;color:var(--muted);margin-top:2px}
+  .pchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+  .chip{font-size:11px;padding:1px 9px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
+  .chip.ok{border-color:var(--green);color:var(--green)}
+  .chip.bad{border-color:var(--red);color:var(--red)}
+  .chip.run{border-color:var(--amber);color:var(--amber)}
+  .pipe{max-height:52vh;overflow:auto}
+  /* prominent document-input zone */
+  .dropbig{border:1.5px dashed var(--accent);background:#132135;border-radius:10px;padding:12px;text-align:center;
+    cursor:pointer;color:var(--fg)}
+  .dropbig .big{font-size:12.5px;font-weight:600}.dropbig .sub{font-size:11px;color:var(--muted);margin-top:2px}
+  .dropbig.over{background:#18263c}
   pre.log{background:#010409;border:1px solid var(--border);border-radius:8px;padding:12px;
     font-family:var(--mono);font-size:12px;min-height:160px;overflow:auto;white-space:pre-wrap;margin:0}
   .loghead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
@@ -82,6 +99,38 @@
   .modal pre{background:#010409;border:1px solid var(--border);border-radius:7px;padding:10px;
     font-family:var(--mono);font-size:12px;white-space:pre-wrap;overflow:auto}
   .empty{color:var(--muted);font-size:13px;padding:8px 0}
+  /* ---- chat bar (full-width, bottom) ---- */
+  .chatbar{margin:0 12px 12px;padding:12px 16px 14px;display:flex;flex-direction:column;gap:10px;flex:none;
+    background:var(--chat-bg);border:1px solid var(--border);border-radius:14px;
+    box-shadow:0 -8px 28px -16px rgba(0,0,0,.7)}
+  .chatbar-head{display:flex;align-items:center;gap:11px}
+  .chatbar-ava{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;
+    justify-content:center;font-size:15px;background:rgba(88,166,255,.14);border:1px solid rgba(88,166,255,.42)}
+  .chatbar-title{font-size:14px;font-weight:650;color:var(--fg);line-height:1.2}
+  .chatbar-sub{font-size:11px;color:var(--muted)}
+  .chatbar #chatApp{width:auto;max-width:240px;margin-left:auto;border-radius:8px;padding:6px 10px;font-size:12px}
+  /* conversation */
+  .thread{display:flex;flex-direction:column;gap:9px;max-height:120px;overflow:auto;padding:2px}
+  .msg{display:flex;gap:8px;max-width:78%;font-size:12.5px;line-height:1.5}
+  .msg .mava{width:23px;height:23px;border-radius:50%;flex:none;display:flex;align-items:center;
+    justify-content:center;font-size:11px;background:rgba(88,166,255,.14);border:1px solid rgba(88,166,255,.4);color:var(--accent2)}
+  .msg .bubble{padding:8px 12px;border-radius:13px;white-space:pre-wrap}
+  .msg.bot{align-self:flex-start}
+  .msg.bot .bubble{background:var(--panel);border:1px solid var(--border);border-top-left-radius:4px;color:var(--fg)}
+  .msg.user{align-self:flex-end;flex-direction:row-reverse}
+  .msg.user .bubble{background:var(--accent);color:#fff;border-top-right-radius:4px}
+  .msg.user .mava{background:var(--panel2);border-color:var(--border);color:var(--muted)}
+  .msg .go{display:block;width:100%;margin-top:9px;padding:8px}
+  /* composer — the "type here" affordance */
+  .composer{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:24px;padding:4px 4px 4px 16px}
+  .composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,129,247,.16)}
+  .composer input{flex:1;background:transparent;border:0;color:var(--fg);padding:9px 0;font:inherit;outline:none}
+  .composer input::placeholder{color:var(--muted)}
+  .composer .send{flex:none;width:40px;height:40px;border-radius:50%;border:0;background:var(--accent);
+    color:#fff;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .composer .send:hover{filter:brightness(1.12)} .composer .send:active{transform:scale(.94)}
+  @media(max-width:1100px){.page{height:auto}.thread{max-height:200px}.msg{max-width:92%}}
 </style>
 </head>
 <body>
@@ -89,6 +138,7 @@
   <h1>⚙︎ AREA</h1><span class="tag">AI software factory nội bộ · requirement / doc / clone → spec → <b>TDD</b> → build → gates → deploy</span>
 </header>
 
+<div class="page">
 <div class="wrap">
   <div class="col">
     <div class="card">
@@ -101,21 +151,27 @@
       </div>
 
       <div id="paneRun">
-        <label>Requirement</label>
+        <label>Mô tả phần mềm (requirement)</label>
         <textarea id="requirement" placeholder="VD: web todo tối giản: thêm, liệt kê, đánh dấu xong, xoá…"></textarea>
-        <label>…hoặc đính kèm tài liệu (tùy chọn) — PDF / Word / Markdown</label>
-        <div class="drop" id="dropRun">kéo-thả file vào đây, hoặc bấm để chọn</div>
+        <label>…hoặc upload tài liệu làm input</label>
+        <div class="dropbig" id="dropRun">
+          <div class="big">📄 Kéo-thả tài liệu vào đây (hoặc bấm để chọn)</div>
+          <div class="sub">PDF · Word (.docx) · Markdown · .txt — nội dung thành requirement</div>
+        </div>
         <input type="file" id="fileRun" multiple accept=".pdf,.docx,.md,.markdown,.txt,.yaml,.yml,.json" style="display:none"/>
         <ul class="files" id="filesRun"></ul>
       </div>
 
       <div id="paneIntake" style="display:none">
-        <label>Tài liệu requirement — PDF / Word / Markdown (nhận cả AI-DLC artifacts)</label>
-        <div class="drop" id="dropIntake">kéo-thả file vào đây, hoặc bấm để chọn</div>
+        <label>Tài liệu requirement (nhận cả AI-DLC artifacts)</label>
+        <div class="dropbig" id="dropIntake">
+          <div class="big">📄 Kéo-thả tài liệu vào đây (hoặc bấm để chọn)</div>
+          <div class="sub">PDF · Word (.docx) · Markdown · .txt</div>
+        </div>
         <input type="file" id="fileIntake" multiple accept=".pdf,.docx,.md,.markdown,.txt,.yaml,.yml,.json" style="display:none"/>
         <ul class="files" id="filesIntake"></ul>
-        <label>Mô tả thêm (tùy chọn)</label>
-        <textarea id="descIntake" placeholder="Thêm gì ngoài tài liệu…"></textarea>
+        <label>Mô tả bổ sung — khi tài liệu/spec còn thiếu (tùy chọn)</label>
+        <textarea id="descIntake" placeholder="Thêm ràng buộc / làm rõ gì ngoài tài liệu…"></textarea>
       </div>
 
       <div id="paneClone" style="display:none">
@@ -133,7 +189,8 @@
         <p class="meta" style="margin:6px 0 0">Lệnh được gộp vào <b>spec</b> rồi <b>khóa lại test (oracle)</b> và build — không đưa thẳng cho agent. Target tự nhận theo app. Tên ở dưới bị bỏ qua.</p>
       </div>
 
-      <label>Expected results / ví dụ (tùy chọn — thành acceptance criteria)</label>
+      <div id="sharedControls">
+      <label>Mô tả bổ sung / kết quả mong đợi — khi spec còn thiếu (tùy chọn → thành acceptance criteria)</label>
       <textarea id="expected" placeholder="VD: calcTip(100,15)=15 · user A post note X → user B KHÔNG thấy X"></textarea>
 
       <div class="row">
@@ -152,24 +209,14 @@
         <span class="chk"><input type="checkbox" id="deploy"/><label for="deploy" style="margin:0">deploy</label></span>
       </div>
       <button class="go" id="goBtn" onclick="startJob()">Bắt đầu build</button>
-    </div>
-
-    <div class="card fill">
-      <h2>Apps <button class="btn" style="float:right" onclick="refreshApps()">↻</button></h2>
-      <div class="list" id="apps"><div class="empty">chưa có app nào</div></div>
-    </div>
-  </div>
-
-  <div class="col">
-    <div class="card fill">
-      <h2>Jobs <button class="btn" style="float:right" onclick="refreshJobs()">↻</button></h2>
-      <div class="list" id="jobs"><div class="empty">chưa có job nào</div></div>
+      </div>
     </div>
   </div>
 
   <div class="col">
     <div class="card">
-      <h2>Pipeline <span class="meta" id="pipeTitle">— tiến trình trực tiếp —</span>
+      <h2>Chu trình phát triển — trực tiếp
+        <span class="meta" id="pipeTitle" style="text-transform:none;letter-spacing:0">— chưa chạy —</span>
         <a id="traceLink" href="#" target="_blank" style="float:right;display:none;font-size:12px">Langfuse trace ↗</a></h2>
       <div class="pipe" id="pipe"></div>
     </div>
@@ -184,6 +231,32 @@
       <iframe class="preview" id="preview"></iframe>
     </div>
   </div>
+
+  <div class="col">
+    <div class="card fill">
+      <h2>Jobs <button class="btn" style="float:right" onclick="refreshJobs()">↻</button></h2>
+      <div class="list" id="jobs"><div class="empty">chưa có job nào</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="chatbar">
+  <div class="chatbar-head">
+    <div class="chatbar-ava">💬</div>
+    <div>
+      <div class="chatbar-title">Chat với AREA</div>
+      <div class="chatbar-sub">Ra lệnh bằng lời hoặc hỏi về nhà máy · keyless · lệnh sửa đi qua spec → oracle → rebuild</div>
+    </div>
+    <select id="chatApp"><option value="">— (tùy chọn) app để ra lệnh sửa —</option></select>
+  </div>
+  <div class="thread" id="chatThread">
+    <div class="msg bot"><div class="mava">✦</div><div class="bubble">Gõ lệnh (vd "thêm nút xoá") để sửa app đã chọn ở trên qua iterate, hoặc hỏi (vd "spec của notes_cf?", "có app nào?", "lf_real deploy chưa?"). Lệnh sửa cần xác nhận trước khi chạy; câu hỏi trả lời ngay từ dữ liệu.</div></div>
+  </div>
+  <div class="composer">
+    <input id="chatMsg" placeholder="Nhắn cho AREA… (Enter để gửi)" onkeydown="if(event.key==='Enter')sendChat()"/>
+    <button class="send" onclick="sendChat()" title="Gửi" aria-label="Gửi">↑</button>
+  </div>
+</div>
 </div>
 
 <div class="modal" id="modal" onclick="if(event.target.id==='modal')closeModal()">
@@ -206,6 +279,41 @@ function setTab(t){
   });
   $('goBtn').textContent = t==='clone'?'Bắt đầu clone'
     :(t==='intake'?'Ingest & build':(t==='iterate'?'Ra lệnh & rebuild':'Bắt đầu build'));
+}
+
+// ---- chat box (governed, keyless) ----
+function addChat(who,text){
+  const t=$('chatThread');
+  const d=document.createElement('div');d.className='msg '+who;
+  const a=document.createElement('div');a.className='mava';a.textContent=who==='user'?'🧑':'✦';
+  const b=document.createElement('div');b.className='bubble';b.textContent=text;
+  d.appendChild(a);d.appendChild(b);
+  t.appendChild(d);t.scrollTop=t.scrollHeight;return d;
+}
+async function sendChat(){
+  const inp=$('chatMsg');const msg=inp.value.trim();if(!msg)return;
+  const app=$('chatApp').value;
+  addChat('user',msg);inp.value='';
+  const thinking=addChat('bot','…');
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({message:msg,app})});
+    const j=await r.json();thinking.remove();
+    if(j.error){addChat('bot','Lỗi: '+j.error);return;}
+    if(j.action==='answer'){addChat('bot',j.reply);return;}
+    if(j.action==='run'){addChat('bot',j.reply);$('requirement').value=j.instruction;setTab('run');return;}
+    if(j.action==='iterate'){
+      const d=addChat('bot',j.reply);
+      const b=document.createElement('button');b.className='go';b.textContent='Xác nhận chạy';
+      b.onclick=async()=>{b.disabled=true;b.textContent='Đang khởi động…';
+        const rr=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
+          body:JSON.stringify({kind:'iterate',params:{name:j.app,instruction:j.instruction,tdd:true}})});
+        const jb=await rr.json();
+        if(jb.id){addChat('bot','▶ Đang chạy iterate trên «'+j.app+'» — xem cột "Chu trình phát triển" ở giữa.');
+          openLog(jb.id);refreshJobs();} else addChat('bot','Lỗi: '+(jb.error||'không tạo được job'));};
+      d.querySelector('.bubble').appendChild(b);
+    }
+  }catch(e){thinking.remove();addChat('bot','Lỗi mạng: '+e);}
 }
 function fmtTime(s){if(!s)return'';return new Date(s*1000).toLocaleTimeString();}
 function esc(t){return (t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
@@ -288,37 +396,84 @@ async function deployApp(name){
   const j=await r.json(); if(j.id){openLog(j.id);refreshJobs();}
 }
 
-// ---- pipeline timeline (parsed from the streamed [area] markers) ----
-const STAGES=[['spec','Spec'],['tests','Lock tests'],['build','Build'],['gates','Gates'],['deploy','Deploy']];
-function parseStages(t){
-  const s={spec:'',tests:'',build:'',gates:'',deploy:'',challenge:false,note:{}};
+// ---- pipeline visualization (parsed live from the streamed [area] markers) ----
+function parsePipe(t){
   const has=re=>re.test(t);
-  if(has(/\[area\] (spec|re-spec|intake)\b/)) s.spec='active';
-  if(has(/spec OK:/)) s.spec='done';
-  if(has(/tdd\s*:.*author \+ lock|holdout: author/)) s.tests='active';
-  if(has(/author attempt \d+.*not complete/)) {s.tests='retry';}
-  if(has(/holdout: locked .* file/)) s.tests='done';
-  const m=t.match(/all (\d+) AC covered/); if(m) s.note.tests=m[1]+' AC';
-  if(has(/\[area\] build :/)) s.build='active';
-  if(has(/build GREEN/)) s.build='done';
-  if(has(/NOT green|build NOT green/)) s.build='failed';
-  if(has(/holdout: re-adjudicat|FORBIDDEN/)) s.challenge=true;
-  const gm=[...t.matchAll(/=== gate: (\w+) ===/g)].map(x=>x[1]);
-  if(gm.length){ s.gates='active'; s.note.gates=gm.join(' ');
-    if(has(/gate '\w+' failed/)) s.gates='failed'; }
-  if(has(/Deploy .*PRODUCTION|deploy_with_gate|\[area\] deploy/i)) s.deploy='active';
-  if(has(/workers\.dev|pages\.dev/)) s.deploy='done';
-  if(has(/✅ GREEN —/) && s.gates==='active') s.gates='done';
-  return s;
+  const grp=re=>{const x=t.match(re);return x?x[1]:null;};
+  const push=(a,txt,c)=>a.push({t:txt,c:c||''});
+
+  // 1 · SPEC
+  const spec={status:'',detail:'',chips:[]};
+  if(has(/\[area\]\s*(spec|re-spec|intake)\b/)){spec.status='active';spec.detail='Phân tích requirement/tài liệu → spec…';}
+  const sac=t.match(/spec OK:\s*(\d+)\s*features?,\s*(\d+)\s*AC/);
+  if(sac){spec.status='done';spec.detail='Đã trích spec + acceptance criteria';push(spec.chips,sac[1]+' features');push(spec.chips,sac[2]+' AC','ok');}
+  if(has(/CLARIFICATION NEEDED|⏸/)){spec.status='active';spec.detail='Cần làm rõ — spec còn mơ hồ (clarify)';push(spec.chips,'clarify','run');}
+
+  // 2 · LOCK ORACLE
+  const tests={status:'',detail:'',chips:[]};
+  if(has(/holdout:\s*author|author \+ lock|lock tests/i)){tests.status='active';tests.detail='Viết + khoá holdout (oracle độc lập)…';}
+  const retry=grp(/author attempt (\d+)[^\n]*not complete/);
+  if(retry){tests.status='active';tests.detail='Tác giả test thử lại (attempt '+retry+')…';push(tests.chips,'retry '+retry,'run');}
+  const acov=grp(/all (\d+) AC covered/); if(acov) push(tests.chips,acov+' AC phủ','ok');
+  const locked=grp(/holdout:\s*locked (\d+) file/);
+  if(locked){tests.status='done';tests.detail='Oracle đã khoá — build không sửa được test';tests.chips.unshift({t:locked+' test files',c:'ok'});}
+  if(has(/re-adjudicat|FORBIDDEN|_CHALLENGE/)) push(tests.chips,'challenge','bad');
+
+  // 3 · BUILD
+  const build={status:'',detail:'',chips:[]};
+  if(has(/\[area\]\s*build\s*:/)){build.status='active';build.detail='Agent build → test → fix (lặp tới oracle xanh)…';}
+  const dur=grp(/\[obs\]\s*build[^\n]*?([0-9.]+)s\s*·/); if(dur) push(build.chips,dur+'s');
+  const cost=grp(/\[obs\]\s*build[^\n]*?\$([0-9.]+)/); if(cost) push(build.chips,'$'+cost);
+  if(has(/build GREEN/)){build.status='done';build.detail='Build xanh qua oracle đã khoá';}
+  if(has(/NOT green/)){build.status='failed';build.detail='Build chưa đạt oracle';}
+
+  // 4 · GATES
+  const gates={status:'',detail:'',chips:[]};
+  const seen=[...t.matchAll(/=== gate:\s*(\w+)\s*===/g)].map(x=>x[1]);
+  if(seen.length){gates.status='active';gates.detail='Kiểm chứng độc lập (security · UI · chaos)…';}
+  ['verify','audit','e2e','chaos'].forEach(g=>{
+    if(!seen.includes(g)) return;
+    let c='run';
+    if(new RegExp("\\[area\\]\\s*"+g+":[^\\n]*PASS").test(t)) c='ok';
+    if(new RegExp("gate '"+g+"' failed").test(t)) c='bad';
+    push(gates.chips,g,c);
+  });
+  if(has(/gate '\w+' failed/)) gates.status='failed';
+
+  // 5 · DEPLOY
+  const deploy={status:'',detail:'',chips:[]};
+  if(has(/D1 detected|provision|Postgres|KV\/Redis/i)){deploy.status='active';deploy.detail='Provision hạ tầng + deploy…';}
+  if(has(/provenance (ok|recorded)/i)) push(deploy.chips,'provenance','ok');
+  if(has(/\[area\]\s*deploy|deploy_with_gate|PRODUCTION/i)) deploy.status=deploy.status||'active';
+  const url=grp(/(https:\/\/[A-Za-z0-9.\-]+\.(?:workers\.dev|pages\.dev|vercel\.app)\S*)/);
+  if(url){deploy.status='done';deploy.detail='Đã deploy live';push(deploy.chips,'live ↗','ok');}
+
+  if(has(/✅ GREEN —/)){ if(gates.status==='active')gates.status='done'; if(build.status&&build.status!=='failed')build.status='done'; }
+
+  return [
+    {label:'1 · Spec — requirement/tài liệu → acceptance',...spec},
+    {label:'2 · Khoá oracle — TDD holdout (độc lập)',...tests},
+    {label:'3 · Build — agent loop tới "oracle xanh"',...build},
+    {label:'4 · Gates — verify · audit · e2e · chaos',...gates},
+    {label:'5 · Deploy — provision · provenance · live',...deploy},
+  ];
 }
 function renderPipe(){
-  const s=parseStages(logBuf), box=$('pipe');
-  box.innerHTML=STAGES.map(([k,label])=>{
-    const st=s[k]||''; const stat={active:'đang chạy…',done:'xong',failed:'lỗi',retry:'thử lại…'}[st]||'—';
-    const extra=s.note[k]?` <span class="meta">${esc(s.note[k])}</span>`:'';
-    const pill=(k==='tests'&&s.challenge)?'<span class="pill">challenge</span>':'';
-    return `<div class="stage ${st}"><div class="sname">${label}${pill}</div><div class="sstat">${stat}${extra}</div></div>`;
-  }).join('');
+  const st=parsePipe(logBuf);
+  const done=st.filter(s=>s.status==='done').length;
+  const active=st.find(s=>s.status==='active');
+  $('pipeTitle').textContent = selJob
+    ? (active ? '▶ '+active.label.split('—')[0].trim() : done+'/'+st.length+' stage xong')
+    : '— chưa chạy (chọn/tạo job) —';
+  $('pipe').innerHTML='<div class="flow">'+st.map(s=>{
+    const icon={active:'◉',done:'✓',failed:'✗'}[s.status]||'○';
+    const detail=s.detail || {active:'đang chạy…',done:'xong',failed:'lỗi'}[s.status] || 'chờ…';
+    const chips=(s.chips||[]).map(c=>`<span class="chip ${c.c}">${esc(c.t)}</span>`).join('');
+    return `<div class="pstage ${s.status}">
+      <div class="prail"><div class="pnode">${icon}</div><div class="pline"></div></div>
+      <div class="pbody"><div class="ptitle">${esc(s.label)}</div>
+        <div class="pdetail">${esc(detail)}</div>${chips?`<div class="pchips">${chips}</div>`:''}</div></div>`;
+  }).join('')+'</div>';
 }
 
 function openLog(jid){
@@ -369,27 +524,13 @@ function renderJobs(jobs){
 async function refreshJobs(){const r=await fetch('/api/jobs');renderJobs(await r.json());}
 
 async function refreshApps(){
-  const r=await fetch('/api/apps');const apps=await r.json();const box=$('apps');
-  // keep the Iterate app-selector in sync (preserve the current choice)
+  const r=await fetch('/api/apps');const apps=await r.json();
+  // feed the app selectors (Iterate tab + Chat bar), preserving the current choice
+  const opts=apps.map(a=>`<option value="${esc(a.name)}">${esc(a.name)}</option>`).join('');
   const selEl=$('iterApp'); if(selEl){const cur=selEl.value;
-    selEl.innerHTML='<option value="">— chọn app —</option>'+
-      apps.map(a=>`<option value="${esc(a.name)}">${esc(a.name)}</option>`).join('');
-    selEl.value=cur;}
-  if(!apps.length){box.innerHTML='<div class="empty">no apps yet</div>';return;}
-  box.innerHTML='';
-  apps.forEach(a=>{
-    const d=document.createElement('div');d.className='item';
-    d.innerHTML=`<span class="grow"><b>${esc(a.name)}</b> ${a.built?'<span class="badge">đã build</span>':''}
-      ${a.url?`<a href="${a.url}" target="_blank">live ↗</a>`:''}</span>`;
-    const spec=document.createElement('button');spec.className='btn';spec.textContent='spec';
-    spec.onclick=()=>viewSpec(a.name);d.appendChild(spec);
-    if(a.built){const it=document.createElement('button');it.className='btn';it.textContent='ra lệnh';
-      it.onclick=()=>{setTab('iterate');$('iterApp').value=a.name;$('iterInstruction').focus();};
-      d.appendChild(it);
-      const dep=document.createElement('button');dep.className='btn';dep.textContent='deploy';
-      dep.onclick=()=>deployApp(a.name);d.appendChild(dep);}
-    box.appendChild(d);
-  });
+    selEl.innerHTML='<option value="">— chọn app —</option>'+opts; selEl.value=cur;}
+  const chEl=$('chatApp'); if(chEl){const cur=chEl.value;
+    chEl.innerHTML='<option value="">— (tùy chọn) app để ra lệnh sửa —</option>'+opts; chEl.value=cur;}
 }
 
 async function viewSpec(name){

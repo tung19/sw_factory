@@ -206,6 +206,18 @@ def main(argv=None) -> int:
                     help="re-verify the built artifact against its recorded provenance "
                          "(exit 1 on mismatch/absent)")
 
+    ex = sub.add_parser("export",
+                        help="Hand a generated app off as its OWN git repo (init + commit, optional push)")
+    ex.add_argument("name")
+    ex.add_argument("--out", default=None,
+                    help="copy the app into <out>/<name> before git-init (default: in place)")
+    ex.add_argument("--repo", default=None, help="git remote URL to set as origin")
+    ex.add_argument("--create", action="store_true",
+                    help="create the GitHub repo via `gh repo create` (needs gh)")
+    ex.add_argument("--public", action="store_true", help="with --create, make the repo public")
+    ex.add_argument("--push", action="store_true", help="push to origin after the initial commit")
+    ex.add_argument("-m", "--message", default=None, help="commit message")
+
     rb = sub.add_parser("rollback", help="Roll a deployed app back to its previous Cloudflare version")
     rb.add_argument("name")
     rb.add_argument("--version", default=None, help="specific version id (default: previous)")
@@ -389,6 +401,22 @@ def main(argv=None) -> int:
             return 1
         ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes),
                                  require_provenance=getattr(args, "require_provenance", False))
+        return 0 if ok else 1
+
+    if args.cmd == "export":
+        from area.export import export_app
+
+        try:
+            ok, log = export_app(
+                args.name, out=args.out, repo=args.repo, push=args.push,
+                create=args.create, message=args.message,
+                visibility="public" if args.public else "private",
+            )
+        except RuntimeError as e:
+            print(f"[area] export: ❌ {e}")
+            return 1
+        print(log)
+        print(f"[area] export: {'✅ done' if ok else '❌ failed'} — {args.name}")
         return 0 if ok else 1
 
     if args.cmd == "provenance":
