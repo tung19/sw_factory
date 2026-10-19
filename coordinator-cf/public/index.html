@@ -90,7 +90,7 @@
     <div class="card" id="pairCard" style="display:none;border-color:var(--amber)">
       <h2>Kết nối máy của bạn (1 lần)</h2>
       <div class="hint">Nhà máy chạy trên <b>máy của bạn</b> — dùng <b>Claude của bạn</b> (miễn phí). Cài <b>1 lần</b>, sau đó chỉ cần mở web + bỏ tài liệu, không thao tác gì thêm.</div>
-      <div class="hint warn" id="winNote" style="display:none">⚠ Bạn đang dùng <b>Windows</b>. Runner cần môi trường Unix, nên trên Windows hãy cài <b>WSL</b> (Linux trong Windows) 1 lần: mở PowerShell <i>(Admin)</i> gõ <code>wsl --install</code> → khởi động lại → mở <b>Ubuntu</b> → dán lệnh bên dưới vào đó (KHÔNG dán vào Command Prompt). (Hỗ trợ Windows gốc không-WSL đang phát triển.)</div>
+      <div class="hint warn" id="winNote" style="display:none">⚠ <b>Windows</b>: runner cần môi trường Unix → cài <b>WSL</b> 1 lần. <b>(1)</b> Mở <b>PowerShell (Admin)</b> → <code>wsl --install</code> → khởi động lại. <b>(2)</b> Mở <b>Ubuntu</b> (Start menu), tạo user/mật khẩu. <b>(3)</b> Dán lệnh bên dưới vào <b>Ubuntu</b> (KHÔNG phải Command Prompt) — nó tự cài Python/Node/Claude + chạy. <b>(4)</b> Nếu được nhắc, gõ <code>claude</code> để đăng nhập Claude của bạn. <i>(Windows gốc không-WSL đang phát triển.)</i></div>
       <button class="go" id="dlBtn" onclick="downloadInstaller()" style="margin-top:9px">📥 Tải trợ lý AREA (cài nền tự động)</button>
       <div class="hint" id="dlNote">Tải xong → <b>bấm phải vào file → Open</b> (lần đầu macOS hỏi, chọn Open). Nó tự cài + chạy nền + tự bật khi mở máy. Cần sẵn: <b>Claude Code đã login</b> · git · Python 3.12+.</div>
       <div class="hint" style="margin-top:7px" id="cmdNote">— hoặc dán lệnh này vào Terminal (nếu rành kỹ thuật):</div>

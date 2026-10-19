@@ -30,7 +30,45 @@ while [ $# -gt 0 ]; do
 done
 
 echo "▶ AREA runner bootstrap (chạy trên MÁY CỦA BẠN)"
-command -v git >/dev/null 2>&1 || { echo "❌ cần git"; exit 1; }
+
+# Auto-install prerequisites on apt systems (Ubuntu / WSL / Debian). On macOS they
+# must already exist (brew). Claude Code is installed if missing; its LOGIN stays
+# interactive. sudo prompts on the terminal even under `curl | bash`.
+ensure_prereqs() {
+  local APT=""; command -v apt-get >/dev/null 2>&1 && APT=1
+  has_py() { command -v python3.12 >/dev/null 2>&1 || command -v python3.13 >/dev/null 2>&1; }
+
+  if ! command -v git >/dev/null 2>&1; then
+    [ -n "$APT" ] && { echo "▶ Cài git…"; sudo apt-get update -qq && sudo apt-get install -y -qq git; } \
+      || { echo "❌ cần git (macOS: xcode-select --install)"; exit 1; }
+  fi
+  if ! has_py; then
+    if [ -n "$APT" ]; then
+      echo "▶ Cài Python 3.12…"
+      sudo apt-get install -y -qq software-properties-common >/dev/null 2>&1 || true
+      sudo add-apt-repository -y ppa:deadsnakes/ppa >/dev/null 2>&1 || true
+      sudo apt-get update -qq && sudo apt-get install -y -qq python3.12 python3.12-venv
+    else
+      echo "❌ cần Python 3.12+ (macOS: brew install python@3.12)"; exit 1
+    fi
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    if [ -n "$APT" ]; then
+      echo "▶ Cài Node.js 20…"
+      curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - >/dev/null 2>&1 || true
+      sudo apt-get install -y -qq nodejs
+    else
+      echo "⚠ Chưa có Node.js — cài Node 20+ (macOS: brew install node)."
+    fi
+  fi
+  if ! command -v claude >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    echo "▶ Cài Claude Code…"; npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
+  fi
+  command -v claude >/dev/null 2>&1 \
+    && echo "  (nếu chưa đăng nhập Claude: chạy  claude  rồi làm theo hướng dẫn)" \
+    || echo "⚠ Chưa có Claude Code — cài/đăng nhập để chạy keyless, hoặc dùng AREA_RUNNER_BACKEND=llm + LLM_API_KEY."
+}
+ensure_prereqs
 
 if [ ! -d "$DIR/.git" ]; then
   echo "▶ Clone AREA → $DIR …"

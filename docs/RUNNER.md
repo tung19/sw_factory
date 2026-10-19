@@ -56,7 +56,33 @@ docker run --rm \
   exposed publicly, always use a unique secret token, and run the coordinator with
   `AREA_COORD_REQUIRE_TOKEN=1` so tokenless connections are refused.
 
+## Windows (via WSL)
+
+The runner shells out to `bash` for building and deploying, so on Windows it runs
+inside **WSL** (a real Ubuntu in Windows), not Command Prompt / PowerShell. One-time:
+
+1. **Install WSL** — open **PowerShell (Run as Administrator)**:
+   ```powershell
+   wsl --install
+   ```
+   Restart, then open **Ubuntu** from the Start menu and create a username/password.
+2. **Pair** — paste the one-command from the dashboard's "Kết nối máy của bạn" card
+   **into the Ubuntu window** (not Command Prompt). The bootstrap auto-installs the
+   prerequisites it can (Python 3.12, Node, Claude Code) and connects:
+   ```bash
+   curl -fsSL https://<coordinator-host>/runner.sh | AREA_INSTALL_SERVICE=1 bash -s -- --connect wss://<coordinator-host> --token <your-token>
+   ```
+3. **Log in to Claude** once if prompted: `claude` (keyless), and `npx wrangler login`
+   to deploy to your Cloudflare.
+
+Notes: the `AREA_INSTALL_SERVICE=1` background service needs systemd, which WSL2
+enables by default on recent builds; otherwise the runner runs in the foreground.
+Native (non-WSL) Windows isn't supported yet — the build/deploy paths assume a
+Unix shell.
+
 ## Stop
 
 `Ctrl-C` in the runner terminal (or stop the container). Your jobs stop; your
-machine and accounts are untouched otherwise.
+machine and accounts are untouched otherwise. A background service:
+`launchctl unload ~/Library/LaunchAgents/dev.area.runner.plist` (macOS) or
+`systemctl --user disable --now area-runner` (Linux/WSL).
