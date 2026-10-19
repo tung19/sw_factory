@@ -1,0 +1,36 @@
+# AREA runner — headless / cloud template (Option B in docs/RUNNER.md).
+#
+# A container has no interactive Claude Code login, so run in KEYED mode:
+#   AREA_RUNNER_BACKEND=llm  +  LLM_API_KEY + LLM_MODEL (e.g. an Anthropic key/model).
+# Pass the coordinator URL, pairing token, and your deploy creds at run time.
+#
+#   docker build -f Dockerfile.runner -t area-runner .
+#   docker run --rm \
+#     -e AREA_COORD_URL=wss://<coordinator-host> \
+#     -e AREA_PAIR_TOKEN=<your-token> \
+#     -e AREA_RUNNER_BACKEND=llm -e LLM_API_KEY=<key> -e LLM_MODEL=<model> \
+#     # -e CLOUDFLARE_API_TOKEN=… / VERCEL_TOKEN=…   (when you deploy)
+#     area-runner
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git curl ca-certificates \
+ && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /area
+
+# Runtime deps first (layer cache). requirements.lock was frozen on macOS, so
+# strip the macOS-only pyobjc lines and install the flat lock with --no-deps.
+COPY requirements.lock ./
+RUN grep -ivE '^pyobjc' requirements.lock > requirements.ci.txt \
+ && pip install --no-cache-dir --no-deps -r requirements.ci.txt
+
+COPY . .
+RUN pip install --no-cache-dir -e . --no-deps
+
+ENV OPENHANDS_SUPPRESS_BANNER=1 PYTHONUNBUFFERED=1
+
+# AREA_COORD_URL + AREA_PAIR_TOKEN (+ LLM_API_KEY/LLM_MODEL) provided at run time.
+ENTRYPOINT ["bash","-lc","exec area runner --connect \"$AREA_COORD_URL\" ${AREA_PAIR_TOKEN:+--token \"$AREA_PAIR_TOKEN\"}"]

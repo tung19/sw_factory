@@ -47,10 +47,25 @@ def _env() -> dict:
     return e
 
 
+# Job kinds whose `area` command accepts --backend (acp keyless | llm keyed).
+_BACKEND_KINDS = {"run", "clone", "intake", "iterate"}
+
+
+def job_argv_for(kind: str, params: dict | None) -> list[str]:
+    """`area` args for a job, honoring AREA_RUNNER_BACKEND (headless/container
+    runners set it to 'llm' with LLM_API_KEY+LLM_MODEL; the default keyless 'acp'
+    needs a Claude Code login on the runner)."""
+    argv = job_argv(kind, params)
+    be = (os.getenv("AREA_RUNNER_BACKEND") or "").strip()
+    if be and kind in _BACKEND_KINDS and "--backend" not in argv:
+        argv += ["--backend", be]
+    return argv
+
+
 async def _exec_job(ws, job: dict) -> None:
     jid = job["id"]
     try:
-        argv = job_argv(job["kind"], job.get("params"))
+        argv = job_argv_for(job["kind"], job.get("params"))
     except ValueError as e:
         await ws.send(encode(status_msg(jid, "failed", None)))
         await ws.send(encode(log_msg(jid, f"[runner] bad job: {e}")))

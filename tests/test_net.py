@@ -134,6 +134,19 @@ def test_hub_forwards_chat_and_apps():
     assert len(got) == 2
 
 
+def test_runner_job_argv_backend_passthrough(monkeypatch):
+    import area.runner as R
+
+    monkeypatch.delenv("AREA_RUNNER_BACKEND", raising=False)
+    assert "--backend" not in R.job_argv_for("run", {"requirement": "x"})  # default keyless
+    monkeypatch.setenv("AREA_RUNNER_BACKEND", "llm")
+    a = R.job_argv_for("run", {"requirement": "x"})
+    assert a[a.index("--backend") + 1] == "llm"
+    # kinds without --backend aren't touched
+    assert "--backend" not in R.job_argv_for("doctor", {})
+    assert "--backend" not in R.job_argv_for("deploy", {"name": "t"})
+
+
 def test_runner_handle_control_chat_and_apps(monkeypatch):
     import area.runner as R
     import area.web.chat as C
