@@ -93,12 +93,15 @@ export class CoordChannel {
     const url = new URL(request.url);
     const role = url.pathname.endsWith("/ws/runner") ? "runner" : "ui";
 
-    // One runner per channel: refuse a second rather than silently displacing the
-    // live one (a displaced runner would keep its socket while every job silently
-    // flowed to the newcomer). The close/error handler clears this.runner, so a
-    // runner that drops cleanly frees the slot for a reconnect.
+    // One runner per channel, with TAKEOVER on reconnect. A runner that drops
+    // uncleanly (killed, network cut, DO not yet notified) leaves a stale socket in
+    // this.runner; refusing the newcomer (409) would then lock the channel until the
+    // DO finally notices the old one is dead. Since the token is the real auth (same
+    // token ⇒ same operator reconnecting), a new runner instead explicitly closes
+    // and replaces the old one — logged via the close code, never a silent swap.
     if (role === "runner" && this.runner) {
-      return new Response("runner already connected", { status: 409 });
+      try { this.runner.close(1012, "replaced by a newer runner"); } catch (_) { /* already gone */ }
+      this.runner = null;
     }
 
     const pair = new WebSocketPair();

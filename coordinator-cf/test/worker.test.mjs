@@ -64,14 +64,20 @@ test("relayable: whitelisted jobs with an id pass; everything else is dropped", 
   assert.equal(relayable("not json"), false);
 });
 
-// ---- anti-hijack: one runner per channel ------------------------------------
-test("CoordChannel: a second runner is refused with 409 (no silent takeover)", async () => {
+// ---- one runner per channel, with takeover on reconnect ---------------------
+test("CoordChannel: a reconnecting runner replaces (closes) the stale one", async () => {
   const ch = new CoordChannel({}, {});
-  ch.runner = {}; // a runner is already connected
-  const res = await ch.fetch(new Request("https://c.example.dev/ws/runner", {
-    headers: { Upgrade: "websocket" },
-  }));
-  assert.equal(res.status, 409);
+  let closedCode = null;
+  ch.runner = { close(code) { closedCode = code; } }; // a stale socket is held
+  try {
+    await ch.fetch(new Request("https://c.example.dev/ws/runner", {
+      headers: { Upgrade: "websocket" },
+    }));
+  } catch (_) {
+    // WebSocketPair isn't available under node:test — we only assert the takeover
+    // path (closing the old runner) that runs before the pair is created.
+  }
+  assert.equal(closedCode, 1012); // old runner was closed, not refused with 409
 });
 
 // ---- DoS guards: frame size + rate ------------------------------------------
