@@ -97,3 +97,25 @@ def test_export_missing_app_raises(tmp_path):
     import pytest
     with pytest.raises(RuntimeError):
         E.export_app("nope", workspace=tmp_path)
+
+
+# ---- security: git transport-helper RCE via --repo --------------------------
+
+def test_is_safe_remote_accepts_real_urls_rejects_helpers():
+    for ok in ("https://github.com/u/r.git", "git@github.com:u/r.git",
+               "ssh://git@host/r.git", "git://host/r.git"):
+        assert E._is_safe_remote(ok), ok
+    for bad in ("ext::sh -c 'touch pwned'", "fd::17/foo", "transport::evil",
+                "--upload-pack=sh", "-oProxyCommand=evil", "", "   ",
+                "/tmp/local/path", "file:///etc"):
+        assert not E._is_safe_remote(bad), bad
+
+
+def test_export_refuses_ext_remote_without_running_git(monkeypatch, tmp_path):
+    _mk_app(tmp_path)
+    cmds = _capture(monkeypatch)
+    ok, log = E.export_app("myapp", repo="ext::sh -c 'touch /tmp/pwned'",
+                           push=True, workspace=tmp_path)
+    assert ok is False
+    assert "refusing unsafe git remote" in log
+    assert cmds == []  # guard fires BEFORE any git command runs

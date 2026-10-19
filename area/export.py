@@ -12,6 +12,7 @@ Flow for a real user: describe → AREA builds (local) → review → `area expo
 """
 from __future__ import annotations
 
+import re
 import shlex
 import shutil
 import subprocess
@@ -54,6 +55,25 @@ playwright-report/
 
 def _run(cmd: str, cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", "-lc", cmd], cwd=str(cwd), capture_output=True, text=True)
+
+
+# A push remote must be an ordinary fetch/push URL. git's transport-HELPER syntax
+# (`ext::<cmd>`, `fd::…`) runs an arbitrary command when git touches the remote —
+# so a crafted --repo on a relayed export job would be RCE on the runner. Only
+# allow the real URL forms; reject helpers, leading-dash option injection, and
+# anything else. (shlex.quote stops SHELL injection but not git's own helper.)
+_REMOTE_OK = re.compile(
+    r"^(https?://|git://|ssh://|ftps?://|[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:)", re.I
+)
+
+
+def _is_safe_remote(repo: str) -> bool:
+    r = (repo or "").strip()
+    if not r or r.startswith("-"):
+        return False
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*::", r):  # ext:: / fd:: / <transport>:: helper
+        return False
+    return bool(_REMOTE_OK.match(r))
 
 
 def ensure_gitignore(app_dir: str | Path) -> bool:
@@ -108,6 +128,13 @@ def export_app(
         raise RuntimeError(f"no app at {app}")
 
     log: list[str] = []
+    if repo is not None and not _is_safe_remote(repo):
+        log.append(
+            f"refusing unsafe git remote {repo!r} — only https/ssh/git/scp-like URLs "
+            "are allowed (a transport helper like ext:: can execute arbitrary code)"
+        )
+        return False, "\n".join(log)
+
     dest = app
     if out:
         dest = Path(out).expanduser() / name
