@@ -79,6 +79,8 @@ def job_argv(kind: str, params: dict | None = None) -> list[str]:
             a += ["--target", str(p["target"])]
         if p.get("tdd"):
             a += ["--tdd"]
+        if p.get("deploy"):
+            a += ["--deploy", "--yes"]  # build → gates → deploy to the runner's own infra
         return a
     if kind == "clone":
         return ["clone", str(p.get("source", "")), "--name", str(p.get("name") or "clone")]

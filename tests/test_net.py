@@ -32,6 +32,9 @@ def test_job_argv_kinds():
     assert P.job_argv("doctor") == ["doctor"]
     a = P.job_argv("run", {"requirement": "todo app", "name": "t", "tdd": True})
     assert a[:2] == ["run", "todo app"] and "--name" in a and "--tdd" in a
+    assert "--deploy" not in a  # deploy is opt-in
+    d = P.job_argv("run", {"requirement": "x", "deploy": True})
+    assert "--deploy" in d and "--yes" in d  # build → gates → deploy, headless
     assert P.job_argv("iterate", {"name": "t", "instruction": "add X"}) == ["iterate", "t", "add X"]
     assert P.job_argv("deploy", {"name": "t"}) == ["deploy", "t", "--yes"]
     e = P.job_argv("export", {"name": "t", "repo": "u", "push": True})

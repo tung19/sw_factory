@@ -106,8 +106,11 @@
       <div class="docchip" id="docchip" onclick="setDoc(null)"></div>
       <label>Tên app (tùy chọn)</label>
       <input id="name" placeholder="app"/>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;margin-top:9px;color:var(--fg);font-size:12.5px">
+        <input type="checkbox" id="depl" checked style="width:auto;margin:0"/> 🚀 Deploy lên luôn sau khi build xanh
+      </label>
       <button class="go" id="build" onclick="build()">Tạo phần mềm →</button>
-      <div class="hint" id="buildstat">Tự: spec → oracle (TDD) → build → gates. Dừng ở build xanh (deploy ở “Nâng cao”).</div>
+      <div class="hint" id="buildstat">Tự: spec → oracle (TDD) → build → gates → <b>deploy</b> (ra URL live). Bỏ tick để dừng ở build xanh. Cần runner đã đăng nhập Cloudflare/Vercel.</div>
 
       <details class="adv">
         <summary>Nâng cao — lệnh khác (deploy · export · clone · iterate · doctor)</summary>
@@ -226,7 +229,7 @@ async function build(){const req=$('req').value.trim();
   if(!req && !pendingDoc){stat('Nhập mô tả hoặc chọn tài liệu trước.',true);return;}
   if(!RUNNER){$('pairCard').style.display='';$('pairCard').scrollIntoView({behavior:'smooth',block:'nearest'});stat('Cần runner để chạy — xem hướng dẫn kết nối phía trên. Mô tả của bạn vẫn được giữ.',true);return;}
   $('build').disabled=true;
-  const p={requirement:req,name:$('name').value.trim()||'app',tdd:true};
+  const p={requirement:req,name:$('name').value.trim()||'app',tdd:true,deploy:$('depl').checked};
   if(pendingDoc){p.doc_uid=await sendDocChunks(pendingDoc);}
   const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
   send({type:'job',id,kind:'run',params:p});
