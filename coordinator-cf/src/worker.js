@@ -17,6 +17,9 @@ export const ALLOWED = new Set(["doctor", "run", "clone", "intake", "iterate", "
 
 const RESERVED = "local";   // the single-user loopback channel; never valid when a token is required
 const MIN_TOKEN = 16;       // a pairing secret must have real entropy (randomUUID is 36 chars)
+const MAX_FRAME = 256 * 1024;        // reject absurd frames — the typed protocol is tiny (DoS guard)
+const RATE_N = 60, RATE_MS = 10_000; // a UI may send at most 60 command frames / 10s (a human clicks)
+const REPLAY_MAX = 50;               // replay the last N runner frames to a (re)connecting UI
 
 // Env flags arrive as strings ("1"/"true"/… or "0"/""/absent).
 export function truthy(v) {
@@ -47,14 +50,43 @@ export function relayable(raw) {
   }
 }
 
+// Byte size of a WebSocket frame payload (string or binary).
+export function frameSize(data) {
+  if (typeof data === "string") return data.length;
+  if (data && typeof data.byteLength === "number") return data.byteLength;
+  return 0;
+}
+
+// Admit a frame or drop it. Size is capped in both directions; `rateLimit` adds a
+// sliding-window cap (used for UI command frames, not the runner's bursty logs).
+// `meter` is a small per-connection object the caller keeps across frames.
+export function admitFrame(meter, size, now, rateLimit = true) {
+  if (size > MAX_FRAME) return { ok: false, reason: "oversize" };
+  if (!rateLimit) return { ok: true };
+  meter.hits = (meter.hits || []).filter((t) => now - t < RATE_MS);
+  if (meter.hits.length >= RATE_N) return { ok: false, reason: "rate" };
+  meter.hits.push(now);
+  return { ok: true };
+}
+
+// Append to a bounded ring buffer (oldest dropped), preserving order.
+export function ring(arr, item, max) {
+  const out = arr.length >= max ? arr.slice(arr.length - max + 1) : arr.slice();
+  out.push(item);
+  return out;
+}
+
 // One channel = one DO instance. Holds the runner + its UIs in memory and relays
-// between them (the JS port of area/net/hub.py).
+// between them (the JS port of area/net/hub.py). The replay buffer is in-memory:
+// it catches a UI up across a reconnect (tab reload, flaky wifi) but NOT across a
+// DO eviction/redeploy — the relay is at-most-once across the DO's lifecycle.
 export class CoordChannel {
   constructor(state, env) {
     this.state = state;
     this.env = env;
     this.runner = null;
     this.uis = new Set();
+    this.recent = []; // bounded replay buffer of the live job's recent runner frames
   }
 
   async fetch(request) {
@@ -73,21 +105,29 @@ export class CoordChannel {
     const client = pair[0];
     const server = pair[1];
     server.accept();
+    const meter = {}; // per-connection rate/size meter
 
     if (role === "runner") {
       this.runner = server;
+      this.recent = []; // fresh runner session → drop any stale replay buffer
       this._bcast(JSON.stringify({ type: "coord", runner: true }));
     } else {
       this.uis.add(server);
       server.send(JSON.stringify({ type: "coord", runner: !!this.runner }));
+      // Catch a (re)connecting UI up on the live job's recent output.
+      for (const f of this.recent) { try { server.send(f); } catch (_) { /* dead ui */ } }
     }
 
     server.addEventListener("message", (ev) => {
+      // DoS guards: cap frame size in both directions; rate-limit UI command
+      // frames (not the runner's legitimately bursty log stream).
+      if (!admitFrame(meter, frameSize(ev.data), Date.now(), role === "ui").ok) return;
       if (role === "ui") {
         if (relayable(ev.data) && this.runner) {
           try { this.runner.send(ev.data); } catch (_) { /* dead runner */ }
         }
       } else {
+        this.recent = ring(this.recent, ev.data, REPLAY_MAX); // buffer for replay
         this._bcast(ev.data); // runner output → this channel's UIs only
       }
     });

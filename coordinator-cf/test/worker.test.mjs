@@ -6,7 +6,7 @@
 // Run: node --test coordinator-cf/test/   (also `npm test` in this dir)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { truthy, channelFor, relayable, ALLOWED, CoordChannel } from "../src/worker.js";
+import { truthy, channelFor, relayable, ALLOWED, CoordChannel, frameSize, admitFrame, ring } from "../src/worker.js";
 
 const u = (qs) => new URL("https://c.example.dev/ws/ui" + qs);
 
@@ -71,4 +71,45 @@ test("CoordChannel: a second runner is refused with 409 (no silent takeover)", a
     headers: { Upgrade: "websocket" },
   }));
   assert.equal(res.status, 409);
+});
+
+// ---- DoS guards: frame size + rate ------------------------------------------
+test("frameSize: string length and binary byteLength", () => {
+  assert.equal(frameSize("hello"), 5);
+  assert.equal(frameSize(new ArrayBuffer(12)), 12);
+  assert.equal(frameSize(undefined), 0);
+});
+
+test("admitFrame: oversize is dropped in either direction", () => {
+  const big = 256 * 1024 + 1;
+  assert.equal(admitFrame({}, big, 0, true).ok, false);
+  assert.equal(admitFrame({}, big, 0, false).ok, false); // runner too
+  assert.equal(admitFrame({}, 100, 0, false).ok, true);
+});
+
+test("admitFrame: UI rate cap trips after the window fills, runner is uncapped", () => {
+  const meter = {};
+  let last;
+  for (let i = 0; i < 65; i++) last = admitFrame(meter, 10, 1000 + i, true);
+  assert.equal(last.ok, false);           // 61st+ within the window is dropped
+  assert.equal(last.reason, "rate");
+  // the runner stream is never rate-limited (bursty logs)
+  const rmeter = {};
+  let ok = true;
+  for (let i = 0; i < 500; i++) ok = ok && admitFrame(rmeter, 10, 1000 + i, false).ok;
+  assert.equal(ok, true);
+});
+
+test("admitFrame: the rate window slides (old hits expire)", () => {
+  const meter = {};
+  for (let i = 0; i < 60; i++) admitFrame(meter, 10, 1000 + i, true); // fill the window
+  assert.equal(admitFrame(meter, 10, 1060, true).ok, false);          // still full
+  assert.equal(admitFrame(meter, 10, 1000 + 10_001, true).ok, true);  // 10s later → room
+});
+
+// ---- replay buffer: bounded, ordered ----------------------------------------
+test("ring: caps length, keeps the most recent in order", () => {
+  let buf = [];
+  for (let i = 0; i < 5; i++) buf = ring(buf, "f" + i, 3);
+  assert.deepEqual(buf, ["f2", "f3", "f4"]);
 });

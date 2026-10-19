@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AREA Coordinator</title>
+<style>
+  :root{--bg:#0b0e14;--panel:#12161f;--panel2:#161c27;--border:#242c3a;--fg:#e9eef6;
+    --muted:#8893a6;--accent:#4c8dff;--accent2:#7fb0ff;--green:#3fb27f;--red:#f0564a;--amber:#d8a541;
+    --chat-bg:#121a28;--mono:ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;height:100vh;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border);flex:none}
+  header b{font-family:var(--mono)} header .sp{flex:1} header .sub{color:var(--muted);font-size:12px}
+  .rdot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block;margin-right:6px}
+  .rdot.on{background:var(--green)}
+  .wrap{flex:1;display:grid;grid-template-columns:330px 1fr;gap:12px;padding:12px;min-height:0}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto}
+  /* mobile / narrow: drop the fixed-viewport app layout → normal scrolling page,
+     so the chat thread + composer stack instead of collapsing onto each other */
+  @media(max-width:900px){
+    body{height:auto;display:block}
+    .wrap{grid-template-columns:1fr;height:auto;min-height:0;flex:none}
+    .col{overflow:visible;min-height:0}
+    .fill{flex:none}
+    .thread{max-height:46vh}
+    pre.log{max-height:55vh}
+    #pipe{max-height:none !important}
+  }
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:13px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 9px}
+  label{display:block;font-size:12px;color:var(--muted);margin:7px 0 3px}
+  select,input,textarea{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--fg);border-radius:7px;padding:8px 10px;font:inherit}
+  textarea{resize:vertical;min-height:46px}
+  button.go{margin-top:11px;width:100%;background:var(--accent);border:0;color:#06101f;font-weight:600;padding:9px;border-radius:8px;cursor:pointer}
+  button.go:disabled{opacity:.5;cursor:not-allowed}
+  .fill{flex:1;min-height:0;display:flex;flex-direction:column}
+  .fill pre{flex:1;min-height:0;overflow:auto}
+  pre.log{background:#05080e;border:1px solid var(--border);border-radius:9px;padding:11px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin:0;min-height:120px}
+  /* pipeline flow */
+  .flow{display:flex;flex-direction:column}
+  .pstage{display:flex;gap:11px}
+  .prail{display:flex;flex-direction:column;align-items:center}
+  .pnode{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--muted);background:var(--panel2);flex:none}
+  .pline{flex:1;width:2px;min-height:12px;background:var(--border);margin:3px 0}
+  .pstage:last-child .pline{display:none}
+  .pstage.active .pnode{border-color:var(--amber);color:var(--amber);animation:pulse 1.3s infinite}
+  .pstage.done .pnode{border-color:var(--green);color:var(--green)}
+  .pstage.failed .pnode{border-color:var(--red);color:var(--red)}
+  @keyframes pulse{50%{opacity:.4}}
+  .pbody{flex:1;min-width:0;padding-bottom:12px}
+  .ptitle{font-size:12.5px;font-weight:600;color:var(--muted)}
+  .pstage.active .ptitle{color:var(--amber)} .pstage.done .ptitle,.pstage.failed .ptitle{color:var(--fg)}
+  .pdetail{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .pchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+  .chip{font-size:11px;padding:1px 8px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
+  .chip.ok{border-color:var(--green);color:var(--green)} .chip.bad{border-color:var(--red);color:var(--red)} .chip.run{border-color:var(--amber);color:var(--amber)}
+  /* chat */
+  .thread{display:flex;flex-direction:column;gap:8px;max-height:200px;overflow:auto;padding:6px;background:var(--panel2);border:1px solid var(--border);border-radius:8px}
+  .msg{display:flex;gap:7px;max-width:88%;font-size:12.5px;line-height:1.45}
+  .msg .mava{width:21px;height:21px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;background:rgba(127,176,255,.15);border:1px solid rgba(127,176,255,.4);color:var(--accent2)}
+  .msg .bubble{padding:7px 11px;border-radius:12px;white-space:pre-wrap}
+  .msg.bot .bubble{background:var(--panel);border:1px solid var(--border)}
+  .msg.user{align-self:flex-end;flex-direction:row-reverse} .msg.user .bubble{background:var(--accent);color:#fff}
+  .msg .go{margin-top:7px;padding:6px 12px;width:auto;display:inline-block}
+  .composer{display:flex;gap:7px;margin-top:8px}
+  .composer input{flex:1} .composer button{flex:none;background:var(--accent);border:0;color:#06101f;font-weight:600;border-radius:8px;padding:0 15px;cursor:pointer}
+  .hint{color:var(--muted);font-size:11.5px;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <b>⚙︎ AREA Coordinator</b>
+  <span class="sub">điều phối · mọi compute/LLM/deploy chạy trên runner (hạ tầng của bạn)</span>
+  <span class="sp"></span>
+  <span><span class="rdot" id="rdot"></span><span class="sub" id="rstat">runner: offline</span></span>
+</header>
+<div class="wrap">
+  <div class="col">
+    <div class="card" id="pairCard" style="display:none;border-color:var(--amber)">
+      <h2>Kết nối runner của bạn</h2>
+      <div class="hint">Chưa có runner cho kênh này. Chạy lệnh sau trên máy/cloud của bạn (cần cài AREA — xem docs/RUNNER.md):</div>
+      <pre class="log" id="pairCmd" style="min-height:0;margin-top:8px;user-select:all"></pre>
+    </div>
+    <div class="card">
+      <h2>Tạo job (chạy trên runner)</h2>
+      <label>Loại</label>
+      <select id="kind" onchange="syncForm()">
+        <option value="doctor">doctor — kiểm môi trường</option>
+        <option value="run">run — tạo app từ mô tả</option>
+        <option value="iterate">iterate — ra lệnh sửa</option>
+        <option value="clone">clone — RE app mẫu</option>
+        <option value="deploy">deploy — deploy app</option>
+        <option value="export">export — giao app thành repo</option>
+      </select>
+      <div id="fName" style="display:none"><label id="lName">Tên app</label><input id="name" placeholder="myapp"/></div>
+      <div id="fBig" style="display:none"><label id="lBig">Mô tả</label><textarea id="big" placeholder="…"></textarea></div>
+      <button class="go" id="go" onclick="sendJob()" disabled>Gửi tới runner</button>
+      <div class="hint">Runner chạy bằng Claude + Cloudflare/Vercel của bạn.</div>
+    </div>
+    <div class="card fill">
+      <h2>💬 Chat với runner</h2>
+      <label>App (tùy chọn, để ra lệnh sửa)</label>
+      <select id="chatApp"><option value="">— app —</option></select>
+      <div class="thread" id="thread" style="margin-top:7px"><div class="msg bot"><div class="mava">✦</div><div class="bubble">Hỏi (vd "có app nào?", "spec của …?") hoặc ra lệnh ("thêm nút xoá" + chọn app). Lệnh sửa cần xác nhận.</div></div></div>
+      <div class="composer"><input id="cmsg" placeholder="nhắn… (Enter)" onkeydown="if(event.key==='Enter')sendChat()" disabled/><button id="csend" onclick="sendChat()" disabled>Gửi</button></div>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card">
+      <h2>Chu trình phát triển — trực tiếp <span class="sub" id="ptitle" style="text-transform:none;letter-spacing:0">— chưa chạy —</span></h2>
+      <div id="pipe" style="max-height:48vh;overflow:auto"></div>
+    </div>
+    <div class="card fill">
+      <h2>Log trực tiếp (từ runner)</h2>
+      <pre class="log" id="log">— chọn lệnh, bấm Gửi —</pre>
+    </div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let ws, logBuf='', activeJob=null;
+const esc=t=>(t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// The hosted coordinator requires a pairing token (it has no shared channel). If
+// none is in the URL and we're not on a loopback dev host, mint a strong one and
+// put it in the URL so it's bookmarkable and the pairing hint carries it. On
+// localhost (the Python single-user server) we stay tokenless on 'local'.
+const TOKEN=(function(){
+  const url=new URL(location.href); let t=(url.searchParams.get('token')||'').trim();
+  const local=location.protocol==='file:'||/^(localhost|127\.|0\.0\.0\.0|\[?::1\]?$)/.test(location.hostname);
+  if(!t&&!local){ t=(self.crypto&&crypto.randomUUID)?crypto.randomUUID()
+      :(Date.now().toString(36)+Math.random().toString(36).slice(2)).padEnd(24,'0');
+    url.searchParams.set('token',t); history.replaceState(null,'',url); }
+  return t||'';
+})();
+
+function setRunner(on){$('rdot').classList.toggle('on',on);$('rstat').textContent='runner: '+(on?'online':'offline');
+  for(const b of [$('go'),$('cmsg'),$('csend')]) b.disabled=!on;
+  $('pairCard').style.display=on?'none':'';
+  if(!on){const wsp=location.protocol==='https:'?'wss':'ws';
+    $('pairCmd').textContent='area runner --connect '+wsp+'://'+location.host+(TOKEN?' --token '+TOKEN:'');}
+  if(on) req({type:'apps'});}
+function req(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
+function connect(){const p=location.protocol==='https:'?'wss':'ws';
+  const q=TOKEN?'?token='+encodeURIComponent(TOKEN):'';
+  ws=new WebSocket(p+'://'+location.host+'/ws/ui'+q);
+  ws.onmessage=onMsg;ws.onclose=()=>{setRunner(false);setTimeout(connect,1500);};}
+function onMsg(e){let m;try{m=JSON.parse(e.data)}catch(_){return;}
+  if(m.type==='coord'){setRunner(!!m.runner);return;}
+  if(m.type==='apps'){fillApps(m.apps||[]);return;}
+  if(m.type==='log'){logBuf+=m.line+'\n';renderLog();renderPipe();return;}
+  if(m.type==='status'){logBuf+='— status: '+m.status+(m.exit!=null?' (exit '+m.exit+')':'')+' —\n';renderLog();renderPipe();if(m.status!=='running')req({type:'apps'});return;}
+  if(m.type==='chat_reply'){onChatReply(m);return;}
+}
+function fillApps(apps){const opts='<option value="">— app —</option>'+apps.map(a=>`<option>${esc(a)}</option>`).join('');
+  for(const id of ['chatApp']){const el=$(id);if(el){const c=el.value;el.innerHTML=opts;el.value=c;}}}
+function renderLog(){const el=$('log');el.textContent=logBuf;el.scrollTop=el.scrollHeight;}
+
+function syncForm(){const k=$('kind').value;
+  const needName=['run','iterate','deploy','export'].includes(k), needBig=['run','iterate','clone','export'].includes(k);
+  $('fName').style.display=needName?'':'none';$('fBig').style.display=needBig?'':'none';
+  $('lBig').textContent={run:'Mô tả phần mềm',iterate:'Lệnh sửa',clone:'Nguồn (git/url/path)',export:'Repo URL (push)'}[k]||'Mô tả';
+  $('lName').textContent=k==='clone'?'Tên (tùy chọn)':'Tên app';}
+function sendJob(){const k=$('kind').value,name=$('name').value.trim(),v=$('big').value.trim(),p={};
+  if(k==='run'){p.requirement=v;p.name=name||'app';p.tdd=true;}
+  else if(k==='iterate'){p.name=name;p.instruction=v;}
+  else if(k==='clone'){p.source=v;p.name=name||'clone';}
+  else if(k==='deploy'){p.name=name;}
+  else if(k==='export'){p.name=name;if(v){p.repo=v;p.push=true;}}
+  const id=Math.random().toString(36).slice(2,10);activeJob=id;logBuf='';renderLog();renderPipe();
+  req({type:'job',id,kind:k,params:p});}
+
+// chat
+function addChat(who,text){const t=$('thread'),d=document.createElement('div');d.className='msg '+who;
+  const a=document.createElement('div');a.className='mava';a.textContent=who==='user'?'🧑':'✦';
+  const b=document.createElement('div');b.className='bubble';b.textContent=text;d.appendChild(a);d.appendChild(b);
+  t.appendChild(d);t.scrollTop=t.scrollHeight;return d;}
+function sendChat(){const msg=$('cmsg').value.trim();if(!msg)return;$('cmsg').value='';addChat('user',msg);
+  req({type:'chat',id:Math.random().toString(36).slice(2,8),message:msg,app:$('chatApp').value});}
+function onChatReply(m){
+  if(m.action==='answer'){addChat('bot',m.reply);return;}
+  if(m.action==='run'){addChat('bot',m.reply);$('kind').value='run';syncForm();$('big').value=m.instruction||'';return;}
+  if(m.action==='iterate'){const d=addChat('bot',m.reply);const b=document.createElement('button');b.className='go';b.textContent='Xác nhận chạy';
+    b.onclick=()=>{b.disabled=true;const id=Math.random().toString(36).slice(2,10);activeJob=id;logBuf='';renderLog();renderPipe();
+      req({type:'job',id,kind:'iterate',params:{name:m.app,instruction:m.instruction,tdd:true}});
+      addChat('bot','▶ Đang chạy iterate — xem Chu trình bên phải.');};
+    d.querySelector('.bubble').appendChild(b);}
+}
+
+// pipeline parse (từ log [area] streamed)
+function parsePipe(t){const has=re=>re.test(t),grp=re=>{const x=t.match(re);return x?x[1]:null},push=(a,x,c)=>a.push({t:x,c:c||''});
+  const spec={status:'',detail:'',chips:[]};
+  if(has(/\[area\]\s*(spec|re-spec|intake)\b/)){spec.status='active';spec.detail='Phân tích → spec…';}
+  const sac=t.match(/spec OK:\s*(\d+)\s*features?,\s*(\d+)\s*AC/);if(sac){spec.status='done';spec.detail='Đã trích spec+AC';push(spec.chips,sac[1]+' features');push(spec.chips,sac[2]+' AC','ok');}
+  const tests={status:'',detail:'',chips:[]};
+  if(has(/holdout:\s*author|author \+ lock/i)){tests.status='active';tests.detail='Khoá holdout (oracle)…';}
+  const locked=grp(/holdout:\s*locked (\d+) file/);if(locked){tests.status='done';tests.detail='Oracle đã khoá';push(tests.chips,locked+' test files','ok');}
+  const acov=grp(/all (\d+) AC covered/);if(acov)push(tests.chips,acov+' AC phủ','ok');
+  const build={status:'',detail:'',chips:[]};
+  if(has(/\[area\]\s*build\s*:/)){build.status='active';build.detail='Agent build→test→fix…';}
+  const dur=grp(/\[obs\]\s*build[^\n]*?([0-9.]+)s\s*·/);if(dur)push(build.chips,dur+'s');const cost=grp(/\[obs\]\s*build[^\n]*?\$([0-9.]+)/);if(cost)push(build.chips,'$'+cost);
+  if(has(/build GREEN/)){build.status='done';build.detail='Build xanh';} if(has(/NOT green/)){build.status='failed';build.detail='Chưa đạt';}
+  const gates={status:'',detail:'',chips:[]};const seen=[...t.matchAll(/=== gate:\s*(\w+)\s*===/g)].map(x=>x[1]);
+  if(seen.length){gates.status='active';gates.detail='Kiểm chứng…';}
+  ['verify','audit','e2e','chaos'].forEach(g=>{if(!seen.includes(g))return;let c='run';
+    if(new RegExp("\\[area\\]\\s*"+g+":[^\\n]*PASS").test(t))c='ok';if(new RegExp("gate '"+g+"' failed").test(t))c='bad';push(gates.chips,g,c);});
+  if(has(/gate '\w+' failed/))gates.status='failed';
+  const dep={status:'',detail:'',chips:[]};
+  if(has(/D1 detected|provision|Postgres/i)){dep.status='active';dep.detail='Provision+deploy…';}
+  if(has(/provenance (ok|recorded)/i))push(dep.chips,'provenance','ok');
+  const url=grp(/(https:\/\/[A-Za-z0-9.\-]+\.(?:workers\.dev|pages\.dev|vercel\.app)\S*)/);if(url){dep.status='done';dep.detail='Đã deploy live';push(dep.chips,'live','ok');}
+  if(has(/✅ GREEN —/)){if(gates.status==='active')gates.status='done';if(build.status&&build.status!=='failed')build.status='done';}
+  return [{label:'1 · Spec',...spec},{label:'2 · Khoá oracle (TDD)',...tests},{label:'3 · Build',...build},{label:'4 · Gates',...gates},{label:'5 · Deploy',...dep}];}
+function renderPipe(){const st=parsePipe(logBuf),done=st.filter(s=>s.status==='done').length,act=st.find(s=>s.status==='active');
+  $('ptitle').textContent=activeJob?(act?'▶ '+act.label:done+'/'+st.length+' xong'):'— chưa chạy —';
+  $('pipe').innerHTML='<div class="flow">'+st.map(s=>{const ic={active:'◉',done:'✓',failed:'✗'}[s.status]||'○';
+    const det=s.detail||{active:'đang chạy…',done:'xong',failed:'lỗi'}[s.status]||'chờ…';
+    const ch=(s.chips||[]).map(c=>`<span class="chip ${c.c}">${esc(c.t)}</span>`).join('');
+    return `<div class="pstage ${s.status}"><div class="prail"><div class="pnode">${ic}</div><div class="pline"></div></div><div class="pbody"><div class="ptitle">${esc(s.label)}</div><div class="pdetail">${esc(det)}</div>${ch?`<div class="pchips">${ch}</div>`:''}</div></div>`;}).join('')+'</div>';}
+
+syncForm();renderPipe();connect();
+</script>
+</body>
+</html>

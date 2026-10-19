@@ -59,3 +59,9 @@ jobs:
       # its own oracle. Node ships on ubuntu-latest; no deps, no network.
       - name: Coordinator Worker policy tests (Node)
         run: node --test coordinator-cf/test/worker.test.mjs
+
+      # The Worker serves its own copy of the dashboard UI; it must not drift from
+      # the canonical one (the deploy script re-syncs it, but a manual edit to one
+      # side would go unnoticed otherwise).
+      - name: Coordinator UI is in sync
+        run: diff -u area/net/static/index.html coordinator-cf/public/index.html
