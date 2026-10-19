@@ -62,10 +62,38 @@ def job_argv_for(kind: str, params: dict | None) -> list[str]:
     return argv
 
 
+def fold_requirement_doc(params: dict | None) -> tuple[dict, str | None]:
+    """If a run job carries an uploaded requirement doc (base64), extract its text
+    and fold it into `requirement`. The UI and runner are on different machines, so
+    the file rides in the job; the runner extracts here, reusing the same parser the
+    local dashboard uses (text formats need no deps; PDF/docx use pypdf/python-docx
+    if present, else a clear marker). Returns (params, note_or_None); never raises."""
+    p = dict(params or {})
+    if not p.get("doc_b64"):
+        return p, None
+    import base64
+
+    from area.web.upload import parse_file
+
+    doc_name = str(p.pop("doc_name", "document"))
+    try:
+        text = parse_file(doc_name, base64.b64decode(p.pop("doc_b64"))).strip()
+    except Exception as e:  # noqa: BLE001 — never fail a job on doc parsing
+        return p, f"doc parse warn: {e}"
+    if text:
+        base = (p.get("requirement") or "").strip()
+        p["requirement"] = f"{base}\n\n=== {doc_name} ===\n{text}".strip()
+        return p, f"đọc tài liệu {doc_name}: {len(text)} ký tự"
+    return p, None
+
+
 async def _exec_job(ws, job: dict) -> None:
     jid = job["id"]
+    params, note = fold_requirement_doc(job.get("params"))
+    if note:
+        await ws.send(encode(log_msg(jid, f"[runner] {note}")))
     try:
-        argv = job_argv_for(job["kind"], job.get("params"))
+        argv = job_argv_for(job["kind"], params)
     except ValueError as e:
         await ws.send(encode(status_msg(jid, "failed", None)))
         await ws.send(encode(log_msg(jid, f"[runner] bad job: {e}")))

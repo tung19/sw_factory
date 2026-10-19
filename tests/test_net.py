@@ -147,6 +147,25 @@ def test_runner_job_argv_backend_passthrough(monkeypatch):
     assert "--backend" not in R.job_argv_for("deploy", {"name": "t"})
 
 
+def test_runner_folds_uploaded_doc_into_requirement():
+    import base64
+
+    import area.runner as R
+
+    # no doc → params pass through untouched
+    p, note = R.fold_requirement_doc({"requirement": "x", "name": "a"})
+    assert p == {"requirement": "x", "name": "a"} and note is None
+
+    # a text doc (md) rides as base64 → extracted + folded into requirement
+    doc = base64.b64encode(b"# Spec\nA guestbook that persists.").decode()
+    p, note = R.fold_requirement_doc({"requirement": "base ask", "name": "g",
+                                      "doc_b64": doc, "doc_name": "spec.md"})
+    assert "doc_b64" not in p and "doc_name" not in p          # stripped before argv
+    assert p["requirement"].startswith("base ask")
+    assert "A guestbook that persists." in p["requirement"]
+    assert "spec.md" in p["requirement"] and note and "spec.md" in note
+
+
 def test_runner_handle_control_chat_and_apps(monkeypatch):
     import area.runner as R
     import area.web.chat as C

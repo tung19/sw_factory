@@ -14,10 +14,8 @@
   header b{font-family:var(--mono)} header .sp{flex:1} header .sub{color:var(--muted);font-size:12px}
   .rdot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block;margin-right:6px}
   .rdot.on{background:var(--green)}
-  .wrap{flex:1;display:grid;grid-template-columns:330px 1fr;gap:12px;padding:12px;min-height:0}
+  .wrap{flex:1;display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px;min-height:0}
   .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto}
-  /* mobile / narrow: drop the fixed-viewport app layout → normal scrolling page,
-     so the chat thread + composer stack instead of collapsing onto each other */
   @media(max-width:900px){
     body{height:auto;display:block}
     .wrap{grid-template-columns:1fr;height:auto;min-height:0;flex:none}
@@ -29,15 +27,26 @@
   }
   .card{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:13px}
   .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 9px}
+  .card.hero{border-color:#2d4a7a;background:linear-gradient(180deg,#14203a,#12161f)}
+  .card.hero h2{color:var(--accent2)}
   label{display:block;font-size:12px;color:var(--muted);margin:7px 0 3px}
   select,input,textarea{width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--fg);border-radius:7px;padding:8px 10px;font:inherit}
-  textarea{resize:vertical;min-height:46px}
-  button.go{margin-top:11px;width:100%;background:var(--accent);border:0;color:#06101f;font-weight:600;padding:9px;border-radius:8px;cursor:pointer}
+  textarea{resize:vertical;min-height:62px}
+  #req{min-height:92px}
+  button.go{margin-top:11px;width:100%;background:var(--accent);border:0;color:#06101f;font-weight:700;padding:11px;border-radius:8px;cursor:pointer;font-size:14px}
+  button.go.sm{padding:9px;font-weight:600}
   button.go:disabled{opacity:.5;cursor:not-allowed}
+  /* upload dropzone */
+  .drop{border:1.5px dashed var(--accent);background:#132135;border-radius:9px;padding:14px;text-align:center;color:var(--muted);cursor:pointer;margin-top:4px;transition:background .15s}
+  .drop.over{background:#18263c;color:var(--fg)}
+  .drop .big{font-size:12.5px;font-weight:600;color:var(--fg)} .drop .sub{font-size:11px;margin-top:2px}
+  .docchip{display:none;margin-top:7px;font-size:11.5px;background:var(--panel2);border:1px solid var(--border);border-radius:7px;padding:6px 9px;color:var(--fg);cursor:pointer}
   .fill{flex:1;min-height:0;display:flex;flex-direction:column}
   .fill pre{flex:1;min-height:0;overflow:auto}
   pre.log{background:#05080e;border:1px solid var(--border);border-radius:9px;padding:11px;font-family:var(--mono);font-size:12px;white-space:pre-wrap;margin:0;min-height:120px}
-  /* pipeline flow */
+  details.adv{margin-top:2px} details.adv>summary{cursor:pointer;color:var(--muted);font-size:12px;list-style:none;padding:4px 0}
+  details.adv>summary::-webkit-details-marker{display:none} details.adv>summary::before{content:'▸ ';color:var(--accent2)}
+  details.adv[open]>summary::before{content:'▾ '}
   .flow{display:flex;flex-direction:column}
   .pstage{display:flex;gap:11px}
   .prail{display:flex;flex-direction:column;align-items:center}
@@ -55,7 +64,6 @@
   .pchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
   .chip{font-size:11px;padding:1px 8px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
   .chip.ok{border-color:var(--green);color:var(--green)} .chip.bad{border-color:var(--red);color:var(--red)} .chip.run{border-color:var(--amber);color:var(--amber)}
-  /* chat */
   .thread{display:flex;flex-direction:column;gap:8px;max-height:200px;overflow:auto;padding:6px;background:var(--panel2);border:1px solid var(--border);border-radius:8px}
   .msg{display:flex;gap:7px;max-width:88%;font-size:12.5px;line-height:1.45}
   .msg .mava{width:21px;height:21px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:11px;background:rgba(127,176,255,.15);border:1px solid rgba(127,176,255,.4);color:var(--accent2)}
@@ -66,12 +74,13 @@
   .composer{display:flex;gap:7px;margin-top:8px}
   .composer input{flex:1} .composer button{flex:none;background:var(--accent);border:0;color:#06101f;font-weight:600;border-radius:8px;padding:0 15px;cursor:pointer}
   .hint{color:var(--muted);font-size:11.5px;margin-top:6px}
+  .hint.warn{color:var(--amber)}
 </style>
 </head>
 <body>
 <header>
-  <b>⚙︎ AREA Coordinator</b>
-  <span class="sub">điều phối · mọi compute/LLM/deploy chạy trên runner (hạ tầng của bạn)</span>
+  <b>⚙︎ AREA</b>
+  <span class="sub">mô tả / tài liệu → nhà máy tự spec · khoá oracle · build · gates — chạy trên runner của bạn</span>
   <span class="sp"></span>
   <span><span class="rdot" id="rdot"></span><span class="sub" id="rstat">runner: offline</span></span>
 </header>
@@ -79,31 +88,48 @@
   <div class="col">
     <div class="card" id="pairCard" style="display:none;border-color:var(--amber)">
       <h2>Kết nối runner của bạn</h2>
-      <div class="hint">Chưa có runner cho kênh này. Chạy lệnh sau trên máy/cloud của bạn (cần cài AREA — xem docs/RUNNER.md):</div>
+      <div class="hint">Chưa có runner cho kênh này — nhà máy chạy trên <b>máy/cloud của bạn</b> (Claude + Cloudflare/Vercel của bạn). Chạy lệnh sau (cần cài AREA — xem docs/RUNNER.md). Bạn vẫn soạn mô tả / upload trước được.</div>
       <pre class="log" id="pairCmd" style="min-height:0;margin-top:8px;user-select:all"></pre>
     </div>
-    <div class="card">
-      <h2>Tạo job (chạy trên runner)</h2>
-      <label>Loại</label>
-      <select id="kind" onchange="syncForm()">
-        <option value="doctor">doctor — kiểm môi trường</option>
-        <option value="run">run — tạo app từ mô tả</option>
-        <option value="iterate">iterate — ra lệnh sửa</option>
-        <option value="clone">clone — RE app mẫu</option>
-        <option value="deploy">deploy — deploy app</option>
-        <option value="export">export — giao app thành repo</option>
-      </select>
-      <div id="fName" style="display:none"><label id="lName">Tên app</label><input id="name" placeholder="myapp"/></div>
-      <div id="fBig" style="display:none"><label id="lBig">Mô tả</label><textarea id="big" placeholder="…"></textarea></div>
-      <button class="go" id="go" onclick="sendJob()" disabled>Gửi tới runner</button>
-      <div class="hint">Runner chạy bằng Claude + Cloudflare/Vercel của bạn.</div>
+
+    <div class="card hero">
+      <h2>🏭 Tạo phần mềm</h2>
+      <label>Mô tả phần mềm bạn muốn</label>
+      <textarea id="req" placeholder="VD: web guestbook — khách để lại tên + lời nhắn, lưu bền, hiện mới nhất trước…"></textarea>
+      <label>…hoặc upload tài liệu yêu cầu</label>
+      <div class="drop" id="drop">
+        <div class="big">Kéo-thả hoặc bấm để chọn</div>
+        <div class="sub">PDF · Word (.docx) · Markdown · .txt — nội dung thành requirement</div>
+      </div>
+      <input type="file" id="file" accept=".pdf,.docx,.doc,.md,.markdown,.txt,.yaml,.yml,.json,.csv" style="display:none"/>
+      <div class="docchip" id="docchip" onclick="setDoc(null)"></div>
+      <label>Tên app (tùy chọn)</label>
+      <input id="name" placeholder="app"/>
+      <button class="go" id="build" onclick="build()">Tạo phần mềm →</button>
+      <div class="hint" id="buildstat">Nhà máy sẽ tự: spec → khoá oracle (TDD) → build → gates. Dừng ở build xanh; deploy là bước riêng (mục Nâng cao).</div>
+
+      <details class="adv">
+        <summary>Nâng cao — lệnh khác (deploy · export · clone · iterate · doctor)</summary>
+        <label>Loại</label>
+        <select id="kind" onchange="syncForm()">
+          <option value="deploy">deploy — đưa app đã build lên hạ tầng</option>
+          <option value="export">export — giao app thành git repo của bạn</option>
+          <option value="iterate">iterate — ra lệnh sửa app đã có</option>
+          <option value="clone">clone — RE một app mẫu thành spec</option>
+          <option value="doctor">doctor — kiểm môi trường runner</option>
+        </select>
+        <div id="fAName"><label id="lAName">Tên app</label><input id="advName" placeholder="app"/></div>
+        <div id="fABig"><label id="lABig">Tham số</label><textarea id="advBig" placeholder="…"></textarea></div>
+        <button class="go sm" id="advGo" onclick="sendJob()">Gửi tới runner</button>
+      </details>
     </div>
+
     <div class="card fill">
       <h2>💬 Chat với runner</h2>
-      <label>App (tùy chọn, để ra lệnh sửa)</label>
+      <label>App (tùy chọn, để hỏi/ra lệnh sửa)</label>
       <select id="chatApp"><option value="">— app —</option></select>
-      <div class="thread" id="thread" style="margin-top:7px"><div class="msg bot"><div class="mava">✦</div><div class="bubble">Hỏi (vd "có app nào?", "spec của …?") hoặc ra lệnh ("thêm nút xoá" + chọn app). Lệnh sửa cần xác nhận.</div></div></div>
-      <div class="composer"><input id="cmsg" placeholder="nhắn… (Enter)" onkeydown="if(event.key==='Enter')sendChat()" disabled/><button id="csend" onclick="sendChat()" disabled>Gửi</button></div>
+      <div class="thread" id="thread" style="margin-top:7px"><div class="msg bot"><div class="mava">✦</div><div class="bubble">Hỏi ("có app nào?", "spec của …?") hoặc ra lệnh sửa ("thêm nút xoá" + chọn app). Lệnh sửa cần xác nhận.</div></div></div>
+      <div class="composer"><input id="cmsg" placeholder="nhắn… (Enter)" onkeydown="if(event.key==='Enter')sendChat()"/><button id="csend" onclick="sendChat()">Gửi</button></div>
     </div>
   </div>
   <div class="col">
@@ -113,19 +139,16 @@
     </div>
     <div class="card fill">
       <h2>Log trực tiếp (từ runner)</h2>
-      <pre class="log" id="log">— chọn lệnh, bấm Gửi —</pre>
+      <pre class="log" id="log">— mô tả phần mềm rồi bấm “Tạo phần mềm” —</pre>
     </div>
   </div>
 </div>
 <script>
 const $=id=>document.getElementById(id);
-let ws, logBuf='', activeJob=null;
+let ws, logBuf='', activeJob=null, RUNNER=false, pendingDoc=null;
 const esc=t=>(t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const rid=()=>Math.random().toString(36).slice(2,10);
 
-// The hosted coordinator requires a pairing token (it has no shared channel). If
-// none is in the URL and we're not on a loopback dev host, mint a strong one and
-// put it in the URL so it's bookmarkable and the pairing hint carries it. On
-// localhost (the Python single-user server) we stay tokenless on 'local'.
 const TOKEN=(function(){
   const url=new URL(location.href); let t=(url.searchParams.get('token')||'').trim();
   const local=location.protocol==='file:'||/^(localhost|127\.|0\.0\.0\.0|\[?::1\]?$)/.test(location.hostname);
@@ -135,13 +158,14 @@ const TOKEN=(function(){
   return t||'';
 })();
 
-function setRunner(on){$('rdot').classList.toggle('on',on);$('rstat').textContent='runner: '+(on?'online':'offline');
-  for(const b of [$('go'),$('cmsg'),$('csend')]) b.disabled=!on;
+// Connection only toggles the runner indicator + pair hint. Inputs stay usable so
+// you can draft a requirement / upload a doc before a runner is even connected.
+function setRunner(on){RUNNER=on;$('rdot').classList.toggle('on',on);$('rstat').textContent='runner: '+(on?'online':'offline');
   $('pairCard').style.display=on?'none':'';
   if(!on){const wsp=location.protocol==='https:'?'wss':'ws';
     $('pairCmd').textContent='area runner --connect '+wsp+'://'+location.host+(TOKEN?' --token '+TOKEN:'');}
-  if(on) req({type:'apps'});}
-function req(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
+  if(on) send({type:'apps'});}
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 function connect(){const p=location.protocol==='https:'?'wss':'ws';
   const q=TOKEN?'?token='+encodeURIComponent(TOKEN):'';
   ws=new WebSocket(p+'://'+location.host+'/ws/ui'+q);
@@ -150,45 +174,77 @@ function onMsg(e){let m;try{m=JSON.parse(e.data)}catch(_){return;}
   if(m.type==='coord'){setRunner(!!m.runner);return;}
   if(m.type==='apps'){fillApps(m.apps||[]);return;}
   if(m.type==='log'){logBuf+=m.line+'\n';renderLog();renderPipe();return;}
-  if(m.type==='status'){logBuf+='— status: '+m.status+(m.exit!=null?' (exit '+m.exit+')':'')+' —\n';renderLog();renderPipe();if(m.status!=='running')req({type:'apps'});return;}
+  if(m.type==='status'){logBuf+='— status: '+m.status+(m.exit!=null?' (exit '+m.exit+')':'')+' —\n';renderLog();renderPipe();if(m.status!=='running')send({type:'apps'});return;}
   if(m.type==='chat_reply'){onChatReply(m);return;}
 }
 function fillApps(apps){const opts='<option value="">— app —</option>'+apps.map(a=>`<option>${esc(a)}</option>`).join('');
-  for(const id of ['chatApp']){const el=$(id);if(el){const c=el.value;el.innerHTML=opts;el.value=c;}}}
+  for(const id of ['chatApp','advName']){const el=$(id);} // chatApp is the only select
+  const el=$('chatApp');if(el){const c=el.value;el.innerHTML=opts;el.value=c;}}
 function renderLog(){const el=$('log');el.textContent=logBuf;el.scrollTop=el.scrollHeight;}
+function stat(msg,warn){const s=$('buildstat');s.textContent=msg;s.classList.toggle('warn',!!warn);}
 
+// ---- upload --------------------------------------------------------------------
+const TEXT_EXT=/\.(md|markdown|txt|text|yaml|yml|json|csv)$/i;
+const DOC_EXT=/\.(pdf|docx?|dotx)$/i;
+const MAX_DOC=160*1024; // raw bytes — stays under the 256KB relay frame cap after base64
+function toB64(buf){let s='';const b=new Uint8Array(buf),ch=0x8000;for(let i=0;i<b.length;i+=ch)s+=String.fromCharCode.apply(null,b.subarray(i,i+ch));return btoa(s);}
+function setDoc(d){pendingDoc=d;const c=$('docchip');if(d){c.style.display='';c.textContent='📎 '+d.name+' — runner trích text khi build  (bấm để bỏ)';}else{c.style.display='none';c.textContent='';}}
+function onFiles(files){const f=files&&files[0];if(!f)return;
+  if(TEXT_EXT.test(f.name)){const r=new FileReader();r.onload=()=>{const cur=$('req').value.trim();$('req').value=(cur?cur+'\n\n':'')+'=== '+f.name+' ===\n'+r.result;setDoc(null);stat('📄 '+f.name+' → đã nạp vào mô tả.');};r.readAsText(f);return;}
+  if(DOC_EXT.test(f.name)){
+    if(f.size>MAX_DOC){stat('⚠ '+f.name+' quá lớn ('+Math.round(f.size/1024)+'KB > 160KB). Dán nội dung vào ô mô tả, hoặc tách nhỏ.',true);return;}
+    const r=new FileReader();r.onload=()=>{setDoc({name:f.name,b64:toB64(r.result)});stat('📎 '+f.name+' đính kèm — runner sẽ trích text khi build.');};r.readAsArrayBuffer(f);return;}
+  stat('⚠ định dạng không hỗ trợ: '+f.name,true);}
+(function wireDrop(){const d=$('drop');d.onclick=()=>$('file').click();
+  $('file').onchange=e=>onFiles(e.target.files);
+  ;['dragenter','dragover'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.add('over');}));
+  ;['dragleave','drop'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.remove('over');}));
+  d.addEventListener('drop',e=>onFiles(e.dataTransfer.files));})();
+
+// ---- build (the one button) ----------------------------------------------------
+function build(){const req=$('req').value.trim();
+  if(!req && !pendingDoc){stat('Nhập mô tả hoặc chọn tài liệu trước.',true);return;}
+  if(!RUNNER){$('pairCard').style.display='';$('pairCard').scrollIntoView({behavior:'smooth',block:'nearest'});stat('Cần runner để chạy — xem hướng dẫn kết nối phía trên. Mô tả của bạn vẫn được giữ.',true);return;}
+  const p={requirement:req,name:$('name').value.trim()||'app',tdd:true};
+  if(pendingDoc){p.doc_b64=pendingDoc.b64;p.doc_name=pendingDoc.name;}
+  const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
+  send({type:'job',id,kind:'run',params:p});
+  stat('▶ Đã gửi yêu cầu tới runner — theo dõi Chu trình bên phải.');}
+
+// ---- advanced job form ---------------------------------------------------------
 function syncForm(){const k=$('kind').value;
-  const needName=['run','iterate','deploy','export'].includes(k), needBig=['run','iterate','clone','export'].includes(k);
-  $('fName').style.display=needName?'':'none';$('fBig').style.display=needBig?'':'none';
-  $('lBig').textContent={run:'Mô tả phần mềm',iterate:'Lệnh sửa',clone:'Nguồn (git/url/path)',export:'Repo URL (push)'}[k]||'Mô tả';
-  $('lName').textContent=k==='clone'?'Tên (tùy chọn)':'Tên app';}
-function sendJob(){const k=$('kind').value,name=$('name').value.trim(),v=$('big').value.trim(),p={};
-  if(k==='run'){p.requirement=v;p.name=name||'app';p.tdd=true;}
-  else if(k==='iterate'){p.name=name;p.instruction=v;}
+  const needName=['iterate','deploy','export'].includes(k), needBig=['iterate','clone','export'].includes(k);
+  $('fAName').style.display=needName?'':'none';$('fABig').style.display=needBig?'':'none';
+  $('lABig').textContent={iterate:'Lệnh sửa',clone:'Nguồn (git/url/path)',export:'Repo URL (push, tùy chọn)'}[k]||'Tham số';
+  $('lAName').textContent=k==='clone'?'Tên (tùy chọn)':'Tên app';}
+function sendJob(){if(!RUNNER){stat('Cần runner để chạy lệnh này.',true);$('pairCard').style.display='';return;}
+  const k=$('kind').value,name=$('advName').value.trim(),v=$('advBig').value.trim(),p={};
+  if(k==='iterate'){p.name=name;p.instruction=v;}
   else if(k==='clone'){p.source=v;p.name=name||'clone';}
   else if(k==='deploy'){p.name=name;}
   else if(k==='export'){p.name=name;if(v){p.repo=v;p.push=true;}}
-  const id=Math.random().toString(36).slice(2,10);activeJob=id;logBuf='';renderLog();renderPipe();
-  req({type:'job',id,kind:k,params:p});}
+  const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
+  send({type:'job',id,kind:k,params:p});}
 
-// chat
+// ---- chat ----------------------------------------------------------------------
 function addChat(who,text){const t=$('thread'),d=document.createElement('div');d.className='msg '+who;
   const a=document.createElement('div');a.className='mava';a.textContent=who==='user'?'🧑':'✦';
   const b=document.createElement('div');b.className='bubble';b.textContent=text;d.appendChild(a);d.appendChild(b);
   t.appendChild(d);t.scrollTop=t.scrollHeight;return d;}
 function sendChat(){const msg=$('cmsg').value.trim();if(!msg)return;$('cmsg').value='';addChat('user',msg);
-  req({type:'chat',id:Math.random().toString(36).slice(2,8),message:msg,app:$('chatApp').value});}
+  if(!RUNNER){addChat('bot','Cần runner để hỏi/ra lệnh — xem phần kết nối phía trên.');return;}
+  send({type:'chat',id:rid(),message:msg,app:$('chatApp').value});}
 function onChatReply(m){
   if(m.action==='answer'){addChat('bot',m.reply);return;}
-  if(m.action==='run'){addChat('bot',m.reply);$('kind').value='run';syncForm();$('big').value=m.instruction||'';return;}
+  if(m.action==='run'){addChat('bot',m.reply);$('req').value=m.instruction||$('req').value;return;}
   if(m.action==='iterate'){const d=addChat('bot',m.reply);const b=document.createElement('button');b.className='go';b.textContent='Xác nhận chạy';
-    b.onclick=()=>{b.disabled=true;const id=Math.random().toString(36).slice(2,10);activeJob=id;logBuf='';renderLog();renderPipe();
-      req({type:'job',id,kind:'iterate',params:{name:m.app,instruction:m.instruction,tdd:true}});
+    b.onclick=()=>{b.disabled=true;const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
+      send({type:'job',id,kind:'iterate',params:{name:m.app,instruction:m.instruction,tdd:true}});
       addChat('bot','▶ Đang chạy iterate — xem Chu trình bên phải.');};
     d.querySelector('.bubble').appendChild(b);}
 }
 
-// pipeline parse (từ log [area] streamed)
+// ---- pipeline parse (from streamed [area] log) ---------------------------------
 function parsePipe(t){const has=re=>re.test(t),grp=re=>{const x=t.match(re);return x?x[1]:null},push=(a,x,c)=>a.push({t:x,c:c||''});
   const spec={status:'',detail:'',chips:[]};
   if(has(/\[area\]\s*(spec|re-spec|intake)\b/)){spec.status='active';spec.detail='Phân tích → spec…';}
@@ -203,8 +259,8 @@ function parsePipe(t){const has=re=>re.test(t),grp=re=>{const x=t.match(re);retu
   if(has(/build GREEN/)){build.status='done';build.detail='Build xanh';} if(has(/NOT green/)){build.status='failed';build.detail='Chưa đạt';}
   const gates={status:'',detail:'',chips:[]};const seen=[...t.matchAll(/=== gate:\s*(\w+)\s*===/g)].map(x=>x[1]);
   if(seen.length){gates.status='active';gates.detail='Kiểm chứng…';}
-  ['verify','audit','e2e','chaos'].forEach(g=>{if(!seen.includes(g))return;let c='run';
-    if(new RegExp("\\[area\\]\\s*"+g+":[^\\n]*PASS").test(t))c='ok';if(new RegExp("gate '"+g+"' failed").test(t))c='bad';push(gates.chips,g,c);});
+  ['verify','audit','e2e','chaos','nfr'].forEach(g=>{if(!seen.includes(g))return;let c='run';
+    if(new RegExp("\\[area\\]\\s*"+g+":[^\\n]*(PASS|OK)").test(t))c='ok';if(new RegExp("gate '"+g+"' failed").test(t))c='bad';push(gates.chips,g,c);});
   if(has(/gate '\w+' failed/))gates.status='failed';
   const dep={status:'',detail:'',chips:[]};
   if(has(/D1 detected|provision|Postgres/i)){dep.status='active';dep.detail='Provision+deploy…';}
