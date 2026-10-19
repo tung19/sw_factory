@@ -5,6 +5,9 @@
   "main": "src/worker.js",
   "compatibility_date": "2026-10-12",
   "compatibility_flags": ["nodejs_compat"],
+  // The hosted coordinator is multi-tenant and public: a real pairing token is
+  // mandatory (no shared "local" channel). Local dev leaves this unset.
+  "vars": { "REQUIRE_TOKEN": "1" },
   // Serves public/index.html at "/"; the Worker handles /ws/ui and /ws/runner.
   "assets": { "directory": "./public" },
   "durable_objects": {

@@ -122,15 +122,28 @@ const $=id=>document.getElementById(id);
 let ws, logBuf='', activeJob=null;
 const esc=t=>(t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
+// The hosted coordinator requires a pairing token (it has no shared channel). If
+// none is in the URL and we're not on a loopback dev host, mint a strong one and
+// put it in the URL so it's bookmarkable and the pairing hint carries it. On
+// localhost (the Python single-user server) we stay tokenless on 'local'.
+const TOKEN=(function(){
+  const url=new URL(location.href); let t=(url.searchParams.get('token')||'').trim();
+  const local=location.protocol==='file:'||/^(localhost|127\.|0\.0\.0\.0|\[?::1\]?$)/.test(location.hostname);
+  if(!t&&!local){ t=(self.crypto&&crypto.randomUUID)?crypto.randomUUID()
+      :(Date.now().toString(36)+Math.random().toString(36).slice(2)).padEnd(24,'0');
+    url.searchParams.set('token',t); history.replaceState(null,'',url); }
+  return t||'';
+})();
+
 function setRunner(on){$('rdot').classList.toggle('on',on);$('rstat').textContent='runner: '+(on?'online':'offline');
   for(const b of [$('go'),$('cmsg'),$('csend')]) b.disabled=!on;
   $('pairCard').style.display=on?'none':'';
-  if(!on){const wsp=location.protocol==='https:'?'wss':'ws';const tok=new URLSearchParams(location.search).get('token');
-    $('pairCmd').textContent='area runner --connect '+wsp+'://'+location.host+(tok?' --token '+tok:'');}
+  if(!on){const wsp=location.protocol==='https:'?'wss':'ws';
+    $('pairCmd').textContent='area runner --connect '+wsp+'://'+location.host+(TOKEN?' --token '+TOKEN:'');}
   if(on) req({type:'apps'});}
 function req(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 function connect(){const p=location.protocol==='https:'?'wss':'ws';
-  const tok=new URLSearchParams(location.search).get('token');const q=tok?'?token='+encodeURIComponent(tok):'';
+  const q=TOKEN?'?token='+encodeURIComponent(TOKEN):'';
   ws=new WebSocket(p+'://'+location.host+'/ws/ui'+q);
   ws.onmessage=onMsg;ws.onclose=()=>{setRunner(false);setTimeout(connect,1500);};}
 function onMsg(e){let m;try{m=JSON.parse(e.data)}catch(_){return;}

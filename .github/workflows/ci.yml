@@ -53,3 +53,9 @@ jobs:
 
       - name: Run test suite
         run: python -m pytest
+
+      # The coordinator that actually runs on Cloudflare is JS, not Python, so its
+      # access policy (token gate, one-runner-per-channel, relay whitelist) needs
+      # its own oracle. Node ships on ubuntu-latest; no deps, no network.
+      - name: Coordinator Worker policy tests (Node)
+        run: node --test coordinator-cf/test/worker.test.mjs
