@@ -79,6 +79,8 @@ def test_provision_postgres_skips_stateless(tmp_path):
 
 def test_provision_postgres_missing_url_is_nonfatal(monkeypatch, tmp_path):
     (tmp_path / "package.json").write_text('{"dependencies":{"@vercel/postgres":"^0.9"}}')
+    monkeypatch.delenv("AREA_POSTGRES_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
     monkeypatch.setattr(V, "_vercel", lambda app, args: None)  # link + env pull are no-ops
     ok, log = V.provision_postgres(tmp_path)
     assert ok  # NON-FATAL
@@ -105,6 +107,59 @@ def test_provision_postgres_applies_migrations(monkeypatch, tmp_path):
     assert ok
     assert applied == ["migrations/0001_init.sql", "migrations/0002_more.sql"]
     assert "applied 2/2" in log
+
+
+def test_vercel_env_add_value_via_stdin_not_argv(monkeypatch, tmp_path):
+    """Security: a wired connection string must go through stdin/env, never argv."""
+    SECRET = "postgres://user:p@ss@host/db?sslmode=require"
+    seen = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(V.subprocess, "run",
+                        lambda cmd, **kw: (seen.append((cmd, kw.get("env") or {})), _Proc())[1])
+    V._vercel_env_add(tmp_path, "POSTGRES_URL", SECRET, "production")
+
+    (cmd, env) = seen[0]
+    joined = " ".join(cmd)
+    assert SECRET not in joined, "connection string leaked onto argv"
+    assert env.get("AREA_ENV_VAL") == SECRET, "value must travel via the env/stdin"
+    assert "printf" in joined and "vercel env add" in joined and "POSTGRES_URL" in joined
+
+
+def test_provision_postgres_wires_provided_url(monkeypatch, tmp_path):
+    """With no store connected but AREA_POSTGRES_URL exported, provisioning wires
+    the URL into the project and migrates against it."""
+    (tmp_path / "package.json").write_text('{"dependencies":{"@vercel/postgres":"^0.9"}}')
+    mig = tmp_path / "migrations"; mig.mkdir()
+    (mig / "0001_init.sql").write_text("CREATE TABLE IF NOT EXISTS u(id TEXT);")
+    PG = "postgres://u:p@h/db"
+    monkeypatch.setenv("AREA_POSTGRES_URL", PG)
+    monkeypatch.setattr(V, "_vercel", lambda app, args: None)  # link + pull surface nothing
+
+    added, applied = [], []
+    monkeypatch.setattr(V, "_vercel_env_add",
+                        lambda app, k, v, t="production": added.append((k, v, t)))
+    monkeypatch.setattr(V, "_apply_sql",
+                        lambda app, url, rel: (applied.append((url, rel)), True)[1])
+
+    ok, log = V.provision_postgres(tmp_path)
+    assert ok
+    assert added == [("POSTGRES_URL", PG, "production")]
+    assert applied == [(PG, "migrations/0001_init.sql")]
+    assert "wired" in log
+
+
+def test_provision_postgres_no_url_no_provided_is_actionable(monkeypatch, tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"@vercel/postgres":"^0.9"}}')
+    monkeypatch.delenv("AREA_POSTGRES_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
+    monkeypatch.setattr(V, "_vercel", lambda app, args: None)
+    ok, log = V.provision_postgres(tmp_path)
+    assert ok and "export AREA_POSTGRES_URL" in log and "NON-FATAL" in log
 
 
 def test_provision_kv_present_env(monkeypatch, tmp_path):

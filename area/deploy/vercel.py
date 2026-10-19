@@ -106,6 +106,30 @@ def _vercel(app: Path, args: str):
     )
 
 
+def _vercel_env_add(app: Path, key: str, value: str, target: str = "production"):
+    """Set a project env var on Vercel, feeding the VALUE through stdin (never the
+    argv/`ps` — same discipline as the token). `vercel env add` reads the value
+    from stdin when the input isn't a TTY. Idempotent-ish: a pre-existing key makes
+    the CLI error, which the caller treats as non-fatal."""
+    e = _env()
+    e["AREA_ENV_VAL"] = value
+    return subprocess.run(
+        ["bash", "-lc",
+         f'printf %s "$AREA_ENV_VAL" | npx -y vercel env add {shlex.quote(key)} {shlex.quote(target)} 2>&1'],
+        cwd=str(app), capture_output=True, text=True, env=e,
+    )
+
+
+def _provided_pg_url() -> Optional[str]:
+    """A Postgres connection string the operator handed us (any provider — Neon,
+    Supabase, …), to WIRE into the project. AREA_POSTGRES_URL wins over POSTGRES_URL."""
+    for k in ("AREA_POSTGRES_URL", "POSTGRES_URL"):
+        v = (os.getenv(k) or "").strip()
+        if v:
+            return v
+    return None
+
+
 def _apply_sql(app: Path, url: str, rel: str) -> bool:
     """Apply one SQL file to the Postgres URL via psql. Idempotent iff the schema
     uses IF NOT EXISTS. The URL is passed through env (never interpolated into the
@@ -146,13 +170,24 @@ def provision_postgres(app_dir: str | Path) -> tuple[bool, str]:
             url = v
             break
     if not url:
-        log.append(
-            "POSTGRES_URL not found after `vercel env pull` — connect a Postgres "
-            "store (Vercel Marketplace → Neon) to this project, then re-run. "
-            "NON-FATAL: deploy proceeds; DB calls will fail until the store is connected."
-        )
-        return True, "\n".join(log)
-    log.append("POSTGRES_URL present")
+        provided = _provided_pg_url()
+        if provided:
+            # Wire an operator-supplied connection string into the project so the
+            # deployed app gets POSTGRES_URL — no manual Marketplace step needed.
+            _vercel_env_add(app, "POSTGRES_URL", provided, "production")
+            url = provided
+            log.append("POSTGRES_URL wired into project from AREA_POSTGRES_URL/POSTGRES_URL "
+                       "(vercel env add, value via stdin)")
+        else:
+            log.append(
+                "POSTGRES_URL not found after `vercel env pull` — either export "
+                "AREA_POSTGRES_URL=<connection string> (AREA will wire it in) or "
+                "connect a Postgres store (Vercel Marketplace → Neon) to this project, "
+                "then re-run. NON-FATAL: deploy proceeds; DB calls fail until a store exists."
+            )
+            return True, "\n".join(log)
+    else:
+        log.append("POSTGRES_URL present")
     mig = app / "migrations"
     if mig.is_dir():
         sqls = sorted(mig.glob("*.sql"))
