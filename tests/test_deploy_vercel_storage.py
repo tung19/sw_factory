@@ -135,6 +135,35 @@ def test_gate_vercel_provisions_postgres_before_deploy(monkeypatch, tmp_path):
     assert ok and order == ["provision-pg", "deploy"] and url == "https://x.vercel.app"
 
 
+def test_vercel_token_never_on_command_line(monkeypatch, tmp_path):
+    """Security: the VERCEL_TOKEN must reach the CLI via the env, never as a
+    --token flag (which leaks the secret into the process table / captured logs)."""
+    SECRET = "vcp_SECRET_SHOULD_NOT_APPEAR_ON_ARGV"
+    monkeypatch.setenv("VERCEL_TOKEN", SECRET)
+    seen = []
+
+    class _Proc:
+        returncode = 0
+        stdout = "https://x.vercel.app"
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen.append((cmd, kw.get("env") or {}))
+        return _Proc()
+
+    monkeypatch.setattr(V.subprocess, "run", fake_run)
+
+    V._vercel(tmp_path, "link --yes")
+    V.deploy(tmp_path)
+
+    assert seen, "subprocess.run was not invoked"
+    for cmd, env in seen:
+        joined = " ".join(cmd)
+        assert "--token" not in joined, f"--token leaked onto argv: {joined}"
+        assert SECRET not in joined, "token value leaked onto argv"
+        assert env.get("VERCEL_TOKEN") == SECRET, "token must be passed via the env"
+
+
 def test_gate_vercel_skips_provision_for_stateless(monkeypatch, tmp_path):
     (tmp_path / "package.json").write_text('{"scripts":{"build":"next build"}}')
     order = []

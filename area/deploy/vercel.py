@@ -96,11 +96,12 @@ def needs_kv(app_dir: str | Path) -> bool:
 
 
 def _vercel(app: Path, args: str):
-    """Run `npx vercel <args>` (auth via VERCEL_TOKEN or a prior `vercel login`)."""
-    token = os.getenv("VERCEL_TOKEN")
-    tflag = f" --token {token}" if token else ""
+    """Run `npx vercel <args>`. Auth comes from the VERCEL_TOKEN env var (the CLI
+    reads it automatically; _env() propagates it) or a prior `vercel login` — never
+    a `--token` CLI flag, which would leak the secret into the process table and
+    any captured command output."""
     return subprocess.run(
-        ["bash", "-lc", f"npx -y vercel {args}{tflag} 2>&1"],
+        ["bash", "-lc", f"npx -y vercel {args} 2>&1"],
         cwd=str(app), capture_output=True, text=True, env=_env(),
     )
 
@@ -138,7 +139,12 @@ def provision_postgres(app_dir: str | Path) -> tuple[bool, str]:
     _vercel(app, "link --yes")
     log.append("vercel link: attempted")
     _vercel(app, "env pull .env.local --yes")
-    url = next((_env_file_value(app, k) for k in _PG_URL_KEYS if _env_file_value(app, k)), None)
+    url = None
+    for k in _PG_URL_KEYS:
+        v = _env_file_value(app, k)
+        if v:
+            url = v
+            break
     if not url:
         log.append(
             "POSTGRES_URL not found after `vercel env pull` — connect a Postgres "
@@ -183,12 +189,10 @@ def deploy(app_dir: str | Path) -> tuple[bool, str, Optional[str]]:
     """Deploy the app to Vercel production. Returns (ok, output_tail, url).
 
     Requires a prior `vercel login` (or VERCEL_TOKEN). `--yes` skips prompts for
-    first-time project linking.
+    first-time project linking. Auth is taken from the env (never a --token flag).
     """
     app = Path(app_dir)
-    token = os.getenv("VERCEL_TOKEN")
-    tflag = f" --token {token}" if token else ""
-    cmd = ["bash", "-lc", f"npx -y vercel deploy --prod --yes{tflag} 2>&1"]
+    cmd = ["bash", "-lc", "npx -y vercel deploy --prod --yes 2>&1"]
     proc = subprocess.run(cmd, cwd=str(app), capture_output=True, text=True, env=_env())
     out = (proc.stdout + "\n" + proc.stderr).strip()
     m = _URL_RE.search(out)
