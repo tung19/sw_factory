@@ -76,88 +76,87 @@ export function ring(arr, item, max) {
   return out;
 }
 
-// One channel = one DO instance. Holds the runner + its UIs in memory and relays
-// between them (the JS port of area/net/hub.py). The replay buffer is in-memory:
-// it catches a UI up across a reconnect (tab reload, flaky wifi) but NOT across a
-// DO eviction/redeploy — the relay is at-most-once across the DO's lifecycle.
+// One channel = one DO instance. Uses the WebSocket HIBERNATION API so a connection
+// SURVIVES the DO being evicted/hibernated (Cloudflare holds the sockets): the
+// runner stays reachable even when the DO isn't resident in memory. Sockets are
+// found via state.getWebSockets(tag) rather than in-memory sets (which don't
+// survive hibernation); an app-level `ping` gets an auto-pong without waking the DO.
 export class CoordChannel {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-    this.runner = null;
-    this.uis = new Set();
-    this.recent = []; // bounded replay buffer of the live job's recent runner frames
+    this.recent = []; // best-effort replay buffer (in-memory; lost on hibernation)
+    try {
+      this.state.setWebSocketAutoResponse(
+        new WebSocketRequestResponsePair(
+          JSON.stringify({ type: "ping" }), JSON.stringify({ type: "pong" }),
+        ),
+      );
+    } catch (_) { /* older runtime without auto-response */ }
+  }
+
+  _runner() {
+    const rs = this.state.getWebSockets("runner");
+    return rs.length ? rs[0] : null;
+  }
+
+  _bcastUIs(data) {
+    for (const u of this.state.getWebSockets("ui")) {
+      try { u.send(data); } catch (_) { /* dead ui */ }
+    }
   }
 
   async fetch(request) {
     const url = new URL(request.url);
     const role = url.pathname.endsWith("/ws/runner") ? "runner" : "ui";
 
-    // One runner per channel, with TAKEOVER on reconnect. A runner that drops
-    // uncleanly (killed, network cut, DO not yet notified) leaves a stale socket in
-    // this.runner; refusing the newcomer (409) would then lock the channel until the
-    // DO finally notices the old one is dead. Since the token is the real auth (same
-    // token ⇒ same operator reconnecting), a new runner instead explicitly closes
-    // and replaces the old one — logged via the close code, never a silent swap.
-    if (role === "runner" && this.runner) {
-      try { this.runner.close(1012, "replaced by a newer runner"); } catch (_) { /* already gone */ }
-      this.runner = null;
+    // One runner per channel, with TAKEOVER on reconnect (token is the auth, so a
+    // new runner on the same token is the same operator reconnecting).
+    if (role === "runner") {
+      const existing = this._runner();
+      if (existing) { try { existing.close(1012, "replaced by a newer runner"); } catch (_) {} }
     }
 
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
-    server.accept();
-    const meter = {}; // per-connection rate/size meter
+    this.state.acceptWebSocket(server, [role]); // hibernatable; tagged by role
 
     if (role === "runner") {
-      this.runner = server;
-      this.recent = []; // fresh runner session → drop any stale replay buffer
-      this._bcast(JSON.stringify({ type: "coord", runner: true }));
+      this._bcastUIs(JSON.stringify({ type: "coord", runner: true }));
     } else {
-      this.uis.add(server);
-      server.send(JSON.stringify({ type: "coord", runner: !!this.runner }));
-      // Catch a (re)connecting UI up on the live job's recent output.
-      for (const f of this.recent) { try { server.send(f); } catch (_) { /* dead ui */ } }
+      try { server.send(JSON.stringify({ type: "coord", runner: !!this._runner() })); } catch (_) {}
+      for (const f of this.recent) { try { server.send(f); } catch (_) {} }
     }
-
-    server.addEventListener("message", (ev) => {
-      // DoS guards: cap frame size in both directions; rate-limit UI COMMAND frames
-      // — but not the runner's bursty logs, nor a UI's chunked upload stream (still
-      // size-capped per frame, and the runner bounds how many chunks it buffers).
-      const isUpload = typeof ev.data === "string" && ev.data.startsWith('{"type":"upload"');
-      if (!admitFrame(meter, frameSize(ev.data), Date.now(), role === "ui" && !isUpload).ok) return;
-      // keepalive pings keep the socket warm but carry no payload — never relay them.
-      if (typeof ev.data === "string" && ev.data.startsWith('{"type":"ping"')) return;
-      if (role === "ui") {
-        if (relayable(ev.data) && this.runner) {
-          try { this.runner.send(ev.data); } catch (_) { /* dead runner */ }
-        }
-      } else {
-        this.recent = ring(this.recent, ev.data, REPLAY_MAX); // buffer for replay
-        this._bcast(ev.data); // runner output → this channel's UIs only
-      }
-    });
-
-    const bye = () => {
-      if (role === "runner") {
-        if (server === this.runner) {
-          this.runner = null;
-          this._bcast(JSON.stringify({ type: "coord", runner: false }));
-        }
-      } else {
-        this.uis.delete(server);
-      }
-    };
-    server.addEventListener("close", bye);
-    server.addEventListener("error", bye);
-
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  _bcast(data) {
-    for (const u of [...this.uis]) {
-      try { u.send(data); } catch (_) { this.uis.delete(u); }
+  // Hibernation delivers messages here (the DO may have been asleep).
+  async webSocketMessage(ws, data) {
+    if (frameSize(data) > MAX_FRAME) return;                                   // size cap (DoS)
+    if (typeof data === "string" && data.startsWith('{"type":"ping"')) return; // keepalive (also auto-ponged)
+    const isRunner = this.state.getTags(ws).includes("runner");
+    if (!isRunner) {
+      if (relayable(data)) {
+        const r = this._runner();
+        if (r) { try { r.send(data); } catch (_) {} }
+      }
+    } else {
+      this.recent = ring(this.recent, data, REPLAY_MAX);
+      this._bcastUIs(data); // runner output → this channel's UIs
+    }
+  }
+
+  async webSocketClose(ws, code, reason, wasClean) {
+    try { ws.close(); } catch (_) {}
+    if (this.state.getTags(ws).includes("runner") && !this._runner()) {
+      this._bcastUIs(JSON.stringify({ type: "coord", runner: false }));
+    }
+  }
+
+  async webSocketError(ws) {
+    if (this.state.getTags(ws).includes("runner") && !this._runner()) {
+      this._bcastUIs(JSON.stringify({ type: "coord", runner: false }));
     }
   }
 }

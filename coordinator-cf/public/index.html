@@ -201,8 +201,12 @@ const MAX_DOC=30*1024*1024; // sanity cap only — large files are CHUNKED over 
 function toB64(buf){let s='';const b=new Uint8Array(buf),ch=0x8000;for(let i=0;i<b.length;i+=ch)s+=String.fromCharCode.apply(null,b.subarray(i,i+ch));return btoa(s);}
 // A requirement doc of ANY size crosses the relay as a sequence of small `upload`
 // frames (each under the 256KB per-frame cap); the runner reassembles by uid.
-function sendDocChunks(doc){const uid=rid()+rid(),CH=170*1024,b=doc.b64,n=Math.max(1,Math.ceil(b.length/CH));
-  for(let i=0;i<n;i++) send({type:'upload',uid,i,n,name:doc.name,data:b.slice(i*CH,(i+1)*CH)});
+// Send small (48KB) chunks PACED (~30ms apart) so a big upload doesn't flood the
+// relay in one burst (which was dropping the socket). Returns the uid when done.
+async function sendDocChunks(doc){const uid=rid()+rid(),CH=48*1024,b=doc.b64,n=Math.max(1,Math.ceil(b.length/CH));
+  for(let i=0;i<n;i++){ send({type:'upload',uid,i,n,name:doc.name,data:b.slice(i*CH,(i+1)*CH)});
+    stat('📤 đang tải tài liệu… '+Math.round((i+1)/n*100)+'%');
+    await new Promise(r=>setTimeout(r,30)); }
   return uid;}
 function setDoc(d){pendingDoc=d;const c=$('docchip');if(d){c.style.display='';c.textContent='📎 '+d.name+' — runner trích text khi build  (bấm để bỏ)';}else{c.style.display='none';c.textContent='';}}
 function onFiles(files){const f=files&&files[0];if(!f)return;
@@ -218,14 +222,16 @@ function onFiles(files){const f=files&&files[0];if(!f)return;
   d.addEventListener('drop',e=>onFiles(e.dataTransfer.files));})();
 
 // ---- build (the one button) ----------------------------------------------------
-function build(){const req=$('req').value.trim();
+async function build(){const req=$('req').value.trim();
   if(!req && !pendingDoc){stat('Nhập mô tả hoặc chọn tài liệu trước.',true);return;}
   if(!RUNNER){$('pairCard').style.display='';$('pairCard').scrollIntoView({behavior:'smooth',block:'nearest'});stat('Cần runner để chạy — xem hướng dẫn kết nối phía trên. Mô tả của bạn vẫn được giữ.',true);return;}
+  $('build').disabled=true;
   const p={requirement:req,name:$('name').value.trim()||'app',tdd:true};
-  if(pendingDoc){p.doc_uid=sendDocChunks(pendingDoc);}
+  if(pendingDoc){p.doc_uid=await sendDocChunks(pendingDoc);}
   const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
   send({type:'job',id,kind:'run',params:p});
-  stat('▶ Đã gửi yêu cầu tới runner — theo dõi Chu trình bên phải.');}
+  stat('▶ Đã gửi yêu cầu tới runner — theo dõi Chu trình bên phải.');
+  $('build').disabled=false;}
 
 // ---- advanced job form ---------------------------------------------------------
 function syncForm(){const k=$('kind').value;

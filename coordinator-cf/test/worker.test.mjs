@@ -64,20 +64,38 @@ test("relayable: whitelisted jobs with an id pass; everything else is dropped", 
   assert.equal(relayable("not json"), false);
 });
 
-// ---- one runner per channel, with takeover on reconnect ---------------------
-test("CoordChannel: a reconnecting runner replaces (closes) the stale one", async () => {
-  const ch = new CoordChannel({}, {});
+// ---- one runner per channel, with takeover on reconnect (hibernation DO) -----
+function mockState(sockets = []) {
+  const tags = new Map(sockets.map((s) => [s, s._tags || ["runner"]]));
+  return {
+    setWebSocketAutoResponse() {},
+    acceptWebSocket(ws, t) { sockets.push(ws); tags.set(ws, t); },
+    getWebSockets(tag) { return sockets.filter((s) => !tag || (tags.get(s) || []).includes(tag)); },
+    getTags(ws) { return tags.get(ws) || []; },
+  };
+}
+
+test("CoordChannel: a reconnecting runner closes the stale one (1012), not 409", async () => {
   let closedCode = null;
-  ch.runner = { close(code) { closedCode = code; } }; // a stale socket is held
+  const stale = { _tags: ["runner"], close(c) { closedCode = c; }, send() {} };
+  const ch = new CoordChannel(mockState([stale]), {});
   try {
-    await ch.fetch(new Request("https://c.example.dev/ws/runner", {
-      headers: { Upgrade: "websocket" },
-    }));
+    await ch.fetch(new Request("https://c.example.dev/ws/runner", { headers: { Upgrade: "websocket" } }));
   } catch (_) {
     // WebSocketPair isn't available under node:test — we only assert the takeover
-    // path (closing the old runner) that runs before the pair is created.
+    // (closing the stale runner) that runs before the pair is created.
   }
-  assert.equal(closedCode, 1012); // old runner was closed, not refused with 409
+  assert.equal(closedCode, 1012);
+});
+
+test("CoordChannel.webSocketMessage: UI job → runner; oversize dropped", () => {
+  const runner = { _tags: ["runner"], sent: [], send(d) { this.sent.push(d); } };
+  const ui = { _tags: ["ui"], send() {} };
+  const ch = new CoordChannel(mockState([runner, ui]), {});
+  ch.webSocketMessage(ui, JSON.stringify({ type: "job", kind: "run", id: "1" }));
+  assert.equal(runner.sent.length, 1);                 // relayed to the runner
+  ch.webSocketMessage(ui, "x".repeat(256 * 1024 + 1)); // oversize → dropped
+  assert.equal(runner.sent.length, 1);
 });
 
 // ---- DoS guards: frame size + rate ------------------------------------------

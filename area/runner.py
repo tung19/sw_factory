@@ -203,7 +203,7 @@ async def _serve_once(url: str, token: str | None) -> None:
     uploads: dict = {}  # in-flight requirement-doc uploads, reassembled by uid
     # Lenient ping_timeout + an app-level keepalive keep the socket warm so an idle
     # connection isn't torn down ("no close frame") between jobs.
-    async with websockets.connect(url, max_size=None, ping_interval=20, ping_timeout=60) as ws:
+    async with websockets.connect(url, max_size=None, ping_interval=15, ping_timeout=30) as ws:
         await ws.send(encode(hello_msg("runner", token)))
         print("[runner] connected — waiting for jobs (Ctrl-C to stop)", flush=True)
         ka = asyncio.create_task(_keepalive(ws))
