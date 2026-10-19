@@ -15,7 +15,7 @@
   header b{font-family:var(--mono)} header .sp{flex:1} header .sub{color:var(--muted);font-size:12px}
   .rdot{width:9px;height:9px;border-radius:50%;background:var(--red);display:inline-block;margin-right:6px}
   .rdot.on{background:var(--green)}
-  .wrap{flex:1;display:grid;grid-template-columns:370px 1fr;gap:12px;padding:12px;min-height:0;overflow:hidden}
+  .wrap{flex:1;align-self:center;width:100%;max-width:1480px;display:grid;grid-template-columns:330px minmax(0,1fr) 340px;gap:12px;padding:12px;min-height:0;overflow:hidden}
   .col{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden}
   @media(max-width:900px){
     body{height:auto;display:block}
@@ -125,13 +125,6 @@
       </details>
     </div>
 
-    <div class="card fill">
-      <h2>💬 Chat với runner</h2>
-      <label>App (tùy chọn, để hỏi/ra lệnh sửa)</label>
-      <select id="chatApp"><option value="">— app —</option></select>
-      <div class="thread" id="thread" style="margin-top:7px"><div class="msg bot"><div class="mava">✦</div><div class="bubble">Hỏi ("có app nào?", "spec của …?") hoặc ra lệnh sửa ("thêm nút xoá" + chọn app). Lệnh sửa cần xác nhận.</div></div></div>
-      <div class="composer"><input id="cmsg" placeholder="nhắn… (Enter)" onkeydown="if(event.key==='Enter')sendChat()"/><button id="csend" onclick="sendChat()">Gửi</button></div>
-    </div>
   </div>
   <div class="col">
     <div class="card fill" style="flex:0 1 auto">
@@ -141,6 +134,15 @@
     <div class="card fill">
       <h2>Log trực tiếp (từ runner)</h2>
       <pre class="log" id="log">— mô tả phần mềm rồi bấm “Tạo phần mềm” —</pre>
+    </div>
+  </div>
+  <div class="col">
+    <div class="card fill">
+      <h2>💬 Chat với runner</h2>
+      <label>App (tùy chọn, để hỏi/ra lệnh sửa)</label>
+      <select id="chatApp"><option value="">— app —</option></select>
+      <div class="thread" id="thread" style="margin-top:7px"><div class="msg bot"><div class="mava">✦</div><div class="bubble">Hỏi ("có app nào?", "spec của …?") hoặc ra lệnh sửa ("thêm nút xoá" + chọn app). Lệnh sửa cần xác nhận.</div></div></div>
+      <div class="composer"><input id="cmsg" placeholder="nhắn… (Enter)" onkeydown="if(event.key==='Enter')sendChat()"/><button id="csend" onclick="sendChat()">Gửi</button></div>
     </div>
   </div>
 </div>
