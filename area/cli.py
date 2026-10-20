@@ -89,6 +89,57 @@ def _confirm_fn(assume_yes: bool):
     return confirm
 
 
+def _edit_via_editor(text: str, filename: str) -> str:
+    """Open $EDITOR on the proposed text and return the edited result; if no editor
+    is configured, accept as-is."""
+    import subprocess
+    import tempfile
+
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+    if not editor:
+        print("[area] (no $EDITOR set — accepting as-is)")
+        return text
+    with tempfile.NamedTemporaryFile("w+", suffix="-" + filename, delete=False) as tf:
+        tf.write(text)
+        path = tf.name
+    try:
+        subprocess.run([*editor.split(), path])
+        with open(path) as f:
+            return f.read()
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _inception_approver(assume_yes: bool):
+    """A human-governance approve callback for `area inception`: show each proposed
+    bolt and let the human accept / edit / regenerate (or auto-accept with --yes
+    / non-interactive)."""
+    from area.inception.engine import REGENERATE
+
+    def approve(bolt, proposed):
+        print(f"\n[area] ─── {bolt.title} ({bolt.filename}) — đề xuất ───\n{proposed}\n")
+        if assume_yes or not sys.stdin.isatty():
+            print(f"[area] tự chấp nhận {bolt.filename}"
+                  + (" (--yes)" if assume_yes else " (không tương tác)"))
+            return proposed
+        while True:
+            try:
+                ans = input(f"[{bolt.title}] [a] chấp nhận · [e] sửa · [r] tạo lại? ").strip().lower()
+            except EOFError:
+                return proposed
+            if ans in ("", "a"):
+                return proposed
+            if ans == "r":
+                return REGENERATE
+            if ans == "e":
+                return _edit_via_editor(proposed, bolt.filename)
+
+    return approve
+
+
 def _add_common(sp):
     sp.add_argument("--name", default=None, help="project name / output folder")
     sp.add_argument("--target", default="cloudflare", choices=["cloudflare", "vercel", "plain"])
@@ -280,6 +331,20 @@ def main(argv=None) -> int:
     )
     ig.add_argument("artifacts", help="path to AI-DLC artifact file or directory")
     _add_common(ig)
+
+    ic = sub.add_parser(
+        "inception",
+        help="AI-DLC front-end: governed bolts (intent→stories→UoW→Testing Posture) "
+             "→ contract-compliant Inception artifacts (then `area intake`)",
+    )
+    ic.add_argument("requirement", help="natural-language requirement, in quotes")
+    ic.add_argument("--name", default=None, help="product name (prompted if omitted)")
+    ic.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    ic.add_argument("--model", default=None)
+    ic.add_argument("--yes", action="store_true",
+                    help="non-interactive: auto-accept each bolt (drops the human gate)")
+    ic.add_argument("--target", default="cloudflare", choices=["cloudflare", "vercel", "plain"],
+                    help="build target used in the printed `area intake` handoff")
 
     it = sub.add_parser(
         "iterate",
@@ -537,6 +602,27 @@ def main(argv=None) -> int:
         rc = _finish(res, args)
         trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
         return rc
+
+    if args.cmd == "inception":
+        from area.inception import run_inception
+        from area.pipeline import WORKSPACE
+
+        name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="inception"))
+        out = WORKSPACE / "specs" / name / "inception"
+        res = run_inception(
+            args.requirement, out, approve_fn=_inception_approver(args.yes),
+            backend=args.backend, model=args.model,
+        )
+        print(f"\n[area] ✅ Inception artifacts → {res['out']}")
+        for f in res["files"]:
+            print(f"  · {Path(f).name}")
+        if res["warnings"]:
+            print("[area] ⚠ contract warnings (advisory — the Testing Posture is the oracle):")
+            for w in res["warnings"]:
+                print(f"    - {w}")
+        print(f"[area] evidence trace: {res['trace_id']} (aidlc_trace.jsonl)")
+        print(f"\n[area] → build it:  area intake {out} --name {name} --tdd --target {args.target}")
+        return 0
 
     if args.cmd == "intake":
         from area import trace
