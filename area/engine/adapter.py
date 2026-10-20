@@ -132,8 +132,13 @@ def _mk_conversation(agent, ws, agent_iters, budget):
     )
 
 
-_TRANSIENT = ("rate", "429", "529", "overloaded", "server error", "timeout",
-              "temporar", "unavailable", "connection")
+# Specific phrases only — a bare "rate" matched "generate"/"accurate"/"separate"
+# and "connection" matched "invalid connection string", so permanent errors were
+# retried 5× with long backoff. Keep each token distinctive to a transient fault.
+_TRANSIENT = ("rate limit", "rate_limit", "ratelimit", "429", "529", "overloaded",
+              "server error", "service unavailable", "temporarily unavailable",
+              "timeout", "timed out", "etimedout", "econnreset", "econnrefused",
+              "connection reset", "connection refused")
 
 
 def _run_retry(conv, *, tries: int = 5, base: float = 15.0) -> None:

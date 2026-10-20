@@ -1,6 +1,7 @@
 """area.pipeline — Flow A (requirement) and Flow B (clone) end to end."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -337,6 +338,17 @@ def _resolve_clone_reference(source: str, spec_dir: Path) -> str:
     return f"{source} (local copy at: {sample})" if sample.exists() else source
 
 
+def _safe_clone_source(src: str) -> bool:
+    """Reject git transport-helper syntax (`ext::`, `fd::`, `<word>::…`, which run
+    an arbitrary command when git touches the remote) and leading-dash option
+    injection, BEFORE the agent git-clones the source. Allows local paths,
+    http(s)/ssh/git URLs, and scp-like `git@host:path`."""
+    s = (src or "").strip()
+    if not s or s.startswith("-"):
+        return False
+    return re.match(r"^[A-Za-z0-9][\w.+-]*::", s) is None
+
+
 def clone_pipeline(
     source: str,
     *,
@@ -357,6 +369,13 @@ def clone_pipeline(
 ) -> PipelineResult:
     """Flow B: reverse-engineer a sample app -> spec -> [independent review] -> build."""
     name = safe_name(name)
+    if not _safe_clone_source(source):
+        raise RuntimeError(
+            f"refusing clone source {source!r}: it looks like a git transport "
+            "helper (ext::/fd::/<helper>::) or option injection, which executes "
+            "arbitrary commands when git touches the remote. Use a plain "
+            "http(s)/ssh/git URL or a local path."
+        )
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] re-spec: {source!r} (kind={kind}, rea={use_rea})")
     spec, acc = spec_from_source(

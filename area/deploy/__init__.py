@@ -65,12 +65,12 @@ def deploy_with_gate(
         if status == "ok":
             print(f"[area] ✅ provenance ok — {detail}")
         elif status == "mismatch":
-            print(f"[area] ❌ provenance MISMATCH:\n{detail}")
-            if require_provenance:
-                print("[area] refusing deploy (AREA_REQUIRE_PROVENANCE) — re-run the "
-                      "build+gates to re-attest, then deploy.")
-                return False, None
-            print("[area] (advisory — set AREA_REQUIRE_PROVENANCE=1 to make this a hard block)")
+            # A mismatch means the artifact was MODIFIED after it was gated —
+            # always refuse, regardless of the flag (the flag only governs the
+            # weaker "absent provenance" case below).
+            print(f"[area] ❌ provenance MISMATCH — artifact changed after gating:\n{detail}")
+            print("[area] refusing deploy — re-run the build+gates to re-attest, then deploy.")
+            return False, None
         else:  # absent
             print(f"[area] ⚠ provenance: {detail}")
             if require_provenance:
