@@ -49,6 +49,8 @@ def heal(
     if not spec_path.exists():
         raise RuntimeError(f"no spec at {spec_path} — nothing to heal")
     before = spec_path.read_text()
+    acc_path = spec_dir / "acceptance.yaml"
+    before_acc = acc_path.read_text() if acc_path.exists() else ""
 
     task = (
         "You are the HEALER of a software factory. A deployed app hit a runtime "
@@ -76,7 +78,9 @@ def heal(
 
     spec = load_spec(spec_path)
     acc = load_acceptance(spec_dir / "acceptance.yaml")
-    changed = spec_path.read_text() != before
+    # the heal task may edit spec.yaml AND/OR acceptance.yaml — count either.
+    after_acc = acc_path.read_text() if acc_path.exists() else ""
+    changed = (spec_path.read_text() != before) or (after_acc != before_acc)
 
     build_passed = None
     if rebuild:

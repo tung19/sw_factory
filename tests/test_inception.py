@@ -71,6 +71,22 @@ def test_validate_missing_units_file(tmp_path):
     assert E.validate_artifacts(tmp_path) == ["03-units-of-work.md is missing"]
 
 
+def test_validate_accepts_bold_uow_ids(tmp_path):
+    (tmp_path / "03-units-of-work.md").write_text("- **UoW-1 — a**: a\n")
+    (tmp_path / "04-testing-posture.md").write_text("- **UoW-1**: Given a, When b, Then c.\n")
+    assert E.validate_artifacts(tmp_path) == []   # bold id must not false-flag
+
+
+def test_run_inception_regen_cap_marks_unapproved(tmp_path):
+    # approve_fn always regenerates → cap is hit without acceptance
+    res = E.run_inception("req", tmp_path,
+                          approve_fn=lambda b, p: E.REGENERATE,
+                          propose_fn=_canned_propose)
+    assert res["unapproved"] == [b.key for b in E.BOLTS]   # every bolt flagged
+    trail = (tmp_path / "aidlc_trace.jsonl").read_text()
+    assert "inception.regen_cap_unapproved" in trail
+
+
 # ---- run_inception orchestration ------------------------------------------------
 
 def test_run_inception_writes_all_four_contract_files(tmp_path):

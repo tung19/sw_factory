@@ -122,7 +122,8 @@ def validate_artifacts(out: str | Path) -> list[str]:
         warnings.append("no Units of Work found (expected `UoW-N` ids)")
     ptext = posture.read_text(errors="ignore") if posture.exists() else ""
     for u in sorted(uow):
-        stmts = re.findall(rf"^- {re.escape(u)}:.*$", ptext, re.M)
+        # tolerate a bold/italic id — `- **UoW-1**:` as well as `- UoW-1:`
+        stmts = re.findall(rf"^-\s*\*{{0,2}}{re.escape(u)}\*{{0,2}}:.*$", ptext, re.M)
         if not stmts:
             warnings.append(f"{u} has no Given/When/Then testing-posture statement")
         elif not all(all(k in s for k in ("Given", "When", "Then")) for s in stmts):
@@ -153,27 +154,40 @@ def run_inception(
 
     emit_evidence(out, trace_id, "inception.start", {"requirement": requirement[:500]})
     approved: dict[str, str] = {}
+    unapproved: list[str] = []
     for bolt in BOLTS:
         final: Optional[str] = None
+        accepted = False
         for attempt in range(1, MAX_REGEN + 1):
             proposed = propose_fn(bolt, bolt_prompt(bolt, requirement, out, regen=attempt > 1))
             decision = approve_fn(bolt, proposed)
+            final = proposed if decision is REGENERATE else decision  # type: ignore[assignment]
             if decision is REGENERATE:
                 emit_evidence(out, trace_id, "inception.regenerate", {"bolt": bolt.key, "attempt": attempt})
-                final = proposed  # keep last in case the cap is hit
                 continue
-            final = decision  # type: ignore[assignment]
+            accepted = True
             break
+        if not accepted:
+            # The regenerate cap was hit and the human never accepted. Write the
+            # last draft so the flow can continue, but do NOT record it as approved
+            # — flag it loudly (this is the oracle-shaping stage).
+            unapproved.append(bolt.key)
+            emit_evidence(out, trace_id, "inception.regen_cap_unapproved", {"bolt": bolt.key})
+            print(f"[area] ⚠ inception: '{bolt.key}' hit the regenerate cap "
+                  f"({MAX_REGEN}) still rejected — writing the last draft UNAPPROVED, review it.")
         (out / bolt.filename).write_text(final or "")
         approved[bolt.key] = final or ""
-        emit_evidence(out, trace_id, "inception.bolt", {"bolt": bolt.key, "chars": len(final or "")})
+        emit_evidence(out, trace_id, "inception.bolt",
+                      {"bolt": bolt.key, "chars": len(final or ""), "approved": accepted})
 
     warnings = validate_artifacts(out)
     emit_evidence(out, trace_id, "inception.ready",
-                  {"files": [b.filename for b in BOLTS], "warnings": warnings})
+                  {"files": [b.filename for b in BOLTS], "warnings": warnings,
+                   "unapproved": unapproved})
     return {
         "out": out,
         "approved": approved,
+        "unapproved": unapproved,
         "warnings": warnings,
         "trace_id": trace_id,
         "files": [str(out / b.filename) for b in BOLTS],

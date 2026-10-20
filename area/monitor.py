@@ -110,7 +110,10 @@ def status(name: str, *, limit: int = 50) -> dict:
     return {"name": name, "url": deployed_url(name), "samples": len(recs),
             "uptime_pct": round(100 * ok / len(recs), 1) if recs else None,
             "avg_ms": round(sum(lat) / len(lat)) if lat else None,
-            "p95_ms": (lat[int(len(lat) * 0.95) - 1] if lat else None),
+            # nearest-rank p95: index = ceil(0.95*n)-1, clamped (the old
+            # int(0.95*n)-1 under-reported — e.g. gave ~p90 for n=10, lat[-1] for n=1)
+            "p95_ms": (lat[min(len(lat) - 1, max(0, (len(lat) * 95 + 99) // 100 - 1))]
+                       if lat else None),
             "recent_failures": [r for r in recs if not r.get("ok")][-5:]}
 
 

@@ -173,8 +173,10 @@ def _test_text(holdout: Path) -> str:
 
 
 def _fingerprint(holdout: Path) -> frozenset:
+    # Key on CONTENT hash, not st_size: a rewrite with the same byte length (common
+    # when an author iterates) must count as progress, not trip the stall detector.
     return frozenset(
-        (str(f.relative_to(holdout)), f.stat().st_size)
+        (str(f.relative_to(holdout)), hashlib.sha256(f.read_bytes()).hexdigest())
         for f in holdout.rglob("*")
         if f.is_file()
     )

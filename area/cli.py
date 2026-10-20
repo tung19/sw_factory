@@ -668,6 +668,9 @@ def main(argv=None) -> int:
         print(f"\n[area] ✅ Inception artifacts → {res['out']}")
         for f in res["files"]:
             print(f"  · {Path(f).name}")
+        if res.get("unapproved"):
+            print(f"[area] ⚠ UNAPPROVED bolts (regenerate cap hit): "
+                  f"{', '.join(res['unapproved'])} — review these before building.")
         if res["warnings"]:
             print("[area] ⚠ contract warnings (advisory — the Testing Posture is the oracle):")
             for w in res["warnings"]:

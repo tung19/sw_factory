@@ -103,9 +103,13 @@ def measure(app_dir: str | Path, *, run_build: bool = False,
     m: dict[str, float] = {}
     if run_build:
         t0 = time.monotonic()
-        subprocess.run(["bash", "-lc", f"{build_cmd} 2>&1"], cwd=str(app),
-                       capture_output=True, text=True, env=_env())
+        bp = subprocess.run(["bash", "-lc", f"{build_cmd} 2>&1"], cwd=str(app),
+                            capture_output=True, text=True, env=_env())
         m["build_ms"] = int((time.monotonic() - t0) * 1000)
+        if bp.returncode != 0:
+            # don't silently time + measure a FAILED build as if it were fine
+            print("[area] nfr: ⚠ --nfr-build timing is off — the build FAILED "
+                  f"(rc={bp.returncode}); bundle metrics may be stale/partial.")
     b = _bundle_bytes(app)
     if b is not None:
         m["bundle_kib"] = b // 1024
