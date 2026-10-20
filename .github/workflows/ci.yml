@@ -36,12 +36,16 @@ jobs:
           # requirements.lock was frozen on macOS, so it pins pyobjc-* — macOS-only
           # packages that cannot build on the Linux runner. Strip them (nothing on
           # Linux requires them; they are darwin-marked in the real dep metadata).
-          grep -ivE '^pyobjc' requirements.lock > requirements.ci.txt
+          # Strip pyobjc-* (macOS-only, can't build on Linux) AND openhands-* — the
+          # engine is vendored in-tree (git subtree) and installed editable below,
+          # so it must NOT be pulled from PyPI (that would shadow the vendored copy).
+          grep -ivE '^pyobjc|^openhands-' requirements.lock > requirements.ci.txt
           # The lock is a complete flat resolution, so install it with --no-deps:
-          # pip then installs exactly these pins without re-resolving (and so never
-          # re-introduces the stripped pyobjc). area.engine imports openhands-sdk at
-          # module load, so the suite genuinely needs it installed.
+          # pip then installs exactly these pins without re-resolving.
           pip install --no-deps -r requirements.ci.txt
+          # Engine (OpenHands SDK) vendored in-tree: install the two packages editable
+          # from vendor/ so area.engine's module-load imports resolve to the in-tree copy.
+          pip install --no-deps -e vendor/software-agent-sdk/openhands-sdk -e vendor/software-agent-sdk/openhands-tools
           # The `area` package itself (editable) — so `import area` + the `area`
           # console script resolve. Deps already satisfied above.
           pip install -e . --no-deps

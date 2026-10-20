@@ -25,8 +25,13 @@ echo "  ✓ $("$PY" --version)"
 echo "▶ Tạo venv + cài area…"
 "$PY" -m venv .venv
 ./.venv/bin/pip install -q --upgrade pip
+# Engine (OpenHands SDK) is vendored in-tree via git subtree (vendor/software-agent-sdk).
+# Install the two packages editable from there so imports resolve to the in-tree copy
+# you own and can modify — not PyPI. Doing this first means `pip install -e .` finds
+# openhands-sdk/tools already satisfied and won't fetch them from PyPI.
+./.venv/bin/pip install -q -e vendor/software-agent-sdk/openhands-sdk -e vendor/software-agent-sdk/openhands-tools
 ./.venv/bin/pip install -q -e .
-echo "  ✓ area đã cài (editable)"
+echo "  ✓ area + engine (vendored) đã cài (editable)"
 
 # --- 3. môi trường -----------------------------------------------------------
 echo "▶ Kiểm tra môi trường:"

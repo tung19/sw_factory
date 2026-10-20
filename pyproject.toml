@@ -4,9 +4,11 @@ version = "0.0.0"
 description = "AREA — internal AI software factory (OpenHands SDK execution core)"
 readme = "README.md"
 requires-python = ">=3.12"
-# Engine deps are installed + pinned during Phase 0 (see requirements.lock / README).
-# OpenHands SDK releases weekly with breaking changes, so we PIN exact versions
-# and keep all engine calls behind area/engine (adapter) to contain churn.
+# Engine (OpenHands SDK) is VENDORED in-tree via git subtree under
+# vendor/software-agent-sdk (MIT) — AREA owns + can modify it, and `git subtree pull`
+# brings upstream fixes. [tool.uv.sources] below points these at the in-tree copy;
+# the pip path (scripts/install.sh, CI) installs them editable from vendor/.
+# All engine calls stay behind area/engine (adapter) to contain churn.
 dependencies = [
     "openhands-sdk==1.55.1",
     "openhands-tools==1.55.1",
@@ -27,6 +29,13 @@ area = "area.cli:main"
 [tool.uv]
 # Reproducibility guard: don't resolve to packages newer than this when locking.
 # exclude-newer = "2026-10-17"
+
+[tool.uv.sources]
+# The engine is vendored in-tree (git subtree: vendor/software-agent-sdk). uv
+# installs these two from the in-tree copy (editable) instead of PyPI, so edits
+# to the vendored SDK take effect immediately. `git subtree pull` updates it.
+openhands-sdk = { path = "vendor/software-agent-sdk/openhands-sdk", editable = true }
+openhands-tools = { path = "vendor/software-agent-sdk/openhands-tools", editable = true }
 
 [tool.pytest.ini_options]
 # AREA's own (dogfood) test suite. Pure orchestrator logic — no live agents.
