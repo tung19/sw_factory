@@ -48,6 +48,42 @@ def _lock(holdout: Path) -> dict:
     }
 
 
+def _lock_file(app: Path) -> Optional[Path]:
+    """The on-disk lock path for a standard workspace/apps/<name> layout, else None."""
+    if app.parent.name != "apps":
+        return None  # non-standard layout (e.g. a temp clone dir)
+    return app.parent.parent / "specs" / app.name / "holdout.lock"
+
+
+def _persist_lock(app: Path) -> None:
+    """Persist the on-disk holdout.lock via the canonical tools/lock-holdout.sh, so
+    a --tdd/author-locked holdout is recognized by tools/verify-holdout-intact.sh
+    AND the PreToolUse guard hook — not only a hand-locked one. The --tdd pipeline
+    otherwise keeps the checksum in memory only. Best-effort: a failure here never
+    breaks the build (the in-memory lock in _holdout_oracle still guards it)."""
+    if _lock_file(app) is None:
+        return
+    script = Path(__file__).resolve().parents[2] / "tools" / "lock-holdout.sh"
+    if not script.exists():
+        return
+    try:
+        subprocess.run(["bash", str(script), app.name, str(app.parent.parent)],
+                       capture_output=True, text=True, timeout=30)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _clear_lock(app: Path) -> None:
+    """Remove the on-disk lock (before a sanctioned re-authoring) so the guard hook
+    can't block the independent verifier from correcting a challenged test."""
+    lf = _lock_file(app)
+    try:
+        if lf is not None and lf.exists():
+            lf.unlink()
+    except OSError:
+        pass
+
+
 def _parity_preamble(reference: str) -> str:
     return (
         "=== CLONE PARITY MODE ===\n"
@@ -225,6 +261,7 @@ def author_until(
             f"holdout authoring failed ({stop}) after {attempts} attempts: {feedback}"
         )
     lock = _lock(holdout)
+    _persist_lock(app)  # write workspace/specs/<name>/holdout.lock (hook + verify-intact)
     print(f"[area] holdout: locked {len(lock)} file(s) under {HOLDOUT_DIR}/ "
           f"(all {len(_ac_ids(acc_yaml))} AC covered)")
     return holdout, lock
@@ -338,6 +375,10 @@ def readjudicate(
     if challenge is None:
         return False, _lock(holdout)
     before = _lock(holdout)
+    # This is the sanctioned path for CORRECTING a challenged locked test. Clear
+    # the on-disk lock first so the guard hook can't block the independent
+    # verifier's edit; the suite is re-locked (and re-persisted) below.
+    _clear_lock(app)
     task = (
         "You are the INDEPENDENT acceptance verifier (NOT the implementer). The "
         f"builder challenges the locked tests under {HOLDOUT_DIR}/ as wrong. "
@@ -357,6 +398,7 @@ def readjudicate(
     finally:
         agent.close()
     after = _lock(holdout)
+    _persist_lock(app)  # re-persist the (possibly corrected) locked suite
     changed = after != before
     print(
         f"[area] holdout: re-adjudicated challenge -> "

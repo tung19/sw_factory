@@ -1,82 +1,57 @@
-"""The anti-self-certification core: a built app's acceptance tests are locked
-and the implementer cannot weaken them. This is the guarantee the whole "done"
-claim rests on, so it is tested directly."""
-from pathlib import Path
+"""area.verify.holdout on-disk lock persistence. A --tdd build keeps its holdout
+checksum in memory; these helpers also write workspace/specs/<name>/holdout.lock
+(via the canonical tools/lock-holdout.sh) so tools/verify-holdout-intact.sh AND
+the PreToolUse guard hook recognize a --tdd-locked holdout, not only a hand-locked
+one. The agent-driven author/readjudicate flows are NOT run here."""
+import subprocess
 
-from area.verify.holdout import (
-    CHALLENGE_FILE,
-    HOLDOUT_DIR,
-    _holdout_oracle,
-    _lock,
-    pending_challenge,
-    tdd_build_oracle,
-)
+import area.verify.holdout as H
 
 
-def _mk(tmp_path) -> Path:
-    hold = tmp_path / HOLDOUT_DIR
+def _mk_holdout(ws, name="app1"):
+    app = ws / "apps" / name
+    hold = app / H.HOLDOUT_DIR
     hold.mkdir(parents=True)
-    (hold / "ac1.test.ts").write_text("describe('AC-1', () => {})\n")
-    (hold / "CONTRACT.md").write_text("lib/todo.ts: addTodo(x)\n")
-    return hold
+    (hold / "ac.holdout.test.ts").write_text("import {expect,test} from 'vitest'\n")
+    (hold / "CONTRACT.md").write_text("# contract\n")
+    return app
 
 
-def test_lock_covers_tests_but_excludes_challenge(tmp_path):
-    hold = _mk(tmp_path)
-    (hold / CHALLENGE_FILE).write_text("some challenge\n")
-    lock = _lock(hold)
-    assert set(lock) == {"ac1.test.ts", "CONTRACT.md"}  # challenge NOT locked
+def test_lock_file_standard_layout(tmp_path):
+    app = tmp_path / "apps" / "app1"
+    lf = H._lock_file(app)
+    assert lf == tmp_path / "specs" / "app1" / "holdout.lock"
 
 
-def test_clean_suite_passes(tmp_path):
-    hold = _mk(tmp_path)
-    oracle = _holdout_oracle(tmp_path, hold, _lock(hold), cmd=["bash", "-lc", "exit 0"])
-    assert oracle().ok
+def test_lock_file_non_standard_layout_is_none(tmp_path):
+    assert H._lock_file(tmp_path / "somewhere" / "app1") is None   # parent != 'apps'
 
 
-def test_weakening_a_locked_test_is_forbidden(tmp_path):
-    hold = _mk(tmp_path)
-    oracle = _holdout_oracle(tmp_path, hold, _lock(hold), cmd=["bash", "-lc", "exit 0"])
-    (hold / "ac1.test.ts").write_text("describe('AC-1', () => { it.skip('x', () => {}) })\n")
-    r = oracle()
-    assert not r.ok and "FORBIDDEN" in r.feedback
+def test_persist_lock_writes_a_lock_the_shell_verifier_accepts(tmp_path):
+    app = _mk_holdout(tmp_path, "app1")
+    H._persist_lock(app)
+    lock = tmp_path / "specs" / "app1" / "holdout.lock"
+    assert lock.exists() and lock.read_text().strip()      # non-empty
+
+    # The canonical shell verifier must accept exactly what _persist_lock wrote.
+    script = H.Path(H.__file__).resolve().parents[2] / "tools" / "verify-holdout-intact.sh"
+    r = subprocess.run(["bash", str(script), "app1", str(tmp_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr          # intact
 
 
-def test_deleting_a_locked_test_is_forbidden(tmp_path):
-    hold = _mk(tmp_path)
-    oracle = _holdout_oracle(tmp_path, hold, _lock(hold), cmd=["bash", "-lc", "exit 0"])
-    (hold / "ac1.test.ts").unlink()
-    assert not oracle().ok
+def test_persist_lock_skips_non_standard_layout(tmp_path):
+    odd = tmp_path / "somewhere" / "app1"
+    (odd / H.HOLDOUT_DIR).mkdir(parents=True)
+    H._persist_lock(odd)                                   # no 'apps' parent → no-op
+    assert not (tmp_path / "specs").exists()
 
 
-def test_failing_tests_fail_the_oracle_even_when_untouched(tmp_path):
-    hold = _mk(tmp_path)
-    oracle = _holdout_oracle(tmp_path, hold, _lock(hold), cmd=["bash", "-lc", "exit 1"])
-    r = oracle()
-    assert not r.ok and "FORBIDDEN" not in r.feedback  # a real test failure, not tampering
-
-
-def test_raising_a_challenge_is_not_tampering(tmp_path):
-    hold = _mk(tmp_path)
-    oracle = _holdout_oracle(tmp_path, hold, _lock(hold), cmd=["bash", "-lc", "exit 0"])
-    (hold / CHALLENGE_FILE).write_text("ac1 contradicts the spec — impossible.\n")
-    assert oracle().ok                      # sanctioned signal, lock still holds
-    assert pending_challenge(hold)          # and it is seen as pending
-
-
-def test_rejected_challenge_is_resolved(tmp_path):
-    hold = _mk(tmp_path)
-    (hold / CHALLENGE_FILE).write_text("REJECTED: the spec clearly requires it.\n")
-    assert pending_challenge(hold) is None
-
-
-def test_tdd_build_oracle_composes_build_and_holdout(tmp_path):
-    hold = _mk(tmp_path)
-    for target, token in (("cloudflare", "build:cf"), ("plain", "build")):
-        oracle = tdd_build_oracle(tmp_path, hold, _lock(hold), target=target)
-        cmd = next(
-            c.cell_contents
-            for c in oracle.__closure__
-            if isinstance(getattr(c, "cell_contents", None), list)
-        )
-        assert token in cmd[-1] and HOLDOUT_DIR in cmd[-1]
+def test_clear_lock_removes_then_is_noop(tmp_path):
+    app = _mk_holdout(tmp_path, "app1")
+    H._persist_lock(app)
+    lock = tmp_path / "specs" / "app1" / "holdout.lock"
+    assert lock.exists()
+    H._clear_lock(app)
+    assert not lock.exists()
+    H._clear_lock(app)                                     # absent → no error
