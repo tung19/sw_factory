@@ -30,6 +30,7 @@ import json
 import os
 import re
 import signal
+import socket
 import subprocess
 import time
 import urllib.error
@@ -64,6 +65,18 @@ def _env() -> dict:
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
+
+
+def _free_port() -> int:
+    """Grab a currently-free TCP port. There is an inherent TOCTOU gap between
+    release and the app's bind, but it is far safer than the framework default
+    (next start defaults to :3000 and crashes on a collision instead of bumping)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+    finally:
+        s.close()
 
 
 # ---- pure: percentiles, evaluation, budget sourcing -----------------------------
@@ -123,14 +136,19 @@ def _pick_start_cmd(app: Path) -> tuple[Optional[str], Optional[str]]:
 
 
 def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.Popen, int, str]]:
-    """Launch the app, detect its port from the boot banner. Returns
-    (proc, port, script) or None. The process runs in its own session so the whole
+    """Launch the app on a FORCED free port (via PORT env) so it never collides
+    with whatever holds the framework default (:3000). Detect the actual port from
+    the boot banner, falling back to the forced port if the server is up but quiet.
+    Returns (proc, port, script) or None. Runs in its own session so the whole
     npm→node tree can be torn down by process-group signal."""
     cmd, script = _pick_start_cmd(app)
     if not cmd:
         return None
+    port_hint = _free_port()
+    env = _env()
+    env["PORT"] = str(port_hint)  # Next.js (next dev/start) honors PORT
     proc = subprocess.Popen(
-        ["bash", "-lc", f"{cmd} 2>&1"], cwd=str(app), env=_env(),
+        ["bash", "-lc", f"{cmd} 2>&1"], cwd=str(app), env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         start_new_session=True,
     )
@@ -145,9 +163,11 @@ def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.
 
     Thread(target=_reader, daemon=True).start()
 
-    deadline = time.monotonic() + start_timeout
+    # Watch for the boot banner, but only briefly — if the server is alive but
+    # hasn't printed a parseable URL, trust the PORT we forced.
+    banner_deadline = time.monotonic() + min(start_timeout, 30.0)
     port: Optional[int] = None
-    while time.monotonic() < deadline and port is None:
+    while time.monotonic() < banner_deadline and port is None:
         for line in list(buf):
             m = _URL_RE.search(line)
             if m:
@@ -158,8 +178,10 @@ def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.
                 break
             time.sleep(0.2)
     if port is None:
-        _stop(proc)
-        return None
+        if proc.poll() is not None:
+            _stop(proc)  # the server process actually exited (e.g. a real crash)
+            return None
+        port = port_hint  # up but quiet → trust the forced PORT (validated by _wait_ready)
     return proc, port, script  # type: ignore[return-value]
 
 
