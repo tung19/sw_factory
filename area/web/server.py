@@ -170,6 +170,14 @@ async def api_inception_save(request):
         return JSONResponse({"error": str(e)}, status_code=400)
 
 
+async def api_trace(request):
+    """An app's end-to-end audit trail (PR8 Phase 3): Inception → spec → gates →
+    provenance → deploy, merged in time order."""
+    from area.evidence import read_trail
+
+    return JSONResponse(read_trail(request.path_params["name"]))
+
+
 async def api_metrics(request):
     """Determinism + cost metrics (PR3): first-try/retry rates, avg attempts, and
     cost/latency per stage, aggregated from workspace/.area/runs.jsonl."""
@@ -212,6 +220,7 @@ app = Starlette(
         Route("/api/apps", api_apps),
         Route("/api/apps/{name}/spec", api_spec),
         Route("/api/apps/{name}/inception", api_inception),
+        Route("/api/apps/{name}/trace", api_trace),
         Route("/api/apps/{name}/tree", api_tree),
     ],
     # PR6: the dashboard drives agent runs + deploys, so gate every request on a

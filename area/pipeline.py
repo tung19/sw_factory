@@ -301,12 +301,17 @@ def intake_pipeline(
     as the build oracle. Construction evidence is emitted back to the AI-DLC
     trail (aidlc_trace.jsonl) for end-to-end audit.
     """
-    from area.intake import emit_evidence, new_trace_id, spec_from_aidlc
+    from area.intake import emit_evidence, spec_from_aidlc
 
     name = safe_name(name)
     root = Path(workspace) if workspace else WORKSPACE
     spec_dir = root / "specs" / name
-    trace_id = new_trace_id()
+    # Continue the Inception run's trace when these artifacts came from `area
+    # inception` (its origin trace lives under specs/<name>/inception/), so the
+    # whole chain Inception → intake → gates → deploy is ONE correlated trace.
+    from area.evidence import current_trace
+
+    trace_id = current_trace(name)
     print(f"[area] intake : {artifacts!r} (AI-DLC, trace={trace_id})")
     spec, acc = spec_from_aidlc(
         artifacts, spec_dir, expected=expected, backend=backend, model=model,

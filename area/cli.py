@@ -221,8 +221,16 @@ def _finish(res, args) -> int:
     status = "✅ GREEN" if res.passed else "❌ NOT green"
     print(f"\n[area] {status} — {res.name}")
     print(f"[area] spec: {res.spec_dir}\n[area] app : {res.app_dir}")
+
+    from area import evidence
+
+    def _ev(event, data=None):
+        evidence.emit(res.name, event, data)
+
     if not res.passed:
+        _ev("build.not_green")
         return 1
+    _ev("build.green", {"target": getattr(args, "target", None)})
 
     all_ = getattr(args, "all", False)
     gates = [
@@ -237,7 +245,9 @@ def _finish(res, args) -> int:
               "skipping redundant 'verify' gate")
     for g in gates:
         print(f"\n[area] === gate: {g} ===")
-        if not _run_gate(g, res.name, args):
+        ok = _run_gate(g, res.name, args)
+        _ev("gate", {"gate": g, "ok": bool(ok)})
+        if not ok:
             print(f"[area] ❌ gate '{g}' failed — skipping deploy")
             return 1
 
@@ -253,6 +263,7 @@ def _finish(res, args) -> int:
                          gates=gate_results, spec_dir=res.spec_dir)
         print(f"[area] provenance recorded ({sum(gate_results.values())} checks) "
               "→ .area/provenance.json")
+        _ev("provenance.recorded", {"checks": sum(gate_results.values())})
     except Exception as e:  # noqa: BLE001
         print(f"[area] provenance write skipped (warn): {e}")
 
@@ -278,7 +289,9 @@ def _finish(res, args) -> int:
     if args.deploy:
         from area.deploy import deploy_with_gate
 
-        ok, _ = deploy_with_gate(res.app_dir, confirm=_confirm_fn(args.yes))
+        ok, url = deploy_with_gate(res.app_dir, confirm=_confirm_fn(args.yes))
+        _ev("deploy.done" if ok else "deploy.failed",
+            {"url": url} if isinstance(url, str) else None)
         return 0 if ok else 1
     return 0
 
@@ -465,6 +478,11 @@ def main(argv=None) -> int:
 
     ob = sub.add_parser("obs", help="Show cost/latency/outcome summary of agent runs")
     ob.add_argument("--json", action="store_true")
+
+    tr = sub.add_parser("trace", help="Show an app's end-to-end audit trail "
+                                      "(Inception → spec → gates → provenance → deploy)")
+    tr.add_argument("name")
+    tr.add_argument("--json", action="store_true")
 
     mm = sub.add_parser("mem", help="Show the experience store (pitfalls remembered)")
 
@@ -837,6 +855,32 @@ def main(argv=None) -> int:
                 f"  {lbl:18} n={d['n']} ok={d['ok']} "
                 f"${round(d['cost'], 4)} (avg ${d['avg_cost']}) {round(d['time'], 1)}s{det}"
             )
+        return 0
+
+    if args.cmd == "trace":
+        import datetime
+
+        from area.evidence import read_trail
+
+        recs = read_trail(args.name)
+        if args.json:
+            import json as _json
+
+            print(_json.dumps(recs, indent=2))
+            return 0
+        if not recs:
+            print(f"[area] no audit trail for {args.name} "
+                  "(run `area inception`/`run` to create one)")
+            return 1
+        traces = {r.get("trace") for r in recs if r.get("trace")}
+        print(f"[area] audit trail — {args.name} · {len(recs)} events · "
+              f"{len(traces)} trace(s)")
+        for r in recs:
+            ts = datetime.datetime.fromtimestamp(r.get("ts", 0)).strftime("%H:%M:%S")
+            data = r.get("data") or {}
+            extra = " ".join(f"{k}={v}" for k, v in data.items()
+                             if k != "requirement")[:72]
+            print(f"  {ts}  {r.get('event', ''):26} {extra}  [{(r.get('trace') or '')[:14]}]")
         return 0
 
     if args.cmd == "mem":

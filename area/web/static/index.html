@@ -632,6 +632,7 @@ async function refreshApps(){
       d.innerHTML=`<span class="grow"><b>${esc(a.name)}</b>${a.url?` <a href="${a.url}" target="_blank" onclick="event.stopPropagation()">↗</a>`:''}</span>`;
       const mk=(txt,fn,cls)=>{const b=document.createElement('button');b.className='mini'+(cls?' '+cls:'');b.textContent=txt;b.onclick=fn;return b;};
       d.appendChild(mk('spec',()=>viewSpec(a.name)));
+      d.appendChild(mk('trace',()=>viewTrace(a.name)));
       d.appendChild(mk('export',()=>exportApp(a.name),'exp'));
       if(a.built) d.appendChild(mk('deploy',()=>deployApp(a.name)));
       box.appendChild(d);
@@ -666,6 +667,21 @@ async function exportApp(name){
   $('mTitle').textContent=name+' — export';
   $('mBody').innerHTML=`<pre>${esc(j.log||'')}</pre>`+
     (push?'':'<p class="meta">Đã tạo repo git local. Để push: <code>area export '+esc(name)+' --repo &lt;url&gt; --push</code></p>');
+  $('modal').classList.add('open');
+}
+
+async function viewTrace(name){
+  const recs=await (await fetch('/api/apps/'+name+'/trace')).json();
+  $('mTitle').textContent=name+' — audit trail';
+  if(!recs.length){$('mBody').innerHTML='<p class="meta">chưa có trail (chạy Inception/Run để tạo)</p>';}
+  else{
+    const body=recs.map(r=>{
+      const ts=new Date((r.ts||0)*1000).toLocaleTimeString();
+      const d=r.data?Object.entries(r.data).filter(([k])=>k!=='requirement').map(([k,v])=>k+'='+JSON.stringify(v)).join(' '):'';
+      return ts+'  '+(r.event||'')+'  '+d+'  ['+((r.trace||'').slice(0,14))+']';
+    }).join('\n');
+    $('mBody').innerHTML=`<p class="meta">${recs.length} sự kiện — Inception → spec → gates → provenance → deploy</p><pre>${esc(body)}</pre>`;
+  }
   $('modal').classList.add('open');
 }
 
