@@ -40,9 +40,13 @@ if [ -f tsconfig.json ]; then
     # config errors (`error TS18003: ...`), and if a non-zero exit yields NO
     # recognizable diagnostics at all (tsc crash, not installed, bad tsconfig),
     # FAIL — never mask a broken type-check as green.
+    # Classify by the FILE-PATH field only (before the first "("), not the whole
+    # line — otherwise a production error whose MESSAGE merely contains the string
+    # "__tests__/_holdout/" (a string-literal type, an import path) would be
+    # misclassified as a holdout error and silently ignored.
     all_err=$(grep -E 'error TS[0-9]' /tmp/_area_tsc.txt)
-    prod_err=$(printf '%s\n' "$all_err" | grep -v '__tests__/_holdout/' | grep -E 'error TS[0-9]')
-    hold_err=$(printf '%s\n' "$all_err" | grep '__tests__/_holdout/')
+    prod_err=$(printf '%s\n' "$all_err" | grep -vE '^[^(]*__tests__/_holdout/' | grep -E 'error TS[0-9]')
+    hold_err=$(printf '%s\n' "$all_err" | grep -E '^[^(]*__tests__/_holdout/')
     if [ -n "$prod_err" ]; then
       echo "$prod_err" | head -25; echo "TSC: FAIL"; fail=1
     elif [ -n "$hold_err" ]; then
@@ -53,14 +57,21 @@ if [ -f tsconfig.json ]; then
       echo "TSC: FAIL (tsc did not complete — crash / not installed / bad tsconfig)"; fail=1
     fi
   fi
-else echo "(no tsconfig)"; fi
+else
+  # No tsconfig: a pure-JS app is fine, but TypeScript files with no tsconfig are
+  # UNCHECKED — fail rather than silently skip the only type gate.
+  if find . -path ./node_modules -prune -o \( -name '*.ts' -o -name '*.tsx' \) -print 2>/dev/null | grep -q .; then
+    echo "TSC: FAIL (no tsconfig.json but TypeScript files present — types unchecked)"; fail=1
+  else echo "(no tsconfig, no TS files — skipped)"; fi
+fi
 echo "== npm audit (%LEVEL%+) =="
 npm audit --audit-level=%LEVEL% > /tmp/_area_aud.txt 2>&1; rc=$?
 tail -15 /tmp/_area_aud.txt
 [ $rc -eq 0 ] && echo "AUDIT: ok" || { echo "AUDIT: FAIL (%LEVEL%+)"; fail=1; }
 echo "== secrets scan =="
-secret_hits=$(grep -rnEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9_-]{16,}" app lib src components 2>/dev/null \
-     | grep -viE "process\.env|NEXT_PUBLIC|example|placeholder|dummy|import |from " | head -10)
+secret_hits=$( { grep -rnEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9/+_.=-]{16,}" app lib src components server pages 2>/dev/null; \
+     grep -nEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9/+_.=-]{16,}" .env .env.* 2>/dev/null; } \
+     | grep -viE "process\.env|NEXT_PUBLIC|example|placeholder|dummy|changeme|your[_-]|import |from " | head -10)
 if [ -n "$secret_hits" ]; then
   echo "$secret_hits"
   echo "SECRETS: FAIL (possible hardcoded secret)"; fail=1
@@ -83,6 +94,7 @@ _RISKY = [
      "shell exec — command-injection risk"),
     (re.compile(r"Math\.random\s*\(\)"), "Math.random() — not cryptographically secure (use crypto)"),
     (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*\$\{"), "SQL built via string interpolation — injection risk"),
+    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*['\"`]\s*\+"), "SQL built via string concatenation — injection risk"),
 ]
 _SCAN_DIRS = ("app", "lib", "src", "components", "server", "pages")
 _SCAN_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs"}

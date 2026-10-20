@@ -28,6 +28,14 @@ def test_advisory_scan_flags_risky_patterns(tmp_path):
     assert all(isinstance(r, str) and isinstance(ln, int) for r, ln, _ in found)
 
 
+def test_advisory_scan_flags_sql_string_concatenation(tmp_path):
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "q.ts").write_text(
+        'const q = "SELECT * FROM users WHERE id = " + userId;\n')
+    msgs = " | ".join(m for _, _, m in A.advisory_scan(tmp_path))
+    assert "concatenation" in msgs
+
+
 def test_advisory_scan_clean_app_has_no_findings(tmp_path):
     (tmp_path / "lib").mkdir()
     (tmp_path / "lib" / "tip.ts").write_text(
