@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="referrer" content="no-referrer"/>
 <title>AREA — AI Software Factory</title>
 <style>
   :root{
@@ -314,6 +315,12 @@ const GUI_TOKEN=new URLSearchParams(location.search).get('token');
 if(GUI_TOKEN){
   const _fetch=window.fetch;
   window.fetch=(u,o)=>{o=o||{};o.headers=Object.assign({},o.headers,{'Authorization':'Bearer '+GUI_TOKEN});return _fetch(u,o);};
+  // Strip the token from the visible URL + history so it can't leak via history,
+  // Referer, or a shared screenshot. The cookie (set by the first ?token= load)
+  // carries same-origin auth; GUI_TOKEN stays in memory for Bearer/SSE. Other
+  // query params (e.g. ?job=) are preserved.
+  try{const u=new URL(location.href);u.searchParams.delete('token');
+    history.replaceState({}, '', u.pathname+(u.search||'')+u.hash);}catch(_){ }
 }
 // EventSource can't set headers, so pass the token as a query param for SSE.
 function sse(url){return new EventSource(GUI_TOKEN?url+(url.includes('?')?'&':'?')+'token='+encodeURIComponent(GUI_TOKEN):url);}
