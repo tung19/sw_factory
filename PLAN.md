@@ -182,5 +182,5 @@ SW_Factory/
 ### "Production-ready" = done khi
 - [ ] Build được app **persistence thật + auth + multi-user**, validated live trên 2–3 app.
 - [x] Gate **perf/load + NFR + security sâu** + **CI/CD** cho AREA. ✅ (7 gate: verify/audit/e2e/chaos/nfr/perf/product; CI xanh)
-- [ ] Phụ thuộc beta có fallback; chi phí/độ tất định đo & kiểm soát được.
+- [~] Phụ thuộc beta có fallback (OpenHands **vendored in-tree** ✅; vinext fallback còn); **chi phí/độ tất định ĐO ĐƯỢC ✅** (PR3 — `area obs` + `/api/metrics`: first-try-rate, retry-rate, avg attempts, $/run per-stage. Số thực hiện tại: first-try 91% · avg 1.12 attempts · $1.65/run). Kiểm soát = budget cap ✅.
 - [ ] Dashboard có auth; deploy/rollback/monitor validated nhiều lần.
