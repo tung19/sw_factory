@@ -76,6 +76,20 @@ def _check_collision(name: str) -> str:
             name = safe_name(nn)
 
 
+def _looks_auth(spec_dir) -> bool:
+    """Does the spec describe auth / sessions / forms? Those are exactly the apps
+    where logic-green ≠ live-works (a holdout can pass while live signup is broken),
+    so the e2e gate is enforced before a deploy of such an app."""
+    text = ""
+    for fn in ("spec.yaml", "acceptance.yaml"):
+        p = Path(spec_dir) / fn
+        if p.exists():
+            text += p.read_text(errors="ignore").lower()
+    return bool(re.search(
+        r"\b(auth|login|log ?in|sign ?in|sign ?up|signup|register|password|"
+        r"session|cookie|credential|logout|form|submit)\b", text))
+
+
 def _confirm_fn(assume_yes: bool):
     def confirm(path: str) -> bool:
         if assume_yes:
@@ -183,6 +197,9 @@ def _add_common(sp):
     sp.add_argument("--strict", action="store_true",
                     help="audit tier-2: make advisory risky-pattern findings BLOCK")
     sp.add_argument("--e2e", action="store_true", help="Playwright E2E gate after build")
+    sp.add_argument("--no-e2e", action="store_true",
+                    help="override the e2e gate that is otherwise FORCED before "
+                         "deploying an auth/session/form app (not recommended)")
     sp.add_argument("--chaos", action="store_true", help="chaos/resilience gate after build")
     sp.add_argument("--nfr", action="store_true",
                     help="perf/NFR budget gate: measure bundle/deps/weight vs budget "
@@ -243,6 +260,21 @@ def _finish(res, args) -> int:
         gates.remove("verify")
         print("[area] (--tdd) holdout already enforced as the build oracle — "
               "skipping redundant 'verify' gate")
+
+    # logic-green ≠ live-works: for an auth/session/form app the e2e gate caught a
+    # live signup bug a passing holdout missed. Enforce it BEFORE a deploy of such
+    # an app (where it actually bit); recommend it otherwise. --no-e2e overrides.
+    if (_looks_auth(res.spec_dir) and "e2e" not in gates
+            and not getattr(args, "no_e2e", False)):
+        if args.deploy:
+            gates.append("e2e")
+            print("[area] 🔒 auth/session/form + deploy → e2e gate is MANDATORY "
+                  "before deploy (added); pass --no-e2e to override.")
+        else:
+            print("[area] ⚠ auth/session/form detected — the e2e gate is strongly "
+                  "recommended (logic-green ≠ live-works). Add --e2e (it is forced "
+                  "before a --deploy).")
+
     for g in gates:
         print(f"\n[area] === gate: {g} ===")
         ok = _run_gate(g, res.name, args)
@@ -396,6 +428,8 @@ def main(argv=None) -> int:
     it.add_argument("--verify", action="store_true")
     it.add_argument("--audit", action="store_true")
     it.add_argument("--e2e", action="store_true")
+    it.add_argument("--no-e2e", action="store_true",
+                    help="override the e2e gate forced before deploying an auth app")
     it.add_argument("--chaos", action="store_true")
     it.add_argument("--nfr", action="store_true", help="perf/NFR budget gate after rebuild")
     it.add_argument("--perf", action="store_true",

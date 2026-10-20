@@ -22,7 +22,7 @@ upstream fixes with `git subtree pull --prefix=vendor/software-agent-sdk <repo> 
 
 ```bash
 source .venv/bin/activate
-python -m pytest            # ~276 tests, ~2s
+python -m pytest            # ~330 tests, ~2-3s
 ```
 
 The suite is **logic-only and agent-free** — it never spawns a build agent or hits an

@@ -62,7 +62,7 @@ Posture rule: **deterministic gates block; LLM-judgement gates are advisory unti
 |------|--------|------|---------|
 | holdout / `verify` | `holdout.py` | the locked oracle (independent agent authors, runner executes) | **yes** (the oracle) |
 | `audit` | `audit.py` | tier-1 deterministic (tsc + `npm audit` + secrets); tier-2 advisory risky-pattern scan | tier-1 yes; tier-2 on `--strict` |
-| `e2e` | `e2e.py` | Playwright drives the real UI (one spec per AC) | **yes** for auth/session/form apps |
+| `e2e` | `e2e.py` | Playwright drives the real UI (one spec per AC) | **forced before deploy** for auth/session/form apps (`--no-e2e` overrides) |
 | `chaos` | `chaos.py` | adversarial inputs + resilience; hardens the app | yes (chaos suite) |
 | `nfr` | `nfr.py` | deterministic static budget (bundle/deps/install size) | spec `nfr.yaml` blocks; defaults advisory unless `--strict` |
 | `perf` | `perf.py` | boots the app, fires concurrent load, measures p50/p95/p99 + throughput + error-rate | spec `perf.yaml` blocks; defaults advisory unless `--strict` |
@@ -72,6 +72,16 @@ Why both `nfr` and `perf`: `nfr` measures the *artifact* statically (CI-friendly
 run); `perf` measures the *running app* (catches runtime regressions a static
 measure can't). Both boot/measure on a **free ephemeral port** so a busy `:3000`
 (e.g. a local Langfuse) can't derail them.
+
+**Independence caveat (important):** only the **holdout** is a truly *independent*
+oracle — authored by a separate agent from the spec alone, checksum-locked, and
+guard-hooked. `product` and the spec reviewer are also independent (separate
+keyless reviewers via `area.engine.ask_cli`). But `e2e`, `chaos`, and `audit --fix`
+drive the **implementer-style build agent** — it authors those tests *and* makes
+them pass, and they are not locked — so a green `e2e`/`chaos` is same-agent
+*hardening*, not an independent check. Don't over-trust them the way you trust the
+holdout. (All gates now also confirm their runner actually executed tests, not just
+exited 0 — see `area/verify/_runners.py`.)
 
 ## Independence enforcement (the heart)
 
