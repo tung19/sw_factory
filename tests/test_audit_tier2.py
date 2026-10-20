@@ -60,6 +60,24 @@ def test_advisory_scan_still_flags_real_shell_exec(tmp_path):
     assert "command-injection" in msgs
 
 
+def test_advisory_scan_bare_spawn_is_not_shell_exec(tmp_path):
+    """Regression: a bare `spawn(...)` (redux-saga / xstate) is NOT shell exec and
+    must not be flagged; real child_process spawn is still caught via the import."""
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "saga.ts").write_text(
+        "import { spawn, fork } from 'redux-saga/effects';\n"
+        "function* root(){ yield spawn(watcher); yield fork(other); }\n"
+    )
+    assert A.advisory_scan(tmp_path) == []  # no child_process → no finding
+
+    (tmp_path / "lib" / "proc.ts").write_text(
+        "import { spawn } from 'node:child_process';\n"
+        "spawn('sh', ['-c', cmd]);\n"
+    )
+    msgs = " | ".join(m for _, _, m in A.advisory_scan(tmp_path))
+    assert "command-injection" in msgs  # child_process import catches it
+
+
 def test_advisory_scan_ignores_node_modules_and_nonsource(tmp_path):
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "page.tsx").write_text("export default () => null;")

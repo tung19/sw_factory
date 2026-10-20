@@ -36,8 +36,10 @@ def main() -> int:
         return 0
 
     cwd = data.get("cwd") or os.getcwd()
-    path = fp if os.path.isabs(fp) else os.path.normpath(os.path.join(cwd, fp))
-    norm = path.replace("\\", "/")
+    raw = fp if os.path.isabs(fp) else os.path.join(cwd, fp)
+    # realpath (not normpath) resolves symlinks, so a locked holdout cannot be
+    # edited through a symlinked path that lexically hides __tests__/_holdout/.
+    norm = os.path.realpath(raw).replace("\\", "/")
     if MARKER not in norm:
         return 0  # not a holdout file
 
@@ -45,17 +47,15 @@ def main() -> int:
         return 0  # the governance escape hatch is always allowed
 
     # .../workspace/apps/<name>/__tests__/_holdout/...  → lock at
-    # .../workspace/specs/<name>/holdout.lock
+    # .../workspace/specs/<name>/holdout.lock. The app name is exactly the segment
+    # before the marker, and 'apps' is the one before that (works even when the
+    # app itself is named 'apps').
     before = norm.split(MARKER, 1)[0]          # .../workspace/apps/<name>
     parts = before.split("/")
-    try:
-        apps_i = len(parts) - 1 - parts[::-1].index("apps")
-    except ValueError:
-        return 0  # unexpected layout → don't block
-    if apps_i + 1 >= len(parts):
-        return 0
-    name = parts[apps_i + 1]
-    ws_root = "/".join(parts[:apps_i])         # .../workspace
+    if len(parts) < 2 or parts[-2] != "apps":
+        return 0  # not the standard workspace/apps/<name> layout → don't block
+    name = parts[-1]
+    ws_root = "/".join(parts[:-2])             # .../workspace
     lock = os.path.join(ws_root, "specs", name, "holdout.lock")
     if not os.path.isfile(lock):
         return 0  # not locked yet → authoring phase, allow

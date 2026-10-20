@@ -31,19 +31,27 @@ fail=0
 echo "== tsc --noEmit (locked holdout excluded) =="
 if [ -f tsconfig.json ]; then
   npx tsc --noEmit > /tmp/_area_tsc.txt 2>&1; rc=$?
-  # The locked holdout is the ORACLE: verified by its RUNNER (vitest), not by
-  # tsc strictness, and it is frozen (can't be edited to fix a type nit). So a
-  # tsc error confined to __tests__/_holdout/ must not block the static gate;
-  # judge tsc on everything else (product code + editable tests).
-  prod_err=$(grep -E ': error TS' /tmp/_area_tsc.txt | grep -v '__tests__/_holdout/')
   if [ $rc -eq 0 ]; then
     echo "TSC: ok"
-  elif [ -z "$prod_err" ]; then
-    echo "(tsc errors are only inside the locked holdout oracle — ignored; it is run-verified by vitest)"
-    echo "TSC: ok"
   else
-    echo "$prod_err" | head -25
-    echo "TSC: FAIL"; fail=1
+    # The locked holdout is the ORACLE: run-verified by vitest, frozen (can't be
+    # edited to fix a type nit). So IGNORE errors confined to __tests__/_holdout/.
+    # But match BOTH file-location errors (`foo.ts(1,2): error TS...`) AND global/
+    # config errors (`error TS18003: ...`), and if a non-zero exit yields NO
+    # recognizable diagnostics at all (tsc crash, not installed, bad tsconfig),
+    # FAIL — never mask a broken type-check as green.
+    all_err=$(grep -E 'error TS[0-9]' /tmp/_area_tsc.txt)
+    prod_err=$(printf '%s\n' "$all_err" | grep -v '__tests__/_holdout/' | grep -E 'error TS[0-9]')
+    hold_err=$(printf '%s\n' "$all_err" | grep '__tests__/_holdout/')
+    if [ -n "$prod_err" ]; then
+      echo "$prod_err" | head -25; echo "TSC: FAIL"; fail=1
+    elif [ -n "$hold_err" ]; then
+      echo "(tsc errors are only inside the locked holdout oracle — ignored; run-verified by vitest)"
+      echo "TSC: ok"
+    else
+      tail -25 /tmp/_area_tsc.txt
+      echo "TSC: FAIL (tsc did not complete — crash / not installed / bad tsconfig)"; fail=1
+    fi
   fi
 else echo "(no tsconfig)"; fi
 echo "== npm audit (%LEVEL%+) =="
@@ -66,10 +74,12 @@ _RISKY = [
     (re.compile(r"dangerouslySetInnerHTML"), "React XSS sink — dangerouslySetInnerHTML"),
     (re.compile(r"\beval\s*\("), "eval() — code-injection risk"),
     (re.compile(r"\bnew\s+Function\s*\("), "new Function() — dynamic code execution"),
-    # Shell exec only: child_process, or a STANDALONE exec/spawn call. A method
-    # call like `db.exec(...)` (node:sqlite) or `regexp.exec(...)` is NOT shell
-    # exec — the negative lookbehind for `.`/word char skips those false positives.
-    (re.compile(r"child_process|(?<![.\w])(?:exec|execSync|execFile|execFileSync|spawn|spawnSync)\s*\("),
+    # Shell exec only: child_process, or a STANDALONE exec* call. A method call
+    # like `db.exec(...)` (node:sqlite) or `regexp.exec(...)` is NOT shell exec —
+    # the negative lookbehind for `.`/word char skips those. `spawn`/`spawnSync`
+    # are caught via the child_process keyword (not the bare-call list) because a
+    # bare `spawn(...)` is common in redux-saga / xstate and is NOT shell exec.
+    (re.compile(r"child_process|(?<![.\w])(?:execSync|execFileSync|execFile|exec)\s*\("),
      "shell exec — command-injection risk"),
     (re.compile(r"Math\.random\s*\(\)"), "Math.random() — not cryptographically secure (use crypto)"),
     (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*\$\{"), "SQL built via string interpolation — injection risk"),

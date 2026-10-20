@@ -7,7 +7,9 @@ throughput and error rate — catching gross runtime regressions (an O(n²) rend
 a blocking handler, a route that 500s under load) that a static measure cannot.
 
 Same oracle posture as nfr / audit tier-2:
-  - workspace/specs/<name>/perf.yaml present  → its budgets BLOCK (the user's oracle)
+  - workspace/specs/<name>/perf.yaml present  → BLOCKING. Your values override the
+    lenient defaults, and the FULL resulting budget blocks — so to loosen one
+    metric, set it explicitly (every unlisted default still applies and blocks).
   - no perf.yaml                              → lenient defaults, ADVISORY (or --strict)
 
 perf.yaml is a flat `metric: number` map, e.g.:
@@ -106,7 +108,9 @@ def evaluate(metrics: dict[str, float], budget: dict[str, float]) -> list[dict]:
 def load_budget(name: str, *, strict: bool = False,
                 root: Optional[Path] = None) -> tuple[dict[str, float], bool]:
     """Return (budget, blocking). A spec-level perf.yaml means the user committed
-    real budgets → blocking; otherwise defaults, advisory unless --strict."""
+    real budgets → blocking; its values override the defaults and the FULL merged
+    budget blocks (set a metric explicitly to loosen it). Otherwise defaults,
+    advisory unless --strict. (Mirrors area.verify.nfr.load_budget.)"""
     root = Path(root) if root else WORKSPACE
     perf = root / "specs" / name / "perf.yaml"
     budget: dict[str, float] = dict(DEFAULT_BUDGET)
