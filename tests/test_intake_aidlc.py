@@ -70,7 +70,7 @@ def test_intake_cli_threads_tdd(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(area.pipeline, "intake_pipeline", fake)
-    assert area.cli.main(["intake", "/some/aidlc", "--tdd"]) == 0
+    assert area.cli.main(["intake", "/some/aidlc", "--name", "ig", "--tdd"]) == 0
     assert cap["tdd"] is True and cap["artifacts"] == "/some/aidlc"
 
 

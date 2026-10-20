@@ -63,7 +63,7 @@ def test_cli_open_default_calls_preview(monkeypatch, tmp_path):
     monkeypatch.setattr(area.pipeline, "run_pipeline", lambda req, **kw: _res(tmp_path))
     monkeypatch.setattr(area.preview, "open_preview",
                         lambda app_dir, **kw: called.append(app_dir) or {"opened": True})
-    area.cli.main(["run", "x"])
+    area.cli.main(["run", "x", "--name", "t"])
     assert called  # default --open fired
 
 
@@ -72,5 +72,5 @@ def test_cli_no_open_skips_preview(monkeypatch, tmp_path):
     monkeypatch.setattr(area.pipeline, "run_pipeline", lambda req, **kw: _res(tmp_path))
     monkeypatch.setattr(area.preview, "open_preview",
                         lambda app_dir, **kw: called.append(app_dir) or {"opened": True})
-    area.cli.main(["run", "x", "--no-open"])
+    area.cli.main(["run", "x", "--name", "t", "--no-open"])
     assert not called

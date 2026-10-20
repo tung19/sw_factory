@@ -133,7 +133,7 @@ def test_cli_clarify_and_spec_review_default_on(monkeypatch, tmp_path):
     cap = {}
     monkeypatch.setattr(area.pipeline, "run_pipeline",
                         lambda req, **kw: (cap.update(kw), _res(tmp_path))[1])
-    area.cli.main(["run", "x"])
+    area.cli.main(["run", "x", "--name", "t"])
     assert cap["clarify"] is True and cap["spec_review"] is True
 
 
@@ -141,7 +141,7 @@ def test_cli_no_clarify_no_spec_review(monkeypatch, tmp_path):
     cap = {}
     monkeypatch.setattr(area.pipeline, "run_pipeline",
                         lambda req, **kw: (cap.update(kw), _res(tmp_path))[1])
-    area.cli.main(["run", "x", "--no-clarify", "--no-spec-review"])
+    area.cli.main(["run", "x", "--name", "t", "--no-clarify", "--no-spec-review"])
     assert cap["clarify"] is False and cap["spec_review"] is False
 
 

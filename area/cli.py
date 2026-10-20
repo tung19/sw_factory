@@ -11,9 +11,69 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
+import sys
 from pathlib import Path
 
 from area._util import safe_name
+
+
+def _slug_from(text: str, fallback: str) -> str:
+    """A short kebab-case slug suggestion from a requirement/source string."""
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    slug = "-".join(words[:4])[:40].strip("-")
+    return slug or fallback
+
+
+def _resolve_name(provided: str | None, *, hint: str, fallback: str) -> str:
+    """Resolve the product name. Each product gets its OWN workspace/apps/<name>
+    (+ specs/<name>), so a name is required — AREA never silently dumps builds into
+    a shared generic folder. If --name is omitted: prompt interactively (suggesting
+    a slug from the requirement); non-interactive → fail with guidance."""
+    if provided:
+        return safe_name(provided)
+    suggestion = _slug_from(hint, fallback)
+    if sys.stdin.isatty():
+        try:
+            ans = input(f"Tên sản phẩm cho project này [{suggestion}]: ").strip()
+        except EOFError:
+            ans = ""
+        return safe_name(ans or suggestion)
+    print(f"[area] --name là BẮT BUỘC khi chạy không tương tác — mỗi sản phẩm cần "
+          f"workspace riêng (workspace/apps/<name>). Gợi ý: --name {suggestion}")
+    raise SystemExit(2)
+
+
+def _check_collision(name: str) -> str:
+    """Don't silently clobber an existing product folder. Interactive: confirm
+    overwrite, take a new name, or bail to `area iterate`. Non-interactive: warn
+    and proceed (the caller chose the name explicitly)."""
+    from area.pipeline import WORKSPACE
+
+    while True:
+        app_dir = WORKSPACE / "apps" / name
+        if not (app_dir.exists() and any(app_dir.iterdir())):
+            return name
+        if not sys.stdin.isatty():
+            print(f"[area] ⚠ '{name}' đã tồn tại (workspace/apps/{name}) — sẽ build "
+                  f"ĐÈ. Để sửa dần dùng: area iterate {name} \"<thay đổi>\"")
+            return name
+        try:
+            ans = input(f"[area] '{name}' đã tồn tại. [o] ghi đè · [Enter] đổi tên · "
+                        "[i] iterate? ").strip().lower()
+        except EOFError:
+            ans = "o"
+        if ans == "o":
+            return name
+        if ans == "i":
+            print(f"[area] → chạy: area iterate {name} \"<thay đổi>\"")
+            raise SystemExit(0)
+        try:
+            nn = input("Tên mới: ").strip()
+        except EOFError:
+            nn = ""
+        if nn:
+            name = safe_name(nn)
 
 
 def _confirm_fn(assume_yes: bool):
@@ -429,10 +489,11 @@ def main(argv=None) -> int:
         from area import trace
         from area.pipeline import run_pipeline
 
-        trace.start_pipeline(args.name or "app", "run",
+        name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="app"))
+        trace.start_pipeline(name, "run",
                              inputs={"requirement": args.requirement[:500], "tdd": args.tdd})
         res = run_pipeline(
-            args.requirement, name=args.name or "app", target=args.target,
+            args.requirement, name=name, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
             design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
@@ -445,10 +506,11 @@ def main(argv=None) -> int:
         from area import trace
         from area.pipeline import clone_pipeline
 
-        trace.start_pipeline(args.name or "clone", "clone",
+        name = _check_collision(_resolve_name(args.name, hint=args.source, fallback="clone"))
+        trace.start_pipeline(name, "clone",
                              inputs={"source": args.source, "tdd": args.tdd})
         res = clone_pipeline(
-            args.source, name=args.name or "clone", kind=args.kind,
+            args.source, name=name, kind=args.kind,
             use_rea=args.rea, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
@@ -480,10 +542,11 @@ def main(argv=None) -> int:
         from area import trace
         from area.pipeline import intake_pipeline
 
-        trace.start_pipeline(args.name or "intake", "intake",
+        name = _check_collision(_resolve_name(args.name, hint=args.artifacts, fallback="intake"))
+        trace.start_pipeline(name, "intake",
                              inputs={"artifacts": args.artifacts, "tdd": args.tdd})
         res = intake_pipeline(
-            args.artifacts, name=args.name or "intake", target=args.target,
+            args.artifacts, name=name, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
             design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
