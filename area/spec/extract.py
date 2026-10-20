@@ -101,6 +101,28 @@ def load_assumptions(out_dir: str | Path) -> list[dict]:
         return []
 
 
+def append_assumptions(out_dir: str | Path, items: list[dict]) -> int:
+    """Merge extra assumption dicts into the ledger (dedup by question text).
+
+    Used by the independent spec reviewer to fold the ambiguities it found into the
+    same assumptions.yaml the --clarify gate reads. Returns how many were newly added.
+    """
+    if not items:
+        return 0
+    p = Path(out_dir) / "assumptions.yaml"
+    existing = load_assumptions(out_dir)
+    seen = {str(a.get("question", "")).strip().lower() for a in existing}
+    added = [a for a in items
+             if str(a.get("question", "")).strip()
+             and str(a.get("question", "")).strip().lower() not in seen]
+    if not added:
+        return 0
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.safe_dump({"assumptions": existing + added}, sort_keys=False,
+                                allow_unicode=True))
+    return len(added)
+
+
 def extract_spec(
     requirement: str,
     out_dir: str | Path,

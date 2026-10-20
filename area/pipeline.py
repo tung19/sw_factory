@@ -9,6 +9,8 @@ from area._util import safe_name
 from area.build import build_app
 from area.re import spec_from_source
 from area.spec import Acceptance, Spec, extract_spec
+from area.spec.extract import append_assumptions
+from area.spec.review import review_spec
 
 WORKSPACE = Path(__file__).resolve().parent.parent / "workspace"
 
@@ -36,6 +38,20 @@ def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict]:
         a for a in load_assumptions(root / "specs" / name)
         if str(a.get("material")).lower() == "true"
     ]
+
+
+def _spec_review_step(root: Path, name: str, requirement: str, backend, model) -> int:
+    """Independent spec-vs-intent review (recommendation #2): a SEPARATE reviewer —
+    not the spec author — folds any MATERIAL ambiguities the spec stage missed into
+    the assumptions ledger, so the clarify gate surfaces them. Advisory + fail-open
+    (it can only ADD questions, never block on its own). Returns how many were added."""
+    spec_dir = root / "specs" / name
+    extra = review_spec(requirement, spec_dir, backend=backend, model=model)
+    n = append_assumptions(spec_dir, extra)
+    if n:
+        print(f"[area] spec-review: +{n} material ambiguity(ies) an INDEPENDENT "
+              "reviewer flagged (merged into assumptions.yaml)")
+    return n
 
 
 def _clarify_result(name, spec, acc, root, questions) -> PipelineResult:
@@ -144,10 +160,16 @@ def run_pipeline(
     design: bool = False,
     tdd: bool = False,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
-    """Flow A: requirement -> spec -> [design] -> [lock tests] -> build."""
+    """Flow A: requirement -> spec -> [independent review] -> [clarify] -> [design] -> build.
+
+    `clarify` defaults ON (recommendation #1): a vague requirement STOPS at the spec
+    on material ambiguity instead of silently guessing + building. `spec_review` adds
+    an independent spec-vs-intent reviewer (recommendation #2) before the gate.
+    """
     name = safe_name(name)
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] spec   : {requirement!r}")
@@ -156,6 +178,8 @@ def run_pipeline(
         model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    if clarify and spec_review:
+        _spec_review_step(root, name, requirement, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
         return _clarify_result(name, spec, acc, root, qs)
@@ -216,7 +240,8 @@ def iterate_pipeline(
     design: bool = False,
     tdd: bool = True,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
     """Flow A⁺ — the "command box": amend an EXISTING app from a natural-language
@@ -234,7 +259,7 @@ def iterate_pipeline(
     return run_pipeline(
         amended, name=name, target=target, backend=backend, model=model,
         spec_iters=spec_iters, build_iters=build_iters, design=design, tdd=tdd,
-        expected=expected, clarify=clarify, workspace=root,
+        expected=expected, clarify=clarify, spec_review=spec_review, workspace=root,
     )
 
 
@@ -250,7 +275,8 @@ def intake_pipeline(
     design: bool = False,
     tdd: bool = False,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
     """Hybrid seam: ingest AI-DLC Inception artifacts -> spec -> [design] -> build.
@@ -271,6 +297,8 @@ def intake_pipeline(
         max_iters=spec_iters, trace_id=trace_id,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    if clarify and spec_review:
+        _spec_review_step(root, name, artifacts, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
         emit_evidence(spec_dir, trace_id, "clarify.needed", {"questions": len(qs)})
@@ -302,10 +330,11 @@ def clone_pipeline(
     design: bool = False,
     tdd: bool = False,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
-    """Flow B: reverse-engineer a sample app -> spec -> [design] -> build."""
+    """Flow B: reverse-engineer a sample app -> spec -> [independent review] -> build."""
     name = safe_name(name)
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] re-spec: {source!r} (kind={kind}, rea={use_rea})")
@@ -314,6 +343,8 @@ def clone_pipeline(
         expected=expected, backend=backend, model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    if clarify and spec_review:
+        _spec_review_step(root, name, source, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
         return _clarify_result(name, spec, acc, root, qs)

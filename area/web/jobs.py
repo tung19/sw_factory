@@ -74,8 +74,16 @@ class JobManager:
         f: list[str] = []
         if p.get("tdd"):
             f.append("--tdd")
+        # clarify + spec-review are DEFAULT-ON in the CLI now; emit the explicit
+        # flag when on (harmless no-op) and --no-* only on an explicit opt-out.
         if p.get("clarify"):
             f.append("--clarify")
+        elif "clarify" in p:
+            f.append("--no-clarify")
+        if p.get("spec_review"):
+            f.append("--spec-review")
+        elif "spec_review" in p:
+            f.append("--no-spec-review")
         if p.get("expected"):
             f += ["--expect", str(p["expected"])]
         if p.get("design"):

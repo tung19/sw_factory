@@ -50,9 +50,17 @@ def _add_common(sp):
                          "acceptance criteria (you supply part of the oracle)")
     sp.add_argument("--expect-file", default=None,
                     help="file containing expected results / examples")
-    sp.add_argument("--clarify", action="store_true",
-                    help="stop at spec and surface MATERIAL ambiguities (assumptions) "
+    sp.add_argument("--clarify", dest="clarify", action="store_true", default=True,
+                    help="(DEFAULT) stop at spec and surface MATERIAL ambiguities "
                          "before building, instead of guessing silently")
+    sp.add_argument("--no-clarify", dest="clarify", action="store_false",
+                    help="skip the clarify gate — guess defaults and build without "
+                         "asking (NOT recommended for a vague requirement)")
+    sp.add_argument("--spec-review", dest="spec_review", action="store_true", default=True,
+                    help="(DEFAULT) an INDEPENDENT reviewer hunts for material "
+                         "ambiguities the spec stage missed, to surface via --clarify")
+    sp.add_argument("--no-spec-review", dest="spec_review", action="store_false",
+                    help="skip the independent spec-vs-intent reviewer")
     sp.add_argument("--verify", action="store_true",
                     help="independent holdout acceptance check after a green build")
     sp.add_argument("--audit", action="store_true", help="security/static gate after build")
@@ -190,8 +198,14 @@ def main(argv=None) -> int:
     it.add_argument("--expect", default=None,
                     help="expected results / examples (authoritative, become AC)")
     it.add_argument("--expect-file", default=None)
-    it.add_argument("--clarify", action="store_true",
-                    help="stop at spec and surface MATERIAL ambiguities before rebuilding")
+    it.add_argument("--clarify", dest="clarify", action="store_true", default=True,
+                    help="(DEFAULT) stop at spec and surface MATERIAL ambiguities before rebuilding")
+    it.add_argument("--no-clarify", dest="clarify", action="store_false",
+                    help="skip the clarify gate (guess + rebuild without asking)")
+    it.add_argument("--spec-review", dest="spec_review", action="store_true", default=True,
+                    help="(DEFAULT) independent reviewer flags material ambiguities the spec missed")
+    it.add_argument("--no-spec-review", dest="spec_review", action="store_false",
+                    help="skip the independent spec-vs-intent reviewer")
     it.add_argument("--verify", action="store_true")
     it.add_argument("--audit", action="store_true")
     it.add_argument("--e2e", action="store_true")
@@ -348,7 +362,7 @@ def main(argv=None) -> int:
             args.requirement, name=args.name or "app", target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify,
+            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
         )
         rc = _finish(res, args)
         trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
@@ -365,7 +379,7 @@ def main(argv=None) -> int:
             use_rea=args.rea, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify,
+            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
         )
         rc = _finish(res, args)
         trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
@@ -383,7 +397,7 @@ def main(argv=None) -> int:
             args.name, args.request, target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=tdd, expected=expected, clarify=args.clarify,
+            design=args.design, tdd=tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
         )
         rc = _finish(res, args)
         trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
@@ -399,7 +413,7 @@ def main(argv=None) -> int:
             args.artifacts, name=args.name or "intake", target=args.target,
             backend=args.backend, model=args.model,
             spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify,
+            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
         )
         rc = _finish(res, args)
         trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
