@@ -13,6 +13,7 @@ from typing import Optional
 from area._util import safe_name
 from area.engine import build_agent, command_verifier, run_until
 from area.pipeline import WORKSPACE
+from area.verify.perf import _free_port
 
 E2E_DIR = "e2e"
 
@@ -32,14 +33,22 @@ def e2e_verify(
         raise RuntimeError(f"no app at {app}")
     acc_yaml = acc_path.read_text() if acc_path.exists() else ""
 
+    # Pin a free port: the framework default (:3000) is often taken (a local
+    # Langfuse, another dev server), and reuseExistingServer:true would latch
+    # onto that FOREIGN server and silently test the wrong app. Bind our own.
+    port = _free_port()
+
     task = (
         "Add Playwright END-TO-END tests that drive the REAL UI of this app and "
         "assert EACH acceptance criterion below.\n"
         "- Install Playwright: `npm i -D @playwright/test` and "
         "`npx playwright install chromium`.\n"
-        "- Create playwright.config.ts with a `webServer` block that starts the "
-        "app (e.g. `npm run dev`) on a port and a matching `baseURL`; "
-        "`reuseExistingServer: true`.\n"
+        f"- IMPORTANT: port 3000 may be taken on this machine. Use port {port} "
+        f"for EVERYTHING. In playwright.config.ts set `use.baseURL = "
+        f"'http://localhost:{port}'` and a `webServer` block "
+        f"`{{ command: 'npm run dev -- -p {port}', url: 'http://localhost:{port}', "
+        f"reuseExistingServer: false, timeout: 120000 }}`. Do NOT use port 3000 "
+        "and do NOT set reuseExistingServer:true (it would reuse a foreign server).\n"
         f"- One spec per AC under {E2E_DIR}/ . Interact THROUGH the UI (goto, "
         "fill, click, expect visible text) — do NOT import internal modules.\n"
         "- Make `npx playwright test` pass. Run it yourself and fix the APP and "
