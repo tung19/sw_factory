@@ -31,6 +31,7 @@ import yaml
 from area._util import safe_name
 from area.engine import Verifier, VerifyResult, build_agent, run_once, run_until
 from area.pipeline import WORKSPACE
+from area.verify._runners import assert_vitest_ran
 
 HOLDOUT_DIR = "__tests__/_holdout"
 # The ONE file the builder may write inside the locked dir: a challenge that a
@@ -46,6 +47,17 @@ def _lock(holdout: Path) -> dict:
         for f in sorted(holdout.rglob("*"))
         if f.is_file() and f.name != CHALLENGE_FILE
     }
+
+
+def _expected_ac_count(holdout: Path) -> int:
+    """Distinct AC-<n> ids across the holdout test files = how many acceptance
+    criteria the suite must execute (≥1 test per AC), used to reject a green
+    exit that actually ran too few / zero tests."""
+    ids: set[str] = set()
+    for f in holdout.rglob("*"):
+        if f.is_file() and f.suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs"}:
+            ids |= set(re.findall(r"\bAC-\d+\b", f.read_text(errors="ignore")))
+    return len(ids)
 
 
 def _lock_file(app: Path) -> Optional[Path]:
@@ -274,6 +286,8 @@ def _holdout_oracle(
     it. `cmd` defaults to just the holdout tests; TDD passes a build+test cmd."""
     test_cmd = cmd or ["bash", "-lc", f"npx vitest run {HOLDOUT_DIR}"]
 
+    expected = _expected_ac_count(holdout)
+
     def oracle() -> VerifyResult:
         if _lock(holdout) != lock:
             return VerifyResult(
@@ -286,7 +300,21 @@ def _holdout_oracle(
         except OSError as e:
             return VerifyResult(False, f"holdout runner failed: {e}")
         out = (proc.stdout + "\n" + proc.stderr).strip()
-        return VerifyResult(proc.returncode == 0, out[-4000:])
+        if proc.returncode != 0:
+            return VerifyResult(False, out[-4000:])
+        # Exit 0 is NOT enough: confirm the locked suite actually RAN (the app's
+        # vitest config is builder-controlled + unlocked, so passWithNoTests / a
+        # non-matching include can exit 0 with zero tests collected).
+        ran, why = assert_vitest_ran(out, expected)
+        if not ran:
+            return VerifyResult(
+                False,
+                f"ORACLE DID NOT RUN: build/exit was green but {why}. The locked "
+                f"acceptance suite must EXECUTE (check vitest config: "
+                f"passWithNoTests / include must match {HOLDOUT_DIR}/).\n\n"
+                + out[-3500:],
+            )
+        return VerifyResult(True, out[-4000:])
 
     return oracle
 
