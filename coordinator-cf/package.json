@@ -1,9 +1,0 @@
-{
-  "private": true,
-  "type": "module",
-  "name": "area-coordinator",
-  "description": "AREA coordinator — Cloudflare Worker + Durable Object relay (ADR 0002). No agents, no secrets.",
-  "scripts": {
-    "test": "node --test test/"
-  }
-}
