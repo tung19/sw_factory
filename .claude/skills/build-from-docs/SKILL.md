@@ -12,9 +12,12 @@ no runner.
 
 ## Steps (in order)
 
-1. **Intake.** Read `docs/requirements/<name>.{md,txt,pdf}` (for PDF, extract text first).
-   Write `workspace/specs/<name>/spec.md` (summary) + `acceptance.yaml` (numbered AC,
-   each "given/when/then"). If a material ambiguity blocks a buildable spec, STOP and ask.
+1. **Intake.** Read `docs/requirements/<name>.{md,txt,pdf}` (extract PDF text first). Run
+   `tools/scaffold-app.sh <name>` to lay out the spec-driven project. Draft
+   `docs/01-engineering-intent.md` + `02-product-requirements.md` (for Tung to confirm) and
+   the machine `workspace/specs/<name>/acceptance.yaml` (numbered AC, "given/when/then").
+   Write `docs/03-technical-spec.md` + `04-api-and-data-design.md` as you design (thin for
+   small apps). If a material ambiguity blocks a buildable spec, STOP and ask.
 
 2. **Lock the oracle — all three independence enforcements:**
    - **(c) Subagent.** Spawn a **Task subagent** whose prompt contains ONLY the spec +
@@ -39,6 +42,11 @@ no runner.
 5. **Provenance.** `tools/provenance.sh <name>` (attests spec→gates→artifact).
 
 6. **Deploy (if asked).** `tools/deploy.sh <name>` → your Cloudflare/Vercel.
+
+As you go, record each artifact in its phase doc: `05-test-specification.md` (before
+locking the holdout), `06-security-and-reliability.md` (audit results, step 4),
+`07-deployment-and-monitoring.md` (live URL, step 6), and `08-maintenance-and-spec-drift.md`
++ `changelog/release-notes.md` on every iterate. Keep them thin for small apps.
 
 ## Iterate an existing app
 Amend `workspace/specs/<name>/spec.md` with the change (keep existing AC unless overridden),

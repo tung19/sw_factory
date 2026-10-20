@@ -28,9 +28,12 @@ spec question, not yours to self-answer.
 
 ### 0 · Intake
 - Read the requirement from `docs/requirements/<name>.{md,txt,pdf}` (or the one given).
-- Extract a **spec**: a one-paragraph summary + a numbered list of **acceptance
-  criteria (AC)**, each testable ("given… when… then…"). Save to
-  `workspace/specs/<name>/spec.md` + `acceptance.yaml`.
+- Run `tools/scaffold-app.sh <name>` to lay out the spec-driven project.
+- Draft `docs/01-engineering-intent.md` + `docs/02-product-requirements.md` from the
+  requirement (for Tung to confirm), and the machine-readable **acceptance** at
+  `workspace/specs/<name>/acceptance.yaml` — numbered AC, each "given… when… then…".
+- As you design, write `docs/03-technical-spec.md` (architecture/stack) and
+  `docs/04-api-and-data-design.md` (routes/schema) — thin for a small app.
 - If a material ambiguity blocks a buildable spec, **STOP and ask Tung** — do not guess.
 
 ### 1 · Lock the oracle (TDD + the 3 independence enforcements)
@@ -76,12 +79,25 @@ To change an app: **amend** its spec with the new request (keep existing AC unle
 overridden) → **RE-LOCK** a fresh holdout → build to green again. Same spine; never pipe
 a raw change straight to code.
 
-## Where things live
-- `docs/requirements/` — drop a requirement here (md / txt / pdf).
-- `workspace/specs/<name>/` — spec + acceptance + `holdout.lock`.
-- `workspace/apps/<name>/` — the generated app (gitignored; `git init` + commit to make it
-  your own repo).
-- `.claude/skills/` — domain knowledge (apply it). `tools/` — deterministic scripts.
+## Project layout (spec-driven, per app)
+`tools/scaffold-app.sh <name>` lays out each app as a spec-driven project (adapts the
+standard SDD workspace). Each loop stage writes into the right phase doc:
+- `docs/01-engineering-intent.md`, `02-product-requirements.md` — **Tung defines** (why +
+  requirements + AC). You may draft them from the raw requirement for Tung to confirm.
+- `docs/03-technical-spec.md`, `04-api-and-data-design.md` — **you write at intake/design**.
+- `docs/05-test-specification.md` — **you write before locking the holdout** (the AC→test map).
+- `docs/06-security-and-reliability.md` — **you append the audit/gate results** (step 3).
+- `docs/07-deployment-and-monitoring.md` — **you record the live URL** (step 5).
+- `docs/08-maintenance-and-spec-drift.md` + `changelog/release-notes.md` — **on each iterate**.
+- Keep these thin — or skip — for a small app; don't force eight empty files on a tiny lib.
+- App **SOURCE** sits at the app root (`package.json`, `app/`, `lib/` …) where the framework
+  expects it. `tasks/` holds the plan + Tung's review-notes.
+- `__tests__/_holdout/` — the **LOCKED independent oracle** (AREA's addition to SDD).
+  `tests/{unit,integration,end-to-end}/` — other tests.
+
+Repo level: `docs/requirements/` (inbox) · `workspace/specs/<name>/` (machine
+`acceptance.yaml` + `holdout.lock`) · `.claude/skills/` (domain knowledge) · `tools/`.
+Generated apps are gitignored — `git init` + commit to make one your own repo.
 
 ## Not in scope on this branch
 The multi-user **coordinator + runner** (web dashboard, relay, ACP backend) lives on the
