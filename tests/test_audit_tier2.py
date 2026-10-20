@@ -36,6 +36,30 @@ def test_advisory_scan_clean_app_has_no_findings(tmp_path):
     assert A.advisory_scan(tmp_path) == []
 
 
+def test_advisory_scan_sqlite_exec_is_not_shell_exec(tmp_path):
+    """Regression: `db.exec(SCHEMA)` (node:sqlite) and `rx.exec(s)` (regexp) are
+    METHOD calls, not shell exec — they must not be flagged command-injection."""
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "db.ts").write_text(
+        "import { DatabaseSync } from 'node:sqlite';\n"
+        "const db = new DatabaseSync('x.db');\n"
+        "db.exec(SCHEMA);\n"
+        "const m = /ab/.exec(s);\n"
+    )
+    assert A.advisory_scan(tmp_path) == []
+
+
+def test_advisory_scan_still_flags_real_shell_exec(tmp_path):
+    """The standalone child_process exec/spawn must STILL be flagged."""
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "run.ts").write_text(
+        "import { exec } from 'node:child_process';\n"
+        "exec(`rm -rf ${dir}`);\n"
+    )
+    msgs = " | ".join(m for _, _, m in A.advisory_scan(tmp_path))
+    assert "command-injection" in msgs
+
+
 def test_advisory_scan_ignores_node_modules_and_nonsource(tmp_path):
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "page.tsx").write_text("export default () => null;")
