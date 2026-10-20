@@ -29,7 +29,11 @@ def rea_mcp_config() -> dict:
         "rea": MCPServer(
             transport="stdio",
             command="npx",
-            args=["-y", "rea-agents"],
+            # `--mcp` makes rea-agents speak MCP on stdio; bare `rea` just prints
+            # help and exits, so the client sees the connection close. The clean
+            # npm cache dodges the root-owned ~/.npm EACCES crash on first launch.
+            args=["-y", "rea-agents", "--mcp"],
+            env={"npm_config_cache": str(Path.home() / ".cache" / "npm-area")},
             description="Reverse Engineer Anything (authorized targets only)",
         )
     }
