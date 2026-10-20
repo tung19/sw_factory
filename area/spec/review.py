@@ -18,12 +18,12 @@ unavailable reviewer never blocks a build (fail-open — it can only ADD questio
 """
 from __future__ import annotations
 
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
 import yaml
+
+from area.engine import ask_cli
 
 SENTINEL = "<<<REVIEW>>>"
 
@@ -92,19 +92,6 @@ def _parse_review(raw: str) -> list[dict]:
     return out
 
 
-def _ask(prompt: str) -> str:
-    """One keyless turn via the Claude Code CLI (print mode), in a throwaway empty
-    dir so the agent has nothing to explore. Raises on failure (caller degrades)."""
-    with tempfile.TemporaryDirectory() as d:
-        proc = subprocess.run(
-            ["claude", "-p", prompt],
-            cwd=d, capture_output=True, text=True, timeout=180,
-        )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip()[:200] or "claude -p failed")
-    return proc.stdout
-
-
 def review_spec(
     requirement: str,
     spec_dir: str | Path,
@@ -135,7 +122,7 @@ def review_spec(
         pass
     prompt = _review_prompt(req, spec_text, acc_text, assumptions_text)
     try:
-        raw = (ask or _ask)(prompt)
+        raw = (ask or (lambda p: ask_cli(p, model=model, label="spec-review")))(prompt)
     except Exception as e:  # noqa: BLE001 — reviewer is advisory; never crash a build
         print(f"[area] spec-review skipped (reviewer unavailable): {type(e).__name__}")
         return []

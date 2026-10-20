@@ -125,8 +125,11 @@ def _mk_conversation(agent, ws, agent_iters, budget):
                 agent=agent, workspace=str(ws),
                 max_iteration_per_run=agent_iters, max_budget_per_run=budget,
             )
-        except Exception:
-            pass  # fall back to the factory (iteration cap only)
+        except Exception as e:  # noqa: BLE001
+            # Don't silently drop a cost-safety control — warn, then fall back to
+            # the iteration-cap-only factory.
+            print(f"[area] ⚠ could not apply --budget cap (${budget}); using the "
+                  f"iteration cap only: {type(e).__name__}: {str(e)[:80]}")
     return Conversation(
         agent=agent, workspace=str(ws), max_iteration_per_run=agent_iters
     )
@@ -135,6 +138,52 @@ def _mk_conversation(agent, ws, agent_iters, budget):
 # Specific phrases only — a bare "rate" matched "generate"/"accurate"/"separate"
 # and "connection" matched "invalid connection string", so permanent errors were
 # retried 5× with long backoff. Keep each token distinctive to a transient fault.
+def mcp_stdio_server(*, command: str, args: Sequence[str],
+                     env: Optional[dict] = None, description: str = ""):
+    """Build a stdio MCPServer config — keeps the OpenHands SDK import inside this
+    one seam (callers like area/re must not import the SDK directly)."""
+    from openhands.sdk.mcp.config import MCPServer
+
+    return MCPServer(transport="stdio", command=command, args=list(args),
+                     env=env or {}, description=description)
+
+
+def ask_cli(prompt: str, *, model: Optional[str] = None, timeout: float = 180.0,
+            label: str = "ask") -> str:
+    """Keyless single-shot through the ONE engine seam: run `claude -p` in a
+    throwaway empty dir and return stdout. Used by the independent reviewers
+    (spec-review, product-fit) and the dashboard intake chat, so every agent call
+    goes through this module — logged to obs (cost/determinism visibility) and
+    honoring --model. Raises on failure (callers degrade). NOTE: the claude CLI
+    reports no cost, so --budget cannot be enforced here — a documented limitation,
+    not a silent drop."""
+    import tempfile
+    import time as _t
+
+    cmd = ["claude", "-p"]
+    if model:
+        cmd += ["--model", model]
+    cmd.append(prompt)
+    t0 = _t.time()
+    ok = False
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            proc = subprocess.run(cmd, cwd=d, capture_output=True, text=True,
+                                  timeout=timeout)
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip()[:200] or "claude -p failed")
+        ok = True
+        return proc.stdout
+    finally:
+        try:
+            from area import obs
+
+            obs.log_run(label, duration=_t.time() - t0, cost=None, passed=ok,
+                        backend="claude-cli")
+        except Exception:  # noqa: BLE001
+            pass
+
+
 _TRANSIENT = ("rate limit", "rate_limit", "ratelimit", "429", "529", "overloaded",
               "server error", "service unavailable", "temporarily unavailable",
               "timeout", "timed out", "etimedout", "econnreset", "econnrefused",

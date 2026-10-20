@@ -23,18 +23,16 @@ from area.spec.models import Acceptance, Spec, load_acceptance, load_spec
 
 def rea_mcp_config() -> dict:
     """REA MCP server (stdio via npx) for Tier 2 reverse-engineering."""
-    from openhands.sdk.mcp.config import MCPServer
+    from area.engine import mcp_stdio_server
 
     return {
-        "rea": MCPServer(
-            transport="stdio",
+        # `--mcp` makes rea-agents speak MCP on stdio; bare `rea` just prints help
+        # and exits, so the client sees the connection close. The clean npm cache
+        # dodges the root-owned ~/.npm EACCES crash on first launch. PIN the exact
+        # version: `-y rea-agents` would auto-install whatever latest resolves
+        # (supply-chain risk + it ships breaking changes across minors).
+        "rea": mcp_stdio_server(
             command="npx",
-            # `--mcp` makes rea-agents speak MCP on stdio; bare `rea` just prints
-            # help and exits, so the client sees the connection close. The clean
-            # npm cache dodges the root-owned ~/.npm EACCES crash on first launch.
-            # PIN the exact version: `-y rea-agents` would auto-install whatever
-            # latest resolves (supply-chain risk + it ships breaking changes across
-            # minor versions). Bump deliberately.
             args=["-y", "rea-agents@6.7.0", "--mcp"],
             env={"npm_config_cache": str(Path.home() / ".cache" / "npm-area")},
             description="Reverse Engineer Anything (authorized targets only)",

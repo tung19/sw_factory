@@ -13,12 +13,12 @@ never wedge the pipeline.
 """
 from __future__ import annotations
 
-import subprocess
-import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
 import yaml
+
+from area.engine import ask_cli
 
 WORKSPACE = Path(__file__).resolve().parents[2] / "workspace"
 SENTINEL = "<<<PRODUCT>>>"
@@ -94,15 +94,6 @@ def _parse_verdict(raw: str) -> dict:
             "gaps": gaps, "parsed": True}
 
 
-def _ask(prompt: str) -> str:
-    with tempfile.TemporaryDirectory() as d:
-        proc = subprocess.run(["claude", "-p", prompt], cwd=d,
-                              capture_output=True, text=True, timeout=180)
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip()[:200] or "claude -p failed")
-    return proc.stdout
-
-
 def product_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
                    strict: bool = False, ask: Optional[Callable[[str], str]] = None,
                    root: Optional[str | Path] = None) -> bool:
@@ -118,7 +109,7 @@ def product_verify(name: str, *, backend: str = "acp", model: Optional[str] = No
         return True
     prompt = _product_prompt(spec_text, acc_text, _app_excerpt(app_dir))
     try:
-        res = _parse_verdict((ask or _ask)(prompt))
+        res = _parse_verdict((ask or (lambda p: ask_cli(p, model=model, label="product")))(prompt))
     except Exception as e:  # noqa: BLE001 — advisory; never wedge the pipeline
         print(f"[area] product: reviewer unavailable ({type(e).__name__}) — skipped (advisory)")
         return True
