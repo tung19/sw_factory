@@ -145,6 +145,14 @@ async def api_job_log(request):
     return PlainTextResponse(text)
 
 
+async def api_metrics(request):
+    """Determinism + cost metrics (PR3): first-try/retry rates, avg attempts, and
+    cost/latency per stage, aggregated from workspace/.area/runs.jsonl."""
+    from area.obs import summary
+
+    return JSONResponse(summary())
+
+
 async def api_apps(request):
     apps = list_apps()
     urls = {}
@@ -174,6 +182,7 @@ app = Starlette(
         Route("/api/jobs/{id}", api_job),
         Route("/api/jobs/{id}/stream", api_stream),
         Route("/api/jobs/{id}/log", api_job_log),
+        Route("/api/metrics", api_metrics),
         Route("/api/apps", api_apps),
         Route("/api/apps/{name}/spec", api_spec),
         Route("/api/apps/{name}/tree", api_tree),

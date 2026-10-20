@@ -735,11 +735,21 @@ def main(argv=None) -> int:
             return 0
         print(
             f"[obs] runs={s['runs']} · total ${s['total_cost_usd']} · {s['total_time_s']}s"
+            + (f" · avg ${s['avg_cost_usd']}/run" if s.get("avg_cost_usd") is not None else "")
         )
-        for lbl, d in sorted(s["by_label"].items()):
+        if s.get("first_try_rate") is not None:
             print(
-                f"  {lbl:16} n={d['n']} ok={d['ok']} "
-                f"${round(d['cost'], 4)} {round(d['time'], 1)}s"
+                f"[obs] determinism: first-try "
+                f"{round(s['first_try_rate'] * 100)}% · retry "
+                f"{round(s['retry_rate'] * 100)}% · avg {s['avg_iters']} attempt(s) "
+                f"(over {s['convergence_runs']} convergence run(s))"
+            )
+        for lbl, d in sorted(s["by_label"].items()):
+            det = (f" · first-try {d['first_try']}/{d['conv_n']} · avg {d['avg_iters']}it"
+                   if d["conv_n"] else "")
+            print(
+                f"  {lbl:18} n={d['n']} ok={d['ok']} "
+                f"${round(d['cost'], 4)} (avg ${d['avg_cost']}) {round(d['time'], 1)}s{det}"
             )
         return 0
 

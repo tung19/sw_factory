@@ -275,6 +275,11 @@
     <h2>Apps &amp; Export <button class="btn" style="float:right;padding:2px 7px" onclick="refreshApps()">↻</button></h2>
     <div class="applist" id="appsList"><div class="empty">chưa có app</div></div>
   </div>
+
+  <div class="sidepanel card">
+    <h2>Metrics — chi phí &amp; độ tất định <button class="btn" style="float:right;padding:2px 7px" onclick="refreshMetrics()">↻</button></h2>
+    <div id="metricsBox"><div class="empty">chưa có dữ liệu run</div></div>
+  </div>
 </div>
 </div>
 
@@ -515,7 +520,7 @@ function openLog(jid){
     const tm=logBuf.match(/\[area\] trace : (\S+)/);
     if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}
     renderPipe();};
-  es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();
+  es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();refreshMetrics();
     try{const j=JSON.parse(e.data);if(j.url){logBuf+='\n🌐 '+j.url+'\n';$('log').textContent=logBuf;showPreview(j.url);}}catch(_){ }
     renderPipe();});
   es.onerror=()=>{es.close();};
@@ -576,6 +581,22 @@ async function refreshApps(){
   }
 }
 
+async function refreshMetrics(){
+  const box=$('metricsBox'); if(!box)return;
+  let s; try{ s=await (await fetch('/api/metrics')).json(); }catch(e){ return; }
+  if(!s||!s.runs){box.innerHTML='<div class="empty">chưa có dữ liệu run</div>';return;}
+  const pct=x=>x==null?'–':Math.round(x*100)+'%';
+  const det = s.first_try_rate!=null
+    ? `<div class="approw"><span class="grow">first-try <b>${pct(s.first_try_rate)}</b> · retry ${pct(s.retry_rate)} · avg <b>${s.avg_iters}</b> attempt</span></div>`
+    : '';
+  const rows=Object.entries(s.by_label).sort().map(([lbl,d])=>{
+    const ft=d.conv_n?` · first-try ${d.first_try}/${d.conv_n}`:'';
+    return `<div class="approw"><span class="grow"><b>${esc(lbl)}</b> ·n${d.n} ok${d.ok}${ft}</span><span class="meta">$${(d.avg_cost||0).toFixed(2)}/run</span></div>`;
+  }).join('');
+  box.innerHTML=`<div class="approw"><span class="grow">${s.runs} run · tổng <b>$${s.total_cost_usd}</b>`
+    +`${s.avg_cost_usd!=null?` · avg $${s.avg_cost_usd}/run`:''}</span></div>`+det+rows;
+}
+
 async function exportApp(name){
   const repo=prompt('Export "'+name+'" thành repo git.\n\nDán URL remote để push (vd https://github.com/ban/'+name+'.git),\nhoặc để trống = chỉ tạo repo git local:','');
   if(repo===null)return; // cancelled
@@ -599,7 +620,7 @@ async function viewSpec(name){
 }
 function closeModal(){$('modal').classList.remove('open');}
 
-refreshJobs();refreshApps();renderPipe();
+refreshJobs();refreshApps();refreshMetrics();renderPipe();
 setInterval(()=>{if(!es||es.readyState===2)refreshJobs();},4000);
 // deep-link: /?job=<id> or /?job=latest auto-opens that job's live view
 (function(){
