@@ -29,12 +29,13 @@ async def api_jobs(request):
         body = await request.json()
         kind = body.get("kind")
         params = body.get("params", {})
-        if kind not in ("run", "clone", "intake", "deploy", "iterate"):
+        if kind not in ("run", "clone", "intake", "deploy", "iterate", "inception"):
             return JSONResponse({"error": "bad kind"}, status_code=400)
         if not params.get("name"):
             return JSONResponse({"error": "name required"}, status_code=400)
         required = {"run": "requirement", "clone": "source",
-                    "intake": "artifacts", "iterate": "instruction"}.get(kind)
+                    "intake": "artifacts", "iterate": "instruction",
+                    "inception": "requirement"}.get(kind)
         if required and not params.get(required):
             return JSONResponse({"error": f"{required} required"}, status_code=400)
         try:
@@ -145,6 +146,30 @@ async def api_job_log(request):
     return PlainTextResponse(text)
 
 
+async def api_inception(request):
+    """The four Inception artifact files for an app (dashboard review/edit panel)."""
+    from area.web.jobs import read_inception
+
+    return JSONResponse(read_inception(request.path_params["name"]))
+
+
+async def api_inception_save(request):
+    """Save the human-edited Inception artifacts back + emit a human-approved
+    evidence record. The human shaping the Testing Posture here is shaping the
+    oracle — governance before the build."""
+    from area.web.jobs import save_inception
+
+    body = await request.json()
+    name = safe_name(body.get("name") or "")
+    files = body.get("files") or {}
+    if not name or not files:
+        return JSONResponse({"error": "name + files required"}, status_code=400)
+    try:
+        return JSONResponse(save_inception(name, files))
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
 async def api_metrics(request):
     """Determinism + cost metrics (PR3): first-try/retry rates, avg attempts, and
     cost/latency per stage, aggregated from workspace/.area/runs.jsonl."""
@@ -183,8 +208,10 @@ app = Starlette(
         Route("/api/jobs/{id}/stream", api_stream),
         Route("/api/jobs/{id}/log", api_job_log),
         Route("/api/metrics", api_metrics),
+        Route("/api/inception/save", api_inception_save, methods=["POST"]),
         Route("/api/apps", api_apps),
         Route("/api/apps/{name}/spec", api_spec),
+        Route("/api/apps/{name}/inception", api_inception),
         Route("/api/apps/{name}/tree", api_tree),
     ],
     # PR6: the dashboard drives agent runs + deploys, so gate every request on a

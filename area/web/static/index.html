@@ -160,6 +160,7 @@
         <button id="tabIntake" onclick="setTab('intake')">Intake (tài liệu)</button>
         <button id="tabClone" onclick="setTab('clone')">Clone</button>
         <button id="tabIterate" onclick="setTab('iterate')">Iterate (ra lệnh)</button>
+        <button id="tabInception" onclick="setTab('inception')">Inception</button>
       </div>
 
       <div id="paneRun">
@@ -199,6 +200,18 @@
         <label>Ra lệnh cho AREA (yêu cầu thay đổi, bằng lời)</label>
         <textarea id="iterInstruction" placeholder="VD: thêm nút xoá note · đổi sang dark mode · signup phải chặn username trùng…"></textarea>
         <p class="meta" style="margin:6px 0 0">Lệnh được gộp vào <b>spec</b> rồi <b>khóa lại test (oracle)</b> và build — không đưa thẳng cho agent. Target tự nhận theo app. Tên ở dưới bị bỏ qua.</p>
+      </div>
+
+      <div id="paneInception" style="display:none">
+        <label>Mô tả phần mềm (AI-DLC Inception)</label>
+        <textarea id="incReq" placeholder="VD: form phản hồi: khách gửi tên + lời nhắn; ai cũng xem được danh sách theo thứ tự mới nhất…"></textarea>
+        <div class="row">
+          <div><label>Tên sản phẩm</label><input id="incName" placeholder="myapp"/></div>
+          <div><label>Target (cho bước build)</label><select id="incTarget"><option>cloudflare</option><option>vercel</option><option>plain</option></select></div>
+        </div>
+        <p class="meta" style="margin:6px 0 0">AI đề xuất từng <b>bolt</b> (intent → user stories → Units of Work → <b>Testing Posture</b>). Xong, bạn <b>duyệt/sửa</b> artifact — nhất là Testing Posture (= oracle) — rồi mới build.</p>
+        <button class="go" id="incBtn" onclick="startInception()">Chạy Inception</button>
+        <div id="incReview"></div>
       </div>
 
       <div id="sharedControls">
@@ -307,10 +320,13 @@ function sse(url){return new EventSource(GUI_TOKEN?url+(url.includes('?')?'&':'?
 
 function setTab(t){
   tab=t;
-  ['run','intake','clone','iterate'].forEach(k=>{
+  ['run','intake','clone','iterate','inception'].forEach(k=>{
     $('tab'+k[0].toUpperCase()+k.slice(1)).classList.toggle('active',k===t);
     $('pane'+k[0].toUpperCase()+k.slice(1)).style.display=k===t?'':'none';
   });
+  // Inception is a self-contained flow (its own controls) — it doesn't use the
+  // shared gate/deploy controls or the main build button.
+  $('sharedControls').style.display = t==='inception'?'none':'';
   $('goBtn').textContent = t==='clone'?'Bắt đầu clone'
     :(t==='intake'?'Ingest & build':(t==='iterate'?'Ra lệnh & rebuild':'Bắt đầu build'));
 }
@@ -423,6 +439,45 @@ async function startJob(){
   }finally{$('goBtn').disabled=false;}
 }
 
+// ---- Inception (AI-DLC front-end): run bolts → review/edit artifacts → build ----
+async function startInception(){
+  const name=$('incName').value.trim(), req=$('incReq').value.trim();
+  if(!name){alert('Cần nhập Tên sản phẩm');return;}
+  if(!req){alert('Cần nhập Requirement');return;}
+  $('incBtn').disabled=true;
+  try{
+    const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({kind:'inception',params:{name,requirement:req,target:$('incTarget').value}})});
+    const j=await r.json();
+    if(j.id){$('incReview').innerHTML='<p class="meta">Đang chạy các bolt… xem tiến trình bên phải; xong sẽ hiện artifact để duyệt.</p>';openLog(j.id);refreshJobs();}
+    else alert(j.error||'thất bại');
+  }finally{$('incBtn').disabled=false;}
+}
+
+async function loadInception(name,target){
+  const d=await (await fetch('/api/apps/'+name+'/inception')).json();
+  const files=d.files||{}, box=$('incReview');
+  if(!Object.keys(files).length){box.innerHTML='<p class="meta">Không thấy artifact — xem log bên phải.</p>';return;}
+  setTab('inception');
+  let html='<p class="meta" style="margin:10px 0 4px"><b>Duyệt & sửa artifact</b> trước khi build — Testing Posture là <b>oracle</b>:</p>';
+  Object.keys(files).sort().forEach(fn=>{
+    html+=`<label>${esc(fn)}</label><textarea class="incEdit" data-fn="${esc(fn)}" style="min-height:120px;font-family:ui-monospace,monospace">${esc(files[fn])}</textarea>`;
+  });
+  html+=`<button class="go" style="margin-top:8px" onclick="saveAndBuild('${esc(name)}','${esc(target||'cloudflare')}')">Lưu &amp; build (TDD)</button>`;
+  box.innerHTML=html;
+}
+
+async function saveAndBuild(name,target){
+  const files={};document.querySelectorAll('#incReview .incEdit').forEach(t=>files[t.dataset.fn]=t.value);
+  const s=await (await fetch('/api/inception/save',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({name,files})})).json();
+  if(s.error){alert('Lưu lỗi: '+s.error);return;}
+  if(s.warnings&&s.warnings.length&&!confirm('Cảnh báo contract:\n- '+s.warnings.join('\n- ')+'\n\nVẫn build?'))return;
+  const j=await (await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({kind:'intake',params:{name,artifacts:s.dir,target,tdd:true,audit:true,e2e:true,chaos:true}})})).json();
+  if(j.id){openLog(j.id);refreshJobs();} else alert(j.error||'build thất bại');
+}
+
 async function deployApp(name){
   if(!confirm('Deploy "'+name+'" lên Cloudflare production?'))return;
   const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
@@ -521,7 +576,10 @@ function openLog(jid){
     if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}
     renderPipe();};
   es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();refreshMetrics();
-    try{const j=JSON.parse(e.data);if(j.url){logBuf+='\n🌐 '+j.url+'\n';$('log').textContent=logBuf;showPreview(j.url);}}catch(_){ }
+    try{const j=JSON.parse(e.data);
+      if(j.url){logBuf+='\n🌐 '+j.url+'\n';$('log').textContent=logBuf;showPreview(j.url);}
+      if(j.kind==='inception'&&j.name&&j.exit===0){loadInception(j.name,(j.params&&j.params.target)||'cloudflare');}
+    }catch(_){ }
     renderPipe();});
   es.onerror=()=>{es.close();};
 }

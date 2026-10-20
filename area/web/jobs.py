@@ -111,6 +111,12 @@ class JobManager:
         if kind == "intake":
             return [b, "intake", p["artifacts"], "--name", p["name"],
                     "--target", target] + self._flags(p)
+        if kind == "inception":
+            # AI-DLC front-end: produce artifacts with --yes (auto-accept each
+            # bolt); the dashboard provides the human gate AFTER, via review/edit
+            # of the artifacts before the build is kicked off.
+            return [b, "inception", p["requirement"], "--name", p["name"],
+                    "--yes", "--target", target]
         if kind == "iterate":
             # The "command box": fold a NL change request into the spec + rebuild.
             # TDD is on by default in the CLI; only pass --no-tdd on explicit opt-out.
@@ -213,6 +219,53 @@ def read_spec(name: str) -> dict:
         if p.exists():
             out[key] = p.read_text(errors="ignore")
     return out
+
+
+def inception_dir(name: str) -> Path:
+    return WORKSPACE / "specs" / safe_name(name) / "inception"
+
+
+def read_inception(name: str) -> dict:
+    """The four Inception artifact files (for the dashboard review/edit panel)."""
+    d = inception_dir(name)
+    files = {}
+    if d.is_dir():
+        for f in sorted(d.glob("*.md")):
+            files[f.name] = f.read_text(errors="ignore")
+    return {"dir": str(d), "files": files}
+
+
+def save_inception(name: str, files: dict) -> dict:
+    """Persist the human-edited Inception artifacts back, emit a human-approved
+    evidence record (correlated to the run's trace when present), and re-check the
+    contract. Only *.md basenames are written (no path traversal)."""
+    from area.inception import validate_artifacts
+    from area.intake.aidlc import emit_evidence, new_trace_id
+
+    d = inception_dir(name)
+    d.mkdir(parents=True, exist_ok=True)
+    written = []
+    for fn, content in (files or {}).items():
+        base = Path(str(fn)).name
+        if base.endswith(".md") and isinstance(content, str):
+            (d / base).write_text(content)
+            written.append(base)
+    # reuse the run's trace_id if the trail has one, so the human-approved event
+    # correlates with the inception run that produced the artifacts
+    trace = new_trace_id()
+    trail = d / "aidlc_trace.jsonl"
+    if trail.exists():
+        try:
+            import json as _json
+
+            lines = [l for l in trail.read_text().splitlines() if l.strip()]
+            if lines:
+                trace = _json.loads(lines[-1]).get("trace", trace)
+        except Exception:  # noqa: BLE001
+            pass
+    emit_evidence(d, trace, "inception.human_approved", {"files": written})
+    return {"ok": True, "dir": str(d), "written": written,
+            "warnings": validate_artifacts(d)}
 
 
 def app_tree(name: str, limit: int = 300) -> list[str]:
