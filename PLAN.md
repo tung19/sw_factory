@@ -177,7 +177,7 @@ SW_Factory/
 | **PR5** | Chỉ test app bé; chưa có app thật (DB+auth+multi-page) | mốc tiếp: 2–3 app thật có DB+auth |
 | ~~**PR6**~~ | ✅ **DONE**: dashboard có **token-auth** (`area/web/auth.py`, kiểu Jupyter). Mọi request phải có token qua `?token=`/Bearer/cookie; `?token=` set cookie HttpOnly+SameSite=Strict để fetch/SSE tự authed. Token = `AREA_GUI_TOKEN` hoặc tự sinh (in URL kèm token khi `area gui`); escape-hatch `AREA_GUI_NO_AUTH=1`. Pure-ASGI (không phá SSE). 9 test + smoke live (401 thiếu/sai token, 200 khi có). Còn (tùy): HTTPS/reverse-proxy nếu expose ngoài localhost | thêm auth + không expose công khai |
 | **PR7** | Deploy/rollback/monitor mới validate 1 lần (guestbook) | ✅ **DEPLOY D1 LIVE validated**: `area deploy gb_d1` → auto-provision D1 (`wrangler d1 create gb-d1: ok`) → deploy vinext/cf → **https://gb-d1.monbkel.workers.dev HTTP 200**. **Persist proven live** (Playwright: post message → reload → vẫn còn trong D1). Handshake wrangler-D1 ↔ vinext `bindings.d1()` **OK, không cần chỉnh** (table tạo lazy). Còn: rollback/monitor nhiều lần |
-| **PR8** | Bus factor (~2500 dòng, 1 người); Hybrid front-end chưa dựng | dựng AI-DLC front-end thật + emit evidence nối trail |
+| **PR8** | 🟡 Bus factor (~6.5k dòng, 1 người); Hybrid front-end chưa dựng | **Docs ✅** (`docs/ARCHITECTURE.md` = system map + 7 gate + spine + module map; `CONTRIBUTING.md` = setup + rules + recipe thêm gate/backend; README có mục Docs) — giảm bus-factor cho người mới. Còn: dựng AI-DLC front-end thật + emit evidence nối trail |
 
 ### "Production-ready" = done khi
 - [ ] Build được app **persistence thật + auth + multi-user**, validated live trên 2–3 app.
