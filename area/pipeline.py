@@ -67,13 +67,29 @@ def _clarify_result(name, spec, acc, root, questions) -> PipelineResult:
     )
 
 
-def _maybe_design(name, backend, model, design) -> None:
-    if not design:
+def _maybe_design(name, backend, model, design, spec=None) -> None:
+    # design=None → auto (run the architect stage for a non-trivial app); explicit
+    # True/False from --design / --no-design overrides the heuristic.
+    want = design if design is not None else _should_design(spec)
+    if not want:
         return
     from area.design import design_stage
 
     print("[area] design : -> design.md")
     design_stage(name, backend=backend, model=model)
+
+
+def _should_design(spec) -> bool:
+    """Heuristic (recommendation #3): a non-trivial app earns the architect stage by
+    DEFAULT (data model, or several features) so the product is thought through — not
+    just slapped together. Trivial single-feature apps skip it. `--design`/`--no-design`
+    override."""
+    try:
+        features = len(getattr(spec, "features", []) or [])
+        entities = len(getattr(spec, "entities", []) or [])
+    except Exception:
+        return False
+    return entities >= 1 or features >= 3
 
 
 def _build(
@@ -157,7 +173,7 @@ def run_pipeline(
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = False,
     expected: Optional[str] = None,
     clarify: bool = True,
@@ -183,7 +199,7 @@ def run_pipeline(
     qs = _clarify_gate(root, name, clarify)
     if qs:
         return _clarify_result(name, spec, acc, root, qs)
-    _maybe_design(name, backend, model, design)
+    _maybe_design(name, backend, model, design, spec)
     return _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
 
 
@@ -237,7 +253,7 @@ def iterate_pipeline(
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = True,
     expected: Optional[str] = None,
     clarify: bool = True,
@@ -272,7 +288,7 @@ def intake_pipeline(
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = False,
     expected: Optional[str] = None,
     clarify: bool = True,
@@ -303,7 +319,7 @@ def intake_pipeline(
     if qs:
         emit_evidence(spec_dir, trace_id, "clarify.needed", {"questions": len(qs)})
         return _clarify_result(name, spec, acc, root, qs)
-    _maybe_design(name, backend, model, design)
+    _maybe_design(name, backend, model, design, spec)
     res = _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
     emit_evidence(spec_dir, trace_id, "construction.done", {"passed": res.passed})
     return res
@@ -327,7 +343,7 @@ def clone_pipeline(
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = False,
     expected: Optional[str] = None,
     clarify: bool = True,
@@ -348,7 +364,7 @@ def clone_pipeline(
     qs = _clarify_gate(root, name, clarify)
     if qs:
         return _clarify_result(name, spec, acc, root, qs)
-    _maybe_design(name, backend, model, design)
+    _maybe_design(name, backend, model, design, spec)
     # TDD clone: author tests for behavioral PARITY with the reference app.
     reference = _resolve_clone_reference(source, root / "specs" / name) if tdd else None
     return _build(

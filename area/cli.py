@@ -40,8 +40,11 @@ def _add_common(sp):
                     help="max USD spend per agent run (cost cap)")
     sp.add_argument("--agent-iters", type=int, default=None,
                     help="max steps per agent run (default 80)")
-    sp.add_argument("--design", action="store_true",
-                    help="run the architect stage (design.md) before build")
+    sp.add_argument("--design", dest="design", action="store_const", const=True, default=None,
+                    help="force the architect stage (design.md) before build "
+                         "(default: AUTO for a non-trivial app)")
+    sp.add_argument("--no-design", dest="design", action="store_const", const=False,
+                    help="skip the architect stage even for a non-trivial app")
     sp.add_argument("--tdd", action="store_true",
                     help="TDD: lock independent acceptance tests BEFORE build; "
                          "the build oracle IS that locked suite (implies verify)")
@@ -75,8 +78,12 @@ def _add_common(sp):
                          "(specs/<name>/nfr.yaml blocks; defaults advisory unless --strict)")
     sp.add_argument("--nfr-build", action="store_true",
                     help="NFR: also run a clean timed build to measure build_ms")
+    sp.add_argument("--product", action="store_true",
+                    help="product-fit gate: an INDEPENDENT reviewer judges whether the "
+                         "built app delivers the spec's product + UX/fit gaps "
+                         "(advisory; blocks only with --strict)")
     sp.add_argument("--all", action="store_true",
-                    help="run all gates: verify + audit + e2e + chaos + nfr")
+                    help="run all gates: verify + audit + e2e + chaos + nfr + product")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
 
@@ -95,7 +102,7 @@ def _finish(res, args) -> int:
 
     all_ = getattr(args, "all", False)
     gates = [
-        g for g in ("verify", "audit", "e2e", "chaos", "nfr")
+        g for g in ("verify", "audit", "e2e", "chaos", "nfr", "product")
         if all_ or getattr(args, g, False)
     ]
     # --tdd already builds against the locked holdout suite, so the post-build
@@ -125,6 +132,15 @@ def _finish(res, args) -> int:
     except Exception as e:  # noqa: BLE001
         print(f"[area] provenance write skipped (warn): {e}")
 
+    # reality loop (#4): show the assumptions this build chose + how to preview +
+    # the one command to refine, so the human closes the intent loop now, not later.
+    try:
+        from area.reality import build_reality_report
+
+        print(build_reality_report(res.name, res.spec_dir, res.app_dir))
+    except Exception as e:  # noqa: BLE001
+        print(f"[area] reality report skipped (warn): {e}")
+
     if args.deploy:
         from area.deploy import deploy_with_gate
 
@@ -134,7 +150,8 @@ def _finish(res, args) -> int:
 
 
 def _run_gate(gate: str, name: str, args) -> bool:
-    from area.verify import chaos_verify, e2e_verify, holdout_verify, nfr_verify, static_audit
+    from area.verify import (chaos_verify, e2e_verify, holdout_verify, nfr_verify,
+                             product_verify, static_audit)
 
     kw = dict(backend=args.backend, model=args.model)
     if gate == "verify":
@@ -150,6 +167,8 @@ def _run_gate(gate: str, name: str, args) -> bool:
     if gate == "nfr":
         return nfr_verify(name, strict=getattr(args, "strict", False),
                           run_build=getattr(args, "nfr_build", False), **kw)
+    if gate == "product":
+        return product_verify(name, strict=getattr(args, "strict", False), **kw)
     return True
 
 
@@ -194,7 +213,10 @@ def main(argv=None) -> int:
     it.add_argument("--budget", type=float, default=None,
                     help="max USD spend per agent run (cost cap)")
     it.add_argument("--agent-iters", type=int, default=None)
-    it.add_argument("--design", action="store_true")
+    it.add_argument("--design", dest="design", action="store_const", const=True, default=None,
+                    help="force the architect stage (default: AUTO for a non-trivial app)")
+    it.add_argument("--no-design", dest="design", action="store_const", const=False,
+                    help="skip the architect stage even for a non-trivial app")
     it.add_argument("--expect", default=None,
                     help="expected results / examples (authoritative, become AC)")
     it.add_argument("--expect-file", default=None)
@@ -210,6 +232,8 @@ def main(argv=None) -> int:
     it.add_argument("--audit", action="store_true")
     it.add_argument("--e2e", action="store_true")
     it.add_argument("--chaos", action="store_true")
+    it.add_argument("--product", action="store_true",
+                    help="product-fit gate (advisory; --strict to enforce)")
     it.add_argument("--all", action="store_true", help="run all gates after rebuild")
     it.add_argument("--deploy", action="store_true")
     it.add_argument("--yes", action="store_true", help="skip the deploy human gate")
