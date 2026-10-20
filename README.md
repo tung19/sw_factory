@@ -51,12 +51,21 @@ uv run python scripts/01_hello_world.py
   **Pin `rea-agents` to an exact version before real use** — it ships breaking changes
   across minor versions. Only point it at software you are authorized to analyze.
 
+## Docs
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the system map (the oracle-loop spine, the pipeline, the 7 gates, the module layout). **Start here to understand the code.**
+- [CONTRIBUTING.md](CONTRIBUTING.md) — setup, tests, and how to extend it (add a gate / backend).
+- [CLAUDE.md](CLAUDE.md) — the rules the build agent follows (the oracle-loop discipline).
+- [PLAN.md](PLAN.md) — architecture plan, decisions, and production-readiness status.
+
 ## Layout
 
 ```
 area/        orchestrator (intake, re, spec, engine, verify, deploy, memory)
-workspace/   generated apps land here
+workspace/   generated apps land here (apps/<name> + specs/<name>)
 config/      llm.env (gitignored) + examples
 scripts/     runnable smoke tests / demos
+tools/       deterministic shell gates (lock/verify-holdout, gate, provenance)
+docs/        ARCHITECTURE.md, ADRs, RUNNER.md, requirements inbox
 PLAN.md      architecture plan (audited)
 ```
