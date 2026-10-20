@@ -86,6 +86,11 @@ def _add_common(sp):
                     help="run all gates: verify + audit + e2e + chaos + nfr + product")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
+    sp.add_argument("--open", dest="open", action="store_true", default=True,
+                    help="(DEFAULT) after a green build, start the app + open it in "
+                         "your browser so you can self-verify")
+    sp.add_argument("--no-open", dest="open", action="store_false",
+                    help="do not auto-open the app after a green build")
 
 
 def _finish(res, args) -> int:
@@ -140,6 +145,16 @@ def _finish(res, args) -> int:
         print(build_reality_report(res.name, res.spec_dir, res.app_dir))
     except Exception as e:  # noqa: BLE001
         print(f"[area] reality report skipped (warn): {e}")
+
+    # auto-open the built app so the user can self-verify (show→react→refine). For a
+    # deploy run the deployed URL is the preview, so only open locally when not deploying.
+    if getattr(args, "open", True) and not args.deploy:
+        try:
+            from area.preview import open_preview
+
+            open_preview(res.app_dir, want_open=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[area] preview skipped (warn): {e}")
 
     if args.deploy:
         from area.deploy import deploy_with_gate
@@ -237,6 +252,10 @@ def main(argv=None) -> int:
     it.add_argument("--all", action="store_true", help="run all gates after rebuild")
     it.add_argument("--deploy", action="store_true")
     it.add_argument("--yes", action="store_true", help="skip the deploy human gate")
+    it.add_argument("--open", dest="open", action="store_true", default=True,
+                    help="(DEFAULT) open the rebuilt app in your browser to verify")
+    it.add_argument("--no-open", dest="open", action="store_false",
+                    help="do not auto-open after rebuild")
 
     d = sub.add_parser("deploy", help="Deploy a built app to Cloudflare (human gate)")
     d.add_argument("name")
