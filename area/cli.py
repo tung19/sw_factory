@@ -78,12 +78,20 @@ def _add_common(sp):
                          "(specs/<name>/nfr.yaml blocks; defaults advisory unless --strict)")
     sp.add_argument("--nfr-build", action="store_true",
                     help="NFR: also run a clean timed build to measure build_ms")
+    sp.add_argument("--perf", action="store_true",
+                    help="perf/load gate: boot the built app + fire concurrent load, "
+                         "measure latency percentiles/throughput/error-rate vs budget "
+                         "(specs/<name>/perf.yaml blocks; defaults advisory unless --strict)")
+    sp.add_argument("--perf-requests", type=int, default=200,
+                    help="perf gate: total requests to fire (default 200)")
+    sp.add_argument("--perf-concurrency", type=int, default=10,
+                    help="perf gate: max requests in flight (default 10)")
     sp.add_argument("--product", action="store_true",
                     help="product-fit gate: an INDEPENDENT reviewer judges whether the "
                          "built app delivers the spec's product + UX/fit gaps "
                          "(advisory; blocks only with --strict)")
     sp.add_argument("--all", action="store_true",
-                    help="run all gates: verify + audit + e2e + chaos + nfr + product")
+                    help="run all gates: verify + audit + e2e + chaos + nfr + perf + product")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
     sp.add_argument("--open", dest="open", action="store_true", default=True,
@@ -107,7 +115,7 @@ def _finish(res, args) -> int:
 
     all_ = getattr(args, "all", False)
     gates = [
-        g for g in ("verify", "audit", "e2e", "chaos", "nfr", "product")
+        g for g in ("verify", "audit", "e2e", "chaos", "nfr", "perf", "product")
         if all_ or getattr(args, g, False)
     ]
     # --tdd already builds against the locked holdout suite, so the post-build
@@ -166,7 +174,7 @@ def _finish(res, args) -> int:
 
 def _run_gate(gate: str, name: str, args) -> bool:
     from area.verify import (chaos_verify, e2e_verify, holdout_verify, nfr_verify,
-                             product_verify, static_audit)
+                             perf_verify, product_verify, static_audit)
 
     kw = dict(backend=args.backend, model=args.model)
     if gate == "verify":
@@ -182,6 +190,10 @@ def _run_gate(gate: str, name: str, args) -> bool:
     if gate == "nfr":
         return nfr_verify(name, strict=getattr(args, "strict", False),
                           run_build=getattr(args, "nfr_build", False), **kw)
+    if gate == "perf":
+        return perf_verify(name, strict=getattr(args, "strict", False),
+                           total=getattr(args, "perf_requests", 200),
+                           concurrency=getattr(args, "perf_concurrency", 10), **kw)
     if gate == "product":
         return product_verify(name, strict=getattr(args, "strict", False), **kw)
     return True
@@ -247,6 +259,13 @@ def main(argv=None) -> int:
     it.add_argument("--audit", action="store_true")
     it.add_argument("--e2e", action="store_true")
     it.add_argument("--chaos", action="store_true")
+    it.add_argument("--nfr", action="store_true", help="perf/NFR budget gate after rebuild")
+    it.add_argument("--perf", action="store_true",
+                    help="perf/load gate (boot app + fire load; advisory, --strict to enforce)")
+    it.add_argument("--perf-requests", type=int, default=200)
+    it.add_argument("--perf-concurrency", type=int, default=10)
+    it.add_argument("--strict", action="store_true",
+                    help="make advisory gate findings (audit tier-2, nfr, perf, product) BLOCK")
     it.add_argument("--product", action="store_true",
                     help="product-fit gate (advisory; --strict to enforce)")
     it.add_argument("--all", action="store_true", help="run all gates after rebuild")
@@ -358,6 +377,17 @@ def main(argv=None) -> int:
     ch.add_argument("--max-iters", type=int, default=3)
     ch.add_argument("--budget", type=float, default=None)
     ch.add_argument("--agent-iters", type=int, default=None)
+
+    pf = sub.add_parser("perf", help="Perf/load gate: boot the built app, fire load, "
+                                     "measure latency/throughput/errors vs budget")
+    pf.add_argument("name")
+    pf.add_argument("--requests", type=int, default=200, help="total requests to fire")
+    pf.add_argument("--concurrency", type=int, default=10, help="max requests in flight")
+    pf.add_argument("--path", default="/", help="URL path to load-test (default /)")
+    pf.add_argument("--strict", action="store_true",
+                    help="make a default-budget breach BLOCK (exit 1)")
+    pf.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    pf.add_argument("--model", default=None)
 
     mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
     mo.add_argument("target", help="app name or https URL")
@@ -685,6 +715,16 @@ def main(argv=None) -> int:
             args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
         )
         print(f"\n[area] chaos: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+        return 0 if ok else 1
+
+    if args.cmd == "perf":
+        from area.verify import perf_verify
+
+        ok = perf_verify(
+            args.name, backend=args.backend, model=args.model, strict=args.strict,
+            total=args.requests, concurrency=args.concurrency, path=args.path,
+        )
+        print(f"\n[area] perf: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
         return 0 if ok else 1
 
     if args.cmd == "monitor":
