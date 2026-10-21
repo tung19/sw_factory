@@ -60,6 +60,7 @@ select = ["F", "E9"]
 python_version = "3.12"
 ignore_missing_imports = true
 files = [
+  "area/cli.py",
   "area/paths.py",
   "area/_util.py",
   "area/evidence.py",
