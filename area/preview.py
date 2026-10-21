@@ -25,7 +25,7 @@ from typing import Callable, Optional
 def _free_port() -> int:
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
+    port: int = s.getsockname()[1]
     s.close()
     return port
 
@@ -82,7 +82,7 @@ def open_preview(
         env = {**os.environ,
                "npm_config_cache": os.path.expanduser("~/.cache/npm-area")}
 
-        def spawn():  # detached dev server; survives this process exiting
+        def spawn() -> subprocess.Popen[bytes]:  # detached dev server; survives this process exiting
             return subprocess.Popen(
                 ["npm", "run", "dev", "--", "-p", str(port)],
                 cwd=str(app_dir), env=env,

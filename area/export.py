@@ -90,7 +90,7 @@ def copy_source(src: str | Path, dest: str | Path) -> Path:
     src, dest = Path(src), Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
-    def _ignore(_dir, names):
+    def _ignore(_dir: str, names: list[str]) -> list[str]:
         return [n for n in names if n in _IGNORE_DIRS]
 
     for item in src.iterdir():

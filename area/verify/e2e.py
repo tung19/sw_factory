@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import Backend, build_agent, command_verifier, run_until
+from area.engine import Backend, VerifyResult, build_agent, command_verifier, run_until
 from area.pipeline import WORKSPACE
 from area.verify._runners import assert_playwright_ran
 from area.verify.perf import _free_port
@@ -60,13 +60,11 @@ def e2e_verify(
     )
     base = command_verifier(["bash", "-lc", "npx playwright test 2>&1"], cwd=app)
 
-    def oracle():
+    def oracle() -> VerifyResult:
         r = base()
         if r.ok:
             ran, why = assert_playwright_ran(r.feedback)
             if not ran:
-                from area.engine import VerifyResult
-
                 return VerifyResult(False, f"e2e exit was green but {why} — the "
                                     "E2E specs must actually run.\n\n" + r.feedback[-2500:])
         return r

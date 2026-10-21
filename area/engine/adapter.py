@@ -21,7 +21,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Literal, Optional, Sequence
 
 from openhands.sdk import LLM, Agent, Conversation, Tool
 from openhands.sdk.agent import ACPAgent
@@ -31,6 +31,10 @@ from openhands.tools.file_editor import FileEditorTool
 from openhands.tools.task_tracker import TaskTrackerTool
 from openhands.tools.terminal import TerminalTool
 
+if TYPE_CHECKING:
+    from openhands.sdk.conversation.goal import GoalOutcome
+    from openhands.sdk.mcp.config import MCPServer
+
 Backend = Literal["acp", "llm"]
 
 # Default toolset for the native (llm) backend. The ACP backend brings its own
@@ -38,7 +42,7 @@ Backend = Literal["acp", "llm"]
 _DEFAULT_TOOLS = [TerminalTool, FileEditorTool, TaskTrackerTool]
 
 
-def _filter_kwargs(cls, kwargs: dict) -> dict:
+def _filter_kwargs(cls: type, kwargs: dict) -> dict:
     """Keep only kwargs that are real model fields and not None.
 
     Defensive against SDK field renames between pinned bumps.
@@ -103,7 +107,9 @@ class VerifyResult:
 Verifier = Callable[[], VerifyResult]
 
 
-def _mk_conversation(agent, ws, agent_iters, budget):
+def _mk_conversation(
+    agent: AgentBase, ws: Path, agent_iters: int | None, budget: float | None
+) -> Conversation:
     """Build a Conversation with per-run caps (P2 cost/budget guard).
 
     agent_iters caps steps per agent.run() (default 80; env AREA_AGENT_ITERS;
@@ -139,7 +145,7 @@ def _mk_conversation(agent, ws, agent_iters, budget):
 # and "connection" matched "invalid connection string", so permanent errors were
 # retried 5× with long backoff. Keep each token distinctive to a transient fault.
 def mcp_stdio_server(*, command: str, args: Sequence[str],
-                     env: Optional[dict] = None, description: str = ""):
+                     env: Optional[dict] = None, description: str = "") -> MCPServer:
     """Build a stdio MCPServer config — keeps the OpenHands SDK import inside this
     one seam (callers like area/re must not import the SDK directly)."""
     from openhands.sdk.mcp.config import MCPServer
@@ -190,7 +196,7 @@ _TRANSIENT = ("rate limit", "rate_limit", "ratelimit", "429", "529", "overloaded
               "connection reset", "connection refused")
 
 
-def _run_retry(conv, *, tries: int = 5, base: float = 15.0) -> None:
+def _run_retry(conv: Conversation, *, tries: int = 5, base: float = 15.0) -> None:
     """conv.run() with exponential backoff on transient errors (rate-limit etc.)."""
     import time as _t
 
@@ -207,7 +213,10 @@ def _run_retry(conv, *, tries: int = 5, base: float = 15.0) -> None:
             _t.sleep(delay)
 
 
-def run_once(agent, workspace, message, *, agent_iters=None, budget=None, label="agent"):
+def run_once(
+    agent: AgentBase, workspace: str | Path, message: str, *,
+    agent_iters: int | None = None, budget: float | None = None, label: str = "agent",
+) -> Conversation:
     """Send one message and run the agent to completion (capped)."""
     import time as _t
 
@@ -325,7 +334,7 @@ def run_goal_judged(
     *,
     judge_model: str,
     max_iterations: int = 10,
-):
+) -> GoalOutcome:
     """Optional: the SDK's judge-LLM goal loop.
 
     NOTE: the judge is a real LLM, so this path needs a key (JUDGE_API_KEY or

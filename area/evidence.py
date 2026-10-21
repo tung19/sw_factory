@@ -37,7 +37,7 @@ def _last_trace(p: Path) -> Optional[str]:
         return None
     for line in reversed(p.read_text(errors="ignore").splitlines()):
         try:
-            t = json.loads(line).get("trace")
+            t: Optional[str] = json.loads(line).get("trace")
             if t:
                 return t
         except Exception:  # noqa: BLE001

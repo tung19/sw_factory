@@ -14,9 +14,13 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from area._util import safe_name
+
+if TYPE_CHECKING:
+    from area.inception.engine import ApproveFn, Bolt
+    from area.pipeline import PipelineResult
 
 
 def _slug_from(text: str, fallback: str) -> str:
@@ -128,13 +132,13 @@ def _edit_via_editor(text: str, filename: str) -> str:
             pass
 
 
-def _inception_approver(assume_yes: bool):
+def _inception_approver(assume_yes: bool) -> "ApproveFn":
     """A human-governance approve callback for `area inception`: show each proposed
     bolt and let the human accept / edit / regenerate (or auto-accept with --yes
     / non-interactive)."""
     from area.inception.engine import REGENERATE
 
-    def approve(bolt, proposed):
+    def approve(bolt: "Bolt", proposed: str) -> object:
         print(f"\n[area] ─── {bolt.title} ({bolt.filename}) — đề xuất ───\n{proposed}\n")
         if assume_yes or not sys.stdin.isatty():
             print(f"[area] tự chấp nhận {bolt.filename}"
@@ -240,7 +244,7 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
                     help="do not auto-open the app after a green build")
 
 
-def _finish(res, args: argparse.Namespace) -> int:
+def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
     if getattr(res, "clarify_needed", False):
         print(f"\n[area] ⏸ CLARIFICATION NEEDED — {res.name} (spec: {res.spec_dir}); "
               "not built. Confirm/override the assumptions above, then re-run "
@@ -252,7 +256,7 @@ def _finish(res, args: argparse.Namespace) -> int:
 
     from area import evidence
 
-    def _ev(event, data=None):
+    def _ev(event: str, data: dict | None = None) -> None:
         evidence.emit(res.name, event, data)
 
     if not res.passed:
@@ -615,7 +619,7 @@ def main(argv: list[str] | None = None) -> int:
 # --- subcommand handlers (one per command). `expected` is used only by the build
 # flows (run/clone/intake/iterate); the others accept it for a uniform table. ---
 
-def _cmd_run(args, expected) -> int:
+def _cmd_run(args: argparse.Namespace, expected: str | None) -> int:
     from area import trace
     from area.pipeline import run_pipeline
 
@@ -633,7 +637,7 @@ def _cmd_run(args, expected) -> int:
     return rc
 
 
-def _cmd_clone(args, expected) -> int:
+def _cmd_clone(args: argparse.Namespace, expected: str | None) -> int:
     from area import trace
     from area.pipeline import clone_pipeline
 
@@ -652,7 +656,7 @@ def _cmd_clone(args, expected) -> int:
     return rc
 
 
-def _cmd_iterate(args, expected) -> int:
+def _cmd_iterate(args: argparse.Namespace, expected: str | None) -> int:
     from area import trace
     from area.pipeline import iterate_pipeline
 
@@ -671,7 +675,7 @@ def _cmd_iterate(args, expected) -> int:
     return rc
 
 
-def _cmd_inception(args, expected) -> int:
+def _cmd_inception(args: argparse.Namespace, expected: str | None) -> int:
     from area.inception import run_inception
     from area.pipeline import WORKSPACE
 
@@ -696,7 +700,7 @@ def _cmd_inception(args, expected) -> int:
     return 0
 
 
-def _cmd_intake(args, expected) -> int:
+def _cmd_intake(args: argparse.Namespace, expected: str | None) -> int:
     from area import trace
     from area.pipeline import intake_pipeline
 
@@ -714,7 +718,7 @@ def _cmd_intake(args, expected) -> int:
     return rc
 
 
-def _cmd_deploy(args, expected) -> int:
+def _cmd_deploy(args: argparse.Namespace, expected: str | None) -> int:
     from area.deploy import deploy_with_gate
     from area.pipeline import WORKSPACE
 
@@ -727,7 +731,7 @@ def _cmd_deploy(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_export(args, expected) -> int:
+def _cmd_export(args: argparse.Namespace, expected: str | None) -> int:
     from area.export import export_app
 
     try:
@@ -744,7 +748,7 @@ def _cmd_export(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_provenance(args, expected) -> int:
+def _cmd_provenance(args: argparse.Namespace, expected: str | None) -> int:
     from area.pipeline import WORKSPACE
     from area.provenance import read_provenance, verify_provenance
 
@@ -768,7 +772,7 @@ def _cmd_provenance(args, expected) -> int:
     return 0
 
 
-def _cmd_rollback(args, expected) -> int:
+def _cmd_rollback(args: argparse.Namespace, expected: str | None) -> int:
     from area.deploy import rollback
     from area.pipeline import WORKSPACE
 
@@ -792,7 +796,7 @@ def _cmd_rollback(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_demo(args, expected) -> int:
+def _cmd_demo(args: argparse.Namespace, expected: str | None) -> int:
     from area.demo import list_examples, run_demo
 
     if not args.name:
@@ -804,7 +808,7 @@ def _cmd_demo(args, expected) -> int:
     return run_demo(args.name, open_browser=args.open, build=args.build)
 
 
-def _cmd_doctor(args, expected) -> int:
+def _cmd_doctor(args: argparse.Namespace, expected: str | None) -> int:
     from area.doctor import report
 
     icon = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
@@ -823,7 +827,7 @@ def _cmd_doctor(args, expected) -> int:
     return 0
 
 
-def _cmd_gui(args, expected) -> int:
+def _cmd_gui(args: argparse.Namespace, expected: str | None) -> int:
     import uvicorn
 
     from area.web.auth import auth_disabled, get_token, is_auto_token
@@ -849,7 +853,7 @@ def _cmd_gui(args, expected) -> int:
         if not auth_disabled():
             url += f"?token={get_token()}"
 
-        def _open():
+        def _open() -> None:
             import time
 
             time.sleep(1.2)  # let uvicorn bind first
@@ -863,7 +867,7 @@ def _cmd_gui(args, expected) -> int:
     return 0
 
 
-def _cmd_heal(args, expected) -> int:
+def _cmd_heal(args: argparse.Namespace, expected: str | None) -> int:
     from area.heal import heal
 
     err = args.error
@@ -884,7 +888,7 @@ def _cmd_heal(args, expected) -> int:
     return 0 if (res.build_passed is None or res.build_passed) else 1
 
 
-def _cmd_verify(args, expected) -> int:
+def _cmd_verify(args: argparse.Namespace, expected: str | None) -> int:
     from area.verify import holdout_verify
 
     ok = holdout_verify(
@@ -894,7 +898,7 @@ def _cmd_verify(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_e2e(args, expected) -> int:
+def _cmd_e2e(args: argparse.Namespace, expected: str | None) -> int:
     from area.verify import e2e_verify
 
     ok = e2e_verify(
@@ -904,7 +908,7 @@ def _cmd_e2e(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_obs(args, expected) -> int:
+def _cmd_obs(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
     from area.obs import summary
@@ -934,7 +938,7 @@ def _cmd_obs(args, expected) -> int:
     return 0
 
 
-def _cmd_trace(args, expected) -> int:
+def _cmd_trace(args: argparse.Namespace, expected: str | None) -> int:
     import datetime
 
     from area.evidence import read_trail
@@ -961,7 +965,7 @@ def _cmd_trace(args, expected) -> int:
     return 0
 
 
-def _cmd_mem(args, expected) -> int:
+def _cmd_mem(args: argparse.Namespace, expected: str | None) -> int:
     from area.memory import lessons
 
     ls = lessons()
@@ -973,7 +977,7 @@ def _cmd_mem(args, expected) -> int:
     return 0
 
 
-def _cmd_design(args, expected) -> int:
+def _cmd_design(args: argparse.Namespace, expected: str | None) -> int:
     from area.design import design_stage
 
     txt = design_stage(args.name, backend=args.backend, model=args.model)
@@ -981,7 +985,7 @@ def _cmd_design(args, expected) -> int:
     return 0 if txt else 1
 
 
-def _cmd_audit(args, expected) -> int:
+def _cmd_audit(args: argparse.Namespace, expected: str | None) -> int:
     from area.verify import static_audit
 
     ok = static_audit(
@@ -992,7 +996,7 @@ def _cmd_audit(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_chaos(args, expected) -> int:
+def _cmd_chaos(args: argparse.Namespace, expected: str | None) -> int:
     from area.verify import chaos_verify
 
     ok = chaos_verify(
@@ -1002,7 +1006,7 @@ def _cmd_chaos(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_perf(args, expected) -> int:
+def _cmd_perf(args: argparse.Namespace, expected: str | None) -> int:
     from area.verify import perf_verify
 
     ok = perf_verify(
@@ -1013,7 +1017,7 @@ def _cmd_perf(args, expected) -> int:
     return 0 if ok else 1
 
 
-def _cmd_monitor(args, expected) -> int:
+def _cmd_monitor(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
     from area.monitor import monitor as _mon
@@ -1028,7 +1032,7 @@ def _cmd_monitor(args, expected) -> int:
     return 0 if m["ok"] == m["checks"] else 1
 
 
-def _cmd_status(args, expected) -> int:
+def _cmd_status(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
     from area.monitor import status as _st
@@ -1043,7 +1047,7 @@ def _cmd_status(args, expected) -> int:
     return 0
 
 
-def _cmd_watch(args, expected) -> int:
+def _cmd_watch(args: argparse.Namespace, expected: str | None) -> int:
     from area.monitor import watch as _watch
 
     ok = _watch(args.name, checks=args.checks, interval=args.interval,
