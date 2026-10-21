@@ -1,7 +1,6 @@
 """`area export`: hand a generated app off as its OWN git repo. Pure parts
 (.gitignore, source copy excluding deps/build, command assembly). The real git/gh
 calls are stubbed — not run here."""
-import subprocess
 import types
 
 import area.export as E

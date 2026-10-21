@@ -6,7 +6,6 @@ then follows. Keeps each role a distinct OpenHands agent + an artifact.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name
