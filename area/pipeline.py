@@ -44,7 +44,9 @@ def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict]:
     ]
 
 
-def _spec_review_step(root: Path, name: str, requirement: str, backend, model) -> int:
+def _spec_review_step(
+    root: Path, name: str, requirement: str, backend: Backend, model: Optional[str]
+) -> int:
     """Independent spec-vs-intent review (recommendation #2): a SEPARATE reviewer —
     not the spec author — folds any MATERIAL ambiguities the spec stage missed into
     the assumptions ledger, so the clarify gate surfaces them. Advisory + fail-open
@@ -58,7 +60,9 @@ def _spec_review_step(root: Path, name: str, requirement: str, backend, model) -
     return n
 
 
-def _clarify_result(name, spec, acc, root, questions) -> PipelineResult:
+def _clarify_result(
+    name: str, spec: Spec, acc: Acceptance, root: Path, questions: list[dict]
+) -> PipelineResult:
     spec_dir = root / "specs" / name
     print(f"\n[area] ⚠ CLARIFICATION NEEDED — {len(questions)} material "
           "assumption(s); NOT building. Confirm/override then re-run:")
@@ -71,7 +75,10 @@ def _clarify_result(name, spec, acc, root, questions) -> PipelineResult:
     )
 
 
-def _maybe_design(name, backend, model, design, spec=None) -> None:
+def _maybe_design(
+    name: str, backend: Backend, model: Optional[str], design: Optional[bool],
+    spec: Optional[Spec] = None,
+) -> None:
     # design=None → auto (run the architect stage for a non-trivial app); explicit
     # True/False from --design / --no-design overrides the heuristic.
     want = design if design is not None else _should_design(spec)
@@ -83,7 +90,7 @@ def _maybe_design(name, backend, model, design, spec=None) -> None:
     design_stage(name, backend=backend, model=model)
 
 
-def _should_design(spec) -> bool:
+def _should_design(spec: Optional[Spec]) -> bool:
     """Heuristic (recommendation #3): a non-trivial app earns the architect stage by
     DEFAULT (data model, or several features) so the product is thought through — not
     just slapped together. Trivial single-feature apps skip it. `--design`/`--no-design`
@@ -97,8 +104,9 @@ def _should_design(spec) -> bool:
 
 
 def _build(
-    name, spec, acc, root, target, backend, model, build_iters, tdd=False,
-    reference=None,
+    name: str, spec: Spec, acc: Acceptance, root: Path, target: str, backend: Backend,
+    model: Optional[str], build_iters: int, tdd: bool = False,
+    reference: Optional[str] = None,
 ) -> PipelineResult:
     app_dir = root / "apps" / name
     design_path = root / "specs" / name / "design.md"
@@ -120,8 +128,9 @@ def _build(
 
 
 def _tdd_build(
-    name, spec, acc, app_dir, target, backend, model, build_iters, design_text,
-    *, reference=None, max_challenges: int = 1,
+    name: str, spec: Spec, acc: Acceptance, app_dir: Path, target: str,
+    backend: Backend, model: Optional[str], build_iters: int, design_text: str,
+    *, reference: Optional[str] = None, max_challenges: int = 1,
 ) -> bool:
     """TDD: lock the independent acceptance suite FIRST, then build-to-green
     against it. If the build fails because the builder challenges a locked test

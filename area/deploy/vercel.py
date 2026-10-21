@@ -95,7 +95,7 @@ def needs_kv(app_dir: str | Path) -> bool:
     return bool(_KV_SIGNALS.search(_app_source_text(Path(app_dir))))
 
 
-def _vercel(app: Path, args: str):
+def _vercel(app: Path, args: str) -> subprocess.CompletedProcess[str]:
     """Run `npx vercel <args>`. Auth comes from the VERCEL_TOKEN env var (the CLI
     reads it automatically; _env() propagates it) or a prior `vercel login` — never
     a `--token` CLI flag, which would leak the secret into the process table and
@@ -106,7 +106,7 @@ def _vercel(app: Path, args: str):
     )
 
 
-def _vercel_env_add(app: Path, key: str, value: str, target: str = "production"):
+def _vercel_env_add(app: Path, key: str, value: str, target: str = "production") -> subprocess.CompletedProcess[str]:
     """Set a project env var on Vercel, feeding the VALUE through stdin (never the
     argv/`ps` — same discipline as the token). `vercel env add` reads the value
     from stdin when the input isn't a TTY. Idempotent-ish: a pre-existing key makes

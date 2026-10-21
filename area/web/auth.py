@@ -21,6 +21,8 @@ import secrets
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs
 
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
 COOKIE_NAME = "area_gui_token"
 
 _token: str | None = None
@@ -55,13 +57,15 @@ def _reset_for_test() -> None:  # pragma: no cover - test helper
     _token, _auto = None, False
 
 
-def _presented_token(scope) -> str | None:
+def _presented_token(scope: Scope) -> str | None:
     """Pull a token from the Authorization header, ?token=, or the cookie."""
-    headers = {k.decode().lower(): v.decode() for k, v in (scope.get("headers") or [])}
+    headers: dict[str, str] = {
+        k.decode().lower(): v.decode() for k, v in (scope.get("headers") or [])
+    }
     auth = headers.get("authorization", "")
     if auth.startswith("Bearer "):
         return auth[len("Bearer "):].strip()
-    qs = parse_qs(scope.get("query_string", b"").decode())
+    qs: dict[str, list[str]] = parse_qs(scope.get("query_string", b"").decode())
     if qs.get("token"):
         return qs["token"][0]
     raw_cookie = headers.get("cookie")
@@ -73,14 +77,14 @@ def _presented_token(scope) -> str | None:
     return None
 
 
-def _token_from_query(scope) -> bool:
+def _token_from_query(scope: Scope) -> bool:
     return bool(parse_qs(scope.get("query_string", b"").decode()).get("token"))
 
 
 class TokenAuthMiddleware:
     """Reject HTTP requests without a valid token; pass everything else through."""
 
-    def __init__(self, app, token: str | None = None):
+    def __init__(self, app: ASGIApp, token: str | None = None) -> None:
         self.app = app
         self._token = token
 
@@ -88,7 +92,7 @@ class TokenAuthMiddleware:
     def token(self) -> str:
         return self._token or get_token()
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or auth_disabled():
             await self.app(scope, receive, send)
             return
@@ -101,11 +105,11 @@ class TokenAuthMiddleware:
             return
         await self._reject(scope, send)
 
-    def _cookie_send(self, send):
+    def _cookie_send(self, send: Send) -> Send:
         """Wrap `send` to set the auth cookie once, on a query-token success."""
         token = self.token
 
-        async def wrapped(message):
+        async def wrapped(message: Message) -> None:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers") or [])
                 cookie = f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Strict".encode()
@@ -115,7 +119,7 @@ class TokenAuthMiddleware:
 
         return wrapped
 
-    async def _reject(self, scope, send):
+    async def _reject(self, scope: Scope, send: Send) -> None:
         if scope.get("path", "").startswith("/api/"):
             body, ctype = b'{"error":"unauthorized"}', b"application/json"
         else:

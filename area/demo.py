@@ -63,7 +63,7 @@ def run_demo(name: str, *, open_browser: bool = True, build: bool = True) -> int
     port = _free_port()
     env["PORT"] = str(port)
 
-    def sh(cmd: str):
+    def sh(cmd: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(["bash", "-lc", f"{cmd} 2>&1"], cwd=str(app), env=env)
 
     if not (app / "node_modules").is_dir():

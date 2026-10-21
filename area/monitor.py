@@ -42,7 +42,8 @@ def deployed_url(name: str) -> Optional[str]:
                           key=lambda r: r.get("ts", 0), reverse=True)
             for j in rows:
                 if j.get("name") == name and j.get("url"):
-                    return j["url"]
+                    url: str = j["url"]
+                    return url
         except Exception:
             pass
     return None

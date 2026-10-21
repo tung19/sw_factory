@@ -11,7 +11,7 @@ from typing import Optional
 
 import yaml
 
-from area.engine import Backend, VerifyResult, build_agent, run_until
+from area.engine import Backend, Verifier, VerifyResult, build_agent, run_until
 from area.spec.models import (
     Acceptance,
     Spec,
@@ -57,7 +57,7 @@ faithful to the requirement — do not invent scope.
 """
 
 
-def _spec_verifier(out: Path):
+def _spec_verifier(out: Path) -> Verifier:
     def _run() -> VerifyResult:
         problems: list[str] = []
         try:

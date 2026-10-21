@@ -63,6 +63,20 @@ python_version = "3.12"
 ignore_missing_imports = true
 files = ["area"]
 
+# Strictness ratchet (after full coverage): every `def` in `area` must be fully
+# annotated, so NEW untyped code / implicit `Any` can't creep back in — the whole
+# point of having gotten to green. These flags are the `no-untyped-def` family plus
+# the cheap, high-value warnings:
+disallow_untyped_defs = true     # a def missing any annotation fails CI
+disallow_incomplete_defs = true  # a partially-annotated def fails too
+check_untyped_defs = true        # type-check the BODIES, not just signatures
+no_implicit_optional = true      # `x: str = None` must be `str | None`
+warn_return_any = true           # returning Any where a type is declared is an error
+warn_redundant_casts = true      # a cast() that does nothing is an error
+warn_unused_ignores = true       # a stale `# type: ignore` is an error
+# DEFERRED to a follow-up (noisier, separate cleanup): disallow_any_generics
+# (bare `dict`/`list` → ~71 type-arg), disallow_untyped_calls, full `strict`.
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

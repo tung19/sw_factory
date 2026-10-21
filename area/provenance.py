@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Optional
 
@@ -30,7 +31,7 @@ _SKIP = {
 }
 
 
-def _iter_source_files(app: Path):
+def _iter_source_files(app: Path) -> Iterator[tuple[Path, Path]]:
     for p in sorted(app.rglob("*")):
         if not p.is_file():
             continue
@@ -104,7 +105,8 @@ def read_provenance(app_dir: str | Path) -> Optional[dict]:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text())
+        data: dict = json.loads(p.read_text())
+        return data
     except (OSError, json.JSONDecodeError):
         return None
 

@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from area.paths import WORKSPACE  # zero-dep constant module (no cycle risk)
 
 RUNS = WORKSPACE / ".area" / "runs.jsonl"
 
 
-def cost_of(conv) -> Optional[float]:
+def cost_of(conv: Any) -> Optional[float]:
     """Best-effort accumulated USD cost of a conversation."""
     try:
         return float(conv.conversation_stats.get_combined_metrics().accumulated_cost)
