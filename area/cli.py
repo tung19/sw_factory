@@ -611,422 +611,462 @@ def main(argv=None) -> int:
     return _dispatch(args, expected)
 
 
+# --- subcommand handlers (one per command). `expected` is used only by the build
+# flows (run/clone/intake/iterate); the others accept it for a uniform table. ---
+
+def _cmd_run(args, expected) -> int:
+    from area import trace
+    from area.pipeline import run_pipeline
+
+    name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="app"))
+    trace.start_pipeline(name, "run",
+                         inputs={"requirement": args.requirement[:500], "tdd": args.tdd})
+    res = run_pipeline(
+        args.requirement, name=name, target=args.target,
+        backend=args.backend, model=args.model,
+        spec_iters=args.spec_iters, build_iters=args.build_iters,
+        design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+    )
+    rc = _finish(res, args)
+    trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+    return rc
+
+
+def _cmd_clone(args, expected) -> int:
+    from area import trace
+    from area.pipeline import clone_pipeline
+
+    name = _check_collision(_resolve_name(args.name, hint=args.source, fallback="clone"))
+    trace.start_pipeline(name, "clone",
+                         inputs={"source": args.source, "tdd": args.tdd})
+    res = clone_pipeline(
+        args.source, name=name, kind=args.kind,
+        use_rea=args.rea, target=args.target,
+        backend=args.backend, model=args.model,
+        spec_iters=args.spec_iters, build_iters=args.build_iters,
+        design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+    )
+    rc = _finish(res, args)
+    trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+    return rc
+
+
+def _cmd_iterate(args, expected) -> int:
+    from area import trace
+    from area.pipeline import iterate_pipeline
+
+    tdd = not args.no_tdd
+    args.tdd = tdd  # so _finish's redundant-verify-skip logic sees it
+    trace.start_pipeline(args.name, "iterate",
+                         inputs={"request": args.request[:500], "tdd": tdd})
+    res = iterate_pipeline(
+        args.name, args.request, target=args.target,
+        backend=args.backend, model=args.model,
+        spec_iters=args.spec_iters, build_iters=args.build_iters,
+        design=args.design, tdd=tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+    )
+    rc = _finish(res, args)
+    trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+    return rc
+
+
+def _cmd_inception(args, expected) -> int:
+    from area.inception import run_inception
+    from area.pipeline import WORKSPACE
+
+    name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="inception"))
+    out = WORKSPACE / "specs" / name / "inception"
+    res = run_inception(
+        args.requirement, out, approve_fn=_inception_approver(args.yes),
+        backend=args.backend, model=args.model,
+    )
+    print(f"\n[area] ✅ Inception artifacts → {res['out']}")
+    for f in res["files"]:
+        print(f"  · {Path(f).name}")
+    if res.get("unapproved"):
+        print(f"[area] ⚠ UNAPPROVED bolts (regenerate cap hit): "
+              f"{', '.join(res['unapproved'])} — review these before building.")
+    if res["warnings"]:
+        print("[area] ⚠ contract warnings (advisory — the Testing Posture is the oracle):")
+        for w in res["warnings"]:
+            print(f"    - {w}")
+    print(f"[area] evidence trace: {res['trace_id']} (aidlc_trace.jsonl)")
+    print(f"\n[area] → build it:  area intake {out} --name {name} --tdd --target {args.target}")
+    return 0
+
+
+def _cmd_intake(args, expected) -> int:
+    from area import trace
+    from area.pipeline import intake_pipeline
+
+    name = _check_collision(_resolve_name(args.name, hint=args.artifacts, fallback="intake"))
+    trace.start_pipeline(name, "intake",
+                         inputs={"artifacts": args.artifacts, "tdd": args.tdd})
+    res = intake_pipeline(
+        args.artifacts, name=name, target=args.target,
+        backend=args.backend, model=args.model,
+        spec_iters=args.spec_iters, build_iters=args.build_iters,
+        design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+    )
+    rc = _finish(res, args)
+    trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
+    return rc
+
+
+def _cmd_deploy(args, expected) -> int:
+    from area.deploy import deploy_with_gate
+    from area.pipeline import WORKSPACE
+
+    app_dir = WORKSPACE / "apps" / safe_name(args.name)
+    if not app_dir.exists():
+        print(f"[area] no app at {app_dir}")
+        return 1
+    ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes),
+                             require_provenance=getattr(args, "require_provenance", False))
+    return 0 if ok else 1
+
+
+def _cmd_export(args, expected) -> int:
+    from area.export import export_app
+
+    try:
+        ok, log = export_app(
+            args.name, out=args.out, repo=args.repo, push=args.push,
+            create=args.create, message=args.message,
+            visibility="public" if args.public else "private",
+        )
+    except RuntimeError as e:
+        print(f"[area] export: ❌ {e}")
+        return 1
+    print(log)
+    print(f"[area] export: {'✅ done' if ok else '❌ failed'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_provenance(args, expected) -> int:
+    from area.pipeline import WORKSPACE
+    from area.provenance import read_provenance, verify_provenance
+
+    app_dir = WORKSPACE / "apps" / safe_name(args.name)
+    if not app_dir.exists():
+        print(f"[area] no app at {app_dir}")
+        return 1
+    if args.verify:
+        status, detail = verify_provenance(app_dir)
+        icon = {"ok": "✅", "mismatch": "❌", "absent": "⚠"}.get(status, "?")
+        print(f"[area] provenance {status} {icon} — {detail}")
+        return 0 if status == "ok" else 1
+    prov = read_provenance(app_dir)
+    if not prov:
+        print(f"[area] no provenance recorded for {args.name} "
+              "(build through AREA's gates to create it)")
+        return 1
+    import json as _json
+
+    print(_json.dumps(prov, indent=2))
+    return 0
+
+
+def _cmd_rollback(args, expected) -> int:
+    from area.deploy import rollback
+    from area.pipeline import WORKSPACE
+
+    app_dir = WORKSPACE / "apps" / safe_name(args.name)
+    if not app_dir.exists():
+        print(f"[area] no app at {app_dir}")
+        return 1
+    if not args.yes:
+        try:
+            ans = input(
+                f"Roll {args.name} back to previous Cloudflare version? [y/N] "
+            ).strip().lower()
+        except EOFError:
+            ans = "n"
+        if ans != "y":
+            print("[area] rollback cancelled")
+            return 1
+    ok, out = rollback(app_dir, version=args.version)
+    print(out[-1000:])
+    print(f"[area] rollback: {'✅ done' if ok else '❌ failed'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_demo(args, expected) -> int:
+    from area.demo import list_examples, run_demo
+
+    if not args.name:
+        ex = list_examples()
+        print("[area] example apps (keyless — no Claude/cost):",
+              ", ".join(ex) or "(none committed)")
+        print("  run one:  area demo <name>")
+        return 0
+    return run_demo(args.name, open_browser=args.open, build=args.build)
+
+
+def _cmd_doctor(args, expected) -> int:
+    from area.doctor import report
+
+    icon = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
+    rows = report()
+    print("[area] doctor — kiểm tra môi trường local (local-first):\n")
+    for name, status, detail, fix in rows:
+        print(f"  {icon.get(status, '?')} {name}" + (f" — {detail}" if detail else ""))
+        if fix:
+            print(f"       ↳ {fix}")
+    fails = [r for r in rows if r[1] == "fail"]
+    print()
+    if fails:
+        print(f"[area] {len(fails)} thứ BẮT BUỘC còn thiếu — cài xong chạy lại `area doctor`.")
+        return 1
+    print("[area] ✅ Sẵn sàng. Chạy:  area gui")
+    return 0
+
+
+def _cmd_gui(args, expected) -> int:
+    import uvicorn
+
+    from area.web.auth import auth_disabled, get_token, is_auto_token
+    from area.web.server import app as webapp
+
+    base = f"http://{args.host}:{args.port}"
+    if auth_disabled():
+        print(f"[area] GUI → {base}   ⚠ auth DISABLED (AREA_GUI_NO_AUTH)", flush=True)
+    else:
+        print(f"[area] GUI → {base}/?token={get_token()}", flush=True)
+        if is_auto_token():
+            print("[area] (auto-generated token — pin one with AREA_GUI_TOKEN. "
+                  "Keep this URL private: it grants full control.)", flush=True)
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"[area] ⚠ host {args.host} exposes the dashboard beyond localhost "
+              "— keep the token secret.", flush=True)
+    if not args.no_open:
+        import threading
+        import webbrowser
+
+        open_host = "127.0.0.1" if args.host in ("0.0.0.0", "::", "") else args.host
+        url = f"http://{open_host}:{args.port}/"
+        if not auth_disabled():
+            url += f"?token={get_token()}"
+
+        def _open():
+            import time
+
+            time.sleep(1.2)  # let uvicorn bind first
+            try:
+                webbrowser.open(url)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=_open, daemon=True).start()
+    uvicorn.run(webapp, host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
+def _cmd_heal(args, expected) -> int:
+    from area.heal import heal
+
+    err = args.error
+    if args.error_file:
+        err = Path(args.error_file).read_text()
+    if not err:
+        print("[area] provide --error or --error-file")
+        return 1
+    res = heal(
+        args.name, err, target=args.target, backend=args.backend,
+        model=args.model, spec_iters=args.spec_iters,
+        rebuild=not args.no_rebuild, build_iters=args.build_iters,
+    )
+    print(
+        f"\n[area] heal: spec_changed={res.spec_changed} "
+        f"rebuilt={res.rebuilt} build={res.build_passed}"
+    )
+    return 0 if (res.build_passed is None or res.build_passed) else 1
+
+
+def _cmd_verify(args, expected) -> int:
+    from area.verify import holdout_verify
+
+    ok = holdout_verify(
+        args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
+    )
+    print(f"\n[area] holdout verify: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_e2e(args, expected) -> int:
+    from area.verify import e2e_verify
+
+    ok = e2e_verify(
+        args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
+    )
+    print(f"\n[area] e2e: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_obs(args, expected) -> int:
+    import json as _json
+
+    from area.obs import summary
+
+    s = summary()
+    if args.json:
+        print(_json.dumps(s, indent=2))
+        return 0
+    print(
+        f"[obs] runs={s['runs']} · total ${s['total_cost_usd']} · {s['total_time_s']}s"
+        + (f" · avg ${s['avg_cost_usd']}/run" if s.get("avg_cost_usd") is not None else "")
+    )
+    if s.get("first_try_rate") is not None:
+        print(
+            f"[obs] determinism: first-try "
+            f"{round(s['first_try_rate'] * 100)}% · retry "
+            f"{round(s['retry_rate'] * 100)}% · avg {s['avg_iters']} attempt(s) "
+            f"(over {s['convergence_runs']} convergence run(s))"
+        )
+    for lbl, d in sorted(s["by_label"].items()):
+        det = (f" · first-try {d['first_try']}/{d['conv_n']} · avg {d['avg_iters']}it"
+               if d["conv_n"] else "")
+        print(
+            f"  {lbl:18} n={d['n']} ok={d['ok']} "
+            f"${round(d['cost'], 4)} (avg ${d['avg_cost']}) {round(d['time'], 1)}s{det}"
+        )
+    return 0
+
+
+def _cmd_trace(args, expected) -> int:
+    import datetime
+
+    from area.evidence import read_trail
+
+    recs = read_trail(args.name)
+    if args.json:
+        import json as _json
+
+        print(_json.dumps(recs, indent=2))
+        return 0
+    if not recs:
+        print(f"[area] no audit trail for {args.name} "
+              "(run `area inception`/`run` to create one)")
+        return 1
+    traces = {r.get("trace") for r in recs if r.get("trace")}
+    print(f"[area] audit trail — {args.name} · {len(recs)} events · "
+          f"{len(traces)} trace(s)")
+    for r in recs:
+        ts = datetime.datetime.fromtimestamp(r.get("ts", 0)).strftime("%H:%M:%S")
+        data = r.get("data") or {}
+        extra = " ".join(f"{k}={v}" for k, v in data.items()
+                         if k != "requirement")[:72]
+        print(f"  {ts}  {r.get('event', ''):26} {extra}  [{(r.get('trace') or '')[:14]}]")
+    return 0
+
+
+def _cmd_mem(args, expected) -> int:
+    from area.memory import lessons
+
+    ls = lessons()
+    print(f"[mem] {len(ls)} lesson(s)")
+    for e in ls[-30:]:
+        print(f"  [{','.join(e.get('tags', []))}] {e.get('symptom', '')[:110]}")
+        if e.get("fix"):
+            print(f"      FIX: {e['fix'][:110]}")
+    return 0
+
+
+def _cmd_design(args, expected) -> int:
+    from area.design import design_stage
+
+    txt = design_stage(args.name, backend=args.backend, model=args.model)
+    print(f"\n[area] design: {'✅ wrote design.md' if txt else '❌ none'} — {args.name}")
+    return 0 if txt else 1
+
+
+def _cmd_audit(args, expected) -> int:
+    from area.verify import static_audit
+
+    ok = static_audit(
+        args.name, fix=args.fix, backend=args.backend, model=args.model,
+        max_iters=args.max_iters, audit_level=args.audit_level, strict=args.strict,
+    )
+    print(f"\n[area] audit: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_chaos(args, expected) -> int:
+    from area.verify import chaos_verify
+
+    ok = chaos_verify(
+        args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
+    )
+    print(f"\n[area] chaos: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_perf(args, expected) -> int:
+    from area.verify import perf_verify
+
+    ok = perf_verify(
+        args.name, backend=args.backend, model=args.model, strict=args.strict,
+        total=args.requests, concurrency=args.concurrency, path=args.path,
+    )
+    print(f"\n[area] perf: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_monitor(args, expected) -> int:
+    import json as _json
+
+    from area.monitor import monitor as _mon
+
+    m = _mon(args.target, checks=args.checks, interval=args.interval,
+             health=args.health)
+    if args.json:
+        print(_json.dumps({k: v for k, v in m.items() if k != "results"}, indent=2))
+    else:
+        print(f"\n[area] monitor: {m['name']} uptime={m['uptime_pct']}% "
+              f"avg={m['avg_ms']}ms ({m['ok']}/{m['checks']})")
+    return 0 if m["ok"] == m["checks"] else 1
+
+
+def _cmd_status(args, expected) -> int:
+    import json as _json
+
+    from area.monitor import status as _st
+
+    s = _st(args.name)
+    if args.json:
+        print(_json.dumps(s, indent=2))
+    else:
+        print(f"[area] status {s['name']}: url={s['url']} "
+              f"uptime={s['uptime_pct']}% avg={s['avg_ms']}ms "
+              f"p95={s['p95_ms']}ms samples={s['samples']}")
+    return 0
+
+
+def _cmd_watch(args, expected) -> int:
+    from area.monitor import watch as _watch
+
+    ok = _watch(args.name, checks=args.checks, interval=args.interval,
+                max_heals=args.max_heals, confirm=_confirm_fn(args.yes),
+                backend=args.backend, model=args.model)
+    print(f"\n[area] watch: {'✅ healthy/healed' if ok else '❌ needs attention'} — {args.name}")
+    return 0 if ok else 1
+
+
+_HANDLERS = {
+    "run": _cmd_run, "clone": _cmd_clone, "iterate": _cmd_iterate,
+    "inception": _cmd_inception, "intake": _cmd_intake, "deploy": _cmd_deploy,
+    "export": _cmd_export, "provenance": _cmd_provenance, "rollback": _cmd_rollback,
+    "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
+    "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
+    "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
+    "perf": _cmd_perf, "monitor": _cmd_monitor, "status": _cmd_status, "watch": _cmd_watch,
+}
+
+
 def _dispatch(args, expected) -> int:
     """Run the handler for the parsed subcommand. Returns the process exit code."""
-    if args.cmd == "run":
-        from area import trace
-        from area.pipeline import run_pipeline
-
-        name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="app"))
-        trace.start_pipeline(name, "run",
-                             inputs={"requirement": args.requirement[:500], "tdd": args.tdd})
-        res = run_pipeline(
-            args.requirement, name=name, target=args.target,
-            backend=args.backend, model=args.model,
-            spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
-        )
-        rc = _finish(res, args)
-        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
-        return rc
-
-    if args.cmd == "clone":
-        from area import trace
-        from area.pipeline import clone_pipeline
-
-        name = _check_collision(_resolve_name(args.name, hint=args.source, fallback="clone"))
-        trace.start_pipeline(name, "clone",
-                             inputs={"source": args.source, "tdd": args.tdd})
-        res = clone_pipeline(
-            args.source, name=name, kind=args.kind,
-            use_rea=args.rea, target=args.target,
-            backend=args.backend, model=args.model,
-            spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
-        )
-        rc = _finish(res, args)
-        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
-        return rc
-
-    if args.cmd == "iterate":
-        from area import trace
-        from area.pipeline import iterate_pipeline
-
-        tdd = not args.no_tdd
-        args.tdd = tdd  # so _finish's redundant-verify-skip logic sees it
-        trace.start_pipeline(args.name, "iterate",
-                             inputs={"request": args.request[:500], "tdd": tdd})
-        res = iterate_pipeline(
-            args.name, args.request, target=args.target,
-            backend=args.backend, model=args.model,
-            spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
-        )
-        rc = _finish(res, args)
-        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
-        return rc
-
-    if args.cmd == "inception":
-        from area.inception import run_inception
-        from area.pipeline import WORKSPACE
-
-        name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="inception"))
-        out = WORKSPACE / "specs" / name / "inception"
-        res = run_inception(
-            args.requirement, out, approve_fn=_inception_approver(args.yes),
-            backend=args.backend, model=args.model,
-        )
-        print(f"\n[area] ✅ Inception artifacts → {res['out']}")
-        for f in res["files"]:
-            print(f"  · {Path(f).name}")
-        if res.get("unapproved"):
-            print(f"[area] ⚠ UNAPPROVED bolts (regenerate cap hit): "
-                  f"{', '.join(res['unapproved'])} — review these before building.")
-        if res["warnings"]:
-            print("[area] ⚠ contract warnings (advisory — the Testing Posture is the oracle):")
-            for w in res["warnings"]:
-                print(f"    - {w}")
-        print(f"[area] evidence trace: {res['trace_id']} (aidlc_trace.jsonl)")
-        print(f"\n[area] → build it:  area intake {out} --name {name} --tdd --target {args.target}")
-        return 0
-
-    if args.cmd == "intake":
-        from area import trace
-        from area.pipeline import intake_pipeline
-
-        name = _check_collision(_resolve_name(args.name, hint=args.artifacts, fallback="intake"))
-        trace.start_pipeline(name, "intake",
-                             inputs={"artifacts": args.artifacts, "tdd": args.tdd})
-        res = intake_pipeline(
-            args.artifacts, name=name, target=args.target,
-            backend=args.backend, model=args.model,
-            spec_iters=args.spec_iters, build_iters=args.build_iters,
-            design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
-        )
-        rc = _finish(res, args)
-        trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
-        return rc
-
-    if args.cmd == "deploy":
-        from area.deploy import deploy_with_gate
-        from area.pipeline import WORKSPACE
-
-        app_dir = WORKSPACE / "apps" / safe_name(args.name)
-        if not app_dir.exists():
-            print(f"[area] no app at {app_dir}")
-            return 1
-        ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes),
-                                 require_provenance=getattr(args, "require_provenance", False))
-        return 0 if ok else 1
-
-    if args.cmd == "export":
-        from area.export import export_app
-
-        try:
-            ok, log = export_app(
-                args.name, out=args.out, repo=args.repo, push=args.push,
-                create=args.create, message=args.message,
-                visibility="public" if args.public else "private",
-            )
-        except RuntimeError as e:
-            print(f"[area] export: ❌ {e}")
-            return 1
-        print(log)
-        print(f"[area] export: {'✅ done' if ok else '❌ failed'} — {args.name}")
-        return 0 if ok else 1
-
-    if args.cmd == "provenance":
-        from area.pipeline import WORKSPACE
-        from area.provenance import read_provenance, verify_provenance
-
-        app_dir = WORKSPACE / "apps" / safe_name(args.name)
-        if not app_dir.exists():
-            print(f"[area] no app at {app_dir}")
-            return 1
-        if args.verify:
-            status, detail = verify_provenance(app_dir)
-            icon = {"ok": "✅", "mismatch": "❌", "absent": "⚠"}.get(status, "?")
-            print(f"[area] provenance {status} {icon} — {detail}")
-            return 0 if status == "ok" else 1
-        prov = read_provenance(app_dir)
-        if not prov:
-            print(f"[area] no provenance recorded for {args.name} "
-                  "(build through AREA's gates to create it)")
-            return 1
-        import json as _json
-
-        print(_json.dumps(prov, indent=2))
-        return 0
-
-    if args.cmd == "rollback":
-        from area.deploy import rollback
-        from area.pipeline import WORKSPACE
-
-        app_dir = WORKSPACE / "apps" / safe_name(args.name)
-        if not app_dir.exists():
-            print(f"[area] no app at {app_dir}")
-            return 1
-        if not args.yes:
-            try:
-                ans = input(
-                    f"Roll {args.name} back to previous Cloudflare version? [y/N] "
-                ).strip().lower()
-            except EOFError:
-                ans = "n"
-            if ans != "y":
-                print("[area] rollback cancelled")
-                return 1
-        ok, out = rollback(app_dir, version=args.version)
-        print(out[-1000:])
-        print(f"[area] rollback: {'✅ done' if ok else '❌ failed'} — {args.name}")
-        return 0 if ok else 1
-
-    if args.cmd == "demo":
-        from area.demo import list_examples, run_demo
-
-        if not args.name:
-            ex = list_examples()
-            print("[area] example apps (keyless — no Claude/cost):",
-                  ", ".join(ex) or "(none committed)")
-            print("  run one:  area demo <name>")
-            return 0
-        return run_demo(args.name, open_browser=args.open, build=args.build)
-
-    if args.cmd == "doctor":
-        from area.doctor import report
-
-        icon = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
-        rows = report()
-        print("[area] doctor — kiểm tra môi trường local (local-first):\n")
-        for name, status, detail, fix in rows:
-            print(f"  {icon.get(status, '?')} {name}" + (f" — {detail}" if detail else ""))
-            if fix:
-                print(f"       ↳ {fix}")
-        fails = [r for r in rows if r[1] == "fail"]
-        print()
-        if fails:
-            print(f"[area] {len(fails)} thứ BẮT BUỘC còn thiếu — cài xong chạy lại `area doctor`.")
-            return 1
-        print("[area] ✅ Sẵn sàng. Chạy:  area gui")
-        return 0
-
-    if args.cmd == "gui":
-        import uvicorn
-
-        from area.web.auth import auth_disabled, get_token, is_auto_token
-        from area.web.server import app as webapp
-
-        base = f"http://{args.host}:{args.port}"
-        if auth_disabled():
-            print(f"[area] GUI → {base}   ⚠ auth DISABLED (AREA_GUI_NO_AUTH)", flush=True)
-        else:
-            print(f"[area] GUI → {base}/?token={get_token()}", flush=True)
-            if is_auto_token():
-                print("[area] (auto-generated token — pin one with AREA_GUI_TOKEN. "
-                      "Keep this URL private: it grants full control.)", flush=True)
-        if args.host not in ("127.0.0.1", "localhost", "::1"):
-            print(f"[area] ⚠ host {args.host} exposes the dashboard beyond localhost "
-                  "— keep the token secret.", flush=True)
-        if not args.no_open:
-            import threading
-            import webbrowser
-
-            open_host = "127.0.0.1" if args.host in ("0.0.0.0", "::", "") else args.host
-            url = f"http://{open_host}:{args.port}/"
-            if not auth_disabled():
-                url += f"?token={get_token()}"
-
-            def _open():
-                import time
-
-                time.sleep(1.2)  # let uvicorn bind first
-                try:
-                    webbrowser.open(url)
-                except Exception:  # noqa: BLE001
-                    pass
-
-            threading.Thread(target=_open, daemon=True).start()
-        uvicorn.run(webapp, host=args.host, port=args.port, log_level="warning")
-        return 0
-
-    if args.cmd == "heal":
-        from area.heal import heal
-
-        err = args.error
-        if args.error_file:
-            err = Path(args.error_file).read_text()
-        if not err:
-            print("[area] provide --error or --error-file")
-            return 1
-        res = heal(
-            args.name, err, target=args.target, backend=args.backend,
-            model=args.model, spec_iters=args.spec_iters,
-            rebuild=not args.no_rebuild, build_iters=args.build_iters,
-        )
-        print(
-            f"\n[area] heal: spec_changed={res.spec_changed} "
-            f"rebuilt={res.rebuilt} build={res.build_passed}"
-        )
-        return 0 if (res.build_passed is None or res.build_passed) else 1
-
-    if args.cmd == "verify":
-        from area.verify import holdout_verify
-
-        ok = holdout_verify(
-            args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
-        )
-        print(f"\n[area] holdout verify: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
-        return 0 if ok else 1
-
-    if args.cmd == "e2e":
-        from area.verify import e2e_verify
-
-        ok = e2e_verify(
-            args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
-        )
-        print(f"\n[area] e2e: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
-        return 0 if ok else 1
-
-    if args.cmd == "obs":
-        import json as _json
-
-        from area.obs import summary
-
-        s = summary()
-        if args.json:
-            print(_json.dumps(s, indent=2))
-            return 0
-        print(
-            f"[obs] runs={s['runs']} · total ${s['total_cost_usd']} · {s['total_time_s']}s"
-            + (f" · avg ${s['avg_cost_usd']}/run" if s.get("avg_cost_usd") is not None else "")
-        )
-        if s.get("first_try_rate") is not None:
-            print(
-                f"[obs] determinism: first-try "
-                f"{round(s['first_try_rate'] * 100)}% · retry "
-                f"{round(s['retry_rate'] * 100)}% · avg {s['avg_iters']} attempt(s) "
-                f"(over {s['convergence_runs']} convergence run(s))"
-            )
-        for lbl, d in sorted(s["by_label"].items()):
-            det = (f" · first-try {d['first_try']}/{d['conv_n']} · avg {d['avg_iters']}it"
-                   if d["conv_n"] else "")
-            print(
-                f"  {lbl:18} n={d['n']} ok={d['ok']} "
-                f"${round(d['cost'], 4)} (avg ${d['avg_cost']}) {round(d['time'], 1)}s{det}"
-            )
-        return 0
-
-    if args.cmd == "trace":
-        import datetime
-
-        from area.evidence import read_trail
-
-        recs = read_trail(args.name)
-        if args.json:
-            import json as _json
-
-            print(_json.dumps(recs, indent=2))
-            return 0
-        if not recs:
-            print(f"[area] no audit trail for {args.name} "
-                  "(run `area inception`/`run` to create one)")
-            return 1
-        traces = {r.get("trace") for r in recs if r.get("trace")}
-        print(f"[area] audit trail — {args.name} · {len(recs)} events · "
-              f"{len(traces)} trace(s)")
-        for r in recs:
-            ts = datetime.datetime.fromtimestamp(r.get("ts", 0)).strftime("%H:%M:%S")
-            data = r.get("data") or {}
-            extra = " ".join(f"{k}={v}" for k, v in data.items()
-                             if k != "requirement")[:72]
-            print(f"  {ts}  {r.get('event', ''):26} {extra}  [{(r.get('trace') or '')[:14]}]")
-        return 0
-
-    if args.cmd == "mem":
-        from area.memory import lessons
-
-        ls = lessons()
-        print(f"[mem] {len(ls)} lesson(s)")
-        for e in ls[-30:]:
-            print(f"  [{','.join(e.get('tags', []))}] {e.get('symptom', '')[:110]}")
-            if e.get("fix"):
-                print(f"      FIX: {e['fix'][:110]}")
-        return 0
-
-    if args.cmd == "design":
-        from area.design import design_stage
-
-        txt = design_stage(args.name, backend=args.backend, model=args.model)
-        print(f"\n[area] design: {'✅ wrote design.md' if txt else '❌ none'} — {args.name}")
-        return 0 if txt else 1
-
-    if args.cmd == "audit":
-        from area.verify import static_audit
-
-        ok = static_audit(
-            args.name, fix=args.fix, backend=args.backend, model=args.model,
-            max_iters=args.max_iters, audit_level=args.audit_level, strict=args.strict,
-        )
-        print(f"\n[area] audit: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
-        return 0 if ok else 1
-
-    if args.cmd == "chaos":
-        from area.verify import chaos_verify
-
-        ok = chaos_verify(
-            args.name, backend=args.backend, model=args.model, max_iters=args.max_iters
-        )
-        print(f"\n[area] chaos: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
-        return 0 if ok else 1
-
-    if args.cmd == "perf":
-        from area.verify import perf_verify
-
-        ok = perf_verify(
-            args.name, backend=args.backend, model=args.model, strict=args.strict,
-            total=args.requests, concurrency=args.concurrency, path=args.path,
-        )
-        print(f"\n[area] perf: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
-        return 0 if ok else 1
-
-    if args.cmd == "monitor":
-        import json as _json
-
-        from area.monitor import monitor as _mon
-
-        m = _mon(args.target, checks=args.checks, interval=args.interval,
-                 health=args.health)
-        if args.json:
-            print(_json.dumps({k: v for k, v in m.items() if k != "results"}, indent=2))
-        else:
-            print(f"\n[area] monitor: {m['name']} uptime={m['uptime_pct']}% "
-                  f"avg={m['avg_ms']}ms ({m['ok']}/{m['checks']})")
-        return 0 if m["ok"] == m["checks"] else 1
-
-    if args.cmd == "status":
-        import json as _json
-
-        from area.monitor import status as _st
-
-        s = _st(args.name)
-        if args.json:
-            print(_json.dumps(s, indent=2))
-        else:
-            print(f"[area] status {s['name']}: url={s['url']} "
-                  f"uptime={s['uptime_pct']}% avg={s['avg_ms']}ms "
-                  f"p95={s['p95_ms']}ms samples={s['samples']}")
-        return 0
-
-    if args.cmd == "watch":
-        from area.monitor import watch as _watch
-
-        ok = _watch(args.name, checks=args.checks, interval=args.interval,
-                    max_heals=args.max_heals, confirm=_confirm_fn(args.yes),
-                    backend=args.backend, model=args.model)
-        print(f"\n[area] watch: {'✅ healthy/healed' if ok else '❌ needs attention'} — {args.name}")
-        return 0 if ok else 1
-
-    return 2
+    handler = _HANDLERS.get(args.cmd)
+    return handler(args, expected) if handler else 2
 
 
 if __name__ == "__main__":
