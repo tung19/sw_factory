@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import build_agent, command_verifier, run_until
+from area.engine import Backend, build_agent, command_verifier, run_until
 from area.pipeline import WORKSPACE
 
 _LEVELS = ("low", "moderate", "high", "critical")
@@ -127,7 +127,7 @@ def static_audit(
     name: str,
     *,
     fix: bool = False,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
     audit_level: str = "high",

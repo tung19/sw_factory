@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import build_agent, command_verifier, run_until
+from area.engine import Backend, build_agent, command_verifier, run_until
 from area.pipeline import WORKSPACE
 from area.verify._runners import assert_vitest_ran
 
@@ -21,7 +21,7 @@ CHAOS_DIR = "__tests__/_chaos"
 def chaos_verify(
     name: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> bool:

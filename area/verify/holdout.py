@@ -29,7 +29,7 @@ from typing import Optional
 import yaml
 
 from area._util import safe_name
-from area.engine import Verifier, VerifyResult, build_agent, run_once, run_until
+from area.engine import Backend, Verifier, VerifyResult, build_agent, run_once, run_until
 from area.pipeline import WORKSPACE
 from area.verify._runners import assert_vitest_ran
 
@@ -221,7 +221,7 @@ def _authoring_oracle(
 
 
 def author_until(
-    app: Path, acc_yaml: str, *, backend: str, model: Optional[str], tdd: bool,
+    app: Path, acc_yaml: str, *, backend: Backend, model: Optional[str], tdd: bool,
     reference: Optional[str] = None, attempts: int = 4, max_no_progress: int = 2,
 ) -> tuple[Path, dict]:
     """Author the holdout suite under its OWN oracle-loop.
@@ -326,7 +326,7 @@ def _holdout_oracle(
 def author_and_lock(
     name: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     acc_yaml: Optional[str] = None,
     app: Optional[str | Path] = None,
@@ -388,7 +388,7 @@ def readjudicate(
     holdout: Path,
     acc_yaml: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
 ) -> tuple[bool, dict]:
     """Escape hatch for a WRONG locked test (evolving-tests-under-governance).
@@ -442,7 +442,7 @@ def readjudicate(
 def holdout_verify(
     name: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> bool:
