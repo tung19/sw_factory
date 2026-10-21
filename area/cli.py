@@ -14,6 +14,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 from area._util import safe_name
 
@@ -76,7 +77,7 @@ def _check_collision(name: str) -> str:
             name = safe_name(nn)
 
 
-def _looks_auth(spec_dir) -> bool:
+def _looks_auth(spec_dir: Path) -> bool:
     """Does the spec describe auth / sessions / forms? Those are exactly the apps
     where logic-green ≠ live-works (a holdout can pass while live signup is broken),
     so the e2e gate is enforced before a deploy of such an app."""
@@ -90,7 +91,7 @@ def _looks_auth(spec_dir) -> bool:
         r"session|cookie|credential|logout|form|submit)\b", text))
 
 
-def _confirm_fn(assume_yes: bool):
+def _confirm_fn(assume_yes: bool) -> Callable[[str], bool]:
     def confirm(path: str) -> bool:
         if assume_yes:
             return True
@@ -154,7 +155,7 @@ def _inception_approver(assume_yes: bool):
     return approve
 
 
-def _add_agent_opts(sp) -> None:
+def _add_agent_opts(sp: argparse.ArgumentParser) -> None:
     """The agent knobs shared by the standalone gate subcommands (verify/e2e/
     audit/chaos): which backend/model, and the retry/cost caps."""
     sp.add_argument("--backend", default="acp", choices=["acp", "llm"])
@@ -164,7 +165,7 @@ def _add_agent_opts(sp) -> None:
     sp.add_argument("--agent-iters", type=int, default=None)
 
 
-def _add_common(sp):
+def _add_common(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--name", default=None, help="project name / output folder")
     sp.add_argument("--target", default="cloudflare", choices=["cloudflare", "vercel", "plain"])
     sp.add_argument("--backend", default="acp", choices=["acp", "llm"])
@@ -239,7 +240,7 @@ def _add_common(sp):
                     help="do not auto-open the app after a green build")
 
 
-def _finish(res, args) -> int:
+def _finish(res, args: argparse.Namespace) -> int:
     if getattr(res, "clarify_needed", False):
         print(f"\n[area] ⏸ CLARIFICATION NEEDED — {res.name} (spec: {res.spec_dir}); "
               "not built. Confirm/override the assumptions above, then re-run "
@@ -338,7 +339,7 @@ def _finish(res, args) -> int:
     return 0
 
 
-def _run_gate(gate: str, name: str, args) -> bool:
+def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
     from area.verify import (chaos_verify, e2e_verify, holdout_verify, nfr_verify,
                              perf_verify, product_verify, static_audit)
 
@@ -591,7 +592,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
     # P2 cost/budget cap -> env read by area/engine at call time
@@ -1052,7 +1053,7 @@ def _cmd_watch(args, expected) -> int:
     return 0 if ok else 1
 
 
-_HANDLERS = {
+_HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "run": _cmd_run, "clone": _cmd_clone, "iterate": _cmd_iterate,
     "inception": _cmd_inception, "intake": _cmd_intake, "deploy": _cmd_deploy,
     "export": _cmd_export, "provenance": _cmd_provenance, "rollback": _cmd_rollback,
@@ -1063,7 +1064,7 @@ _HANDLERS = {
 }
 
 
-def _dispatch(args, expected) -> int:
+def _dispatch(args: argparse.Namespace, expected: str | None) -> int:
     """Run the handler for the parsed subcommand. Returns the process exit code."""
     handler = _HANDLERS.get(args.cmd)
     return handler(args, expected) if handler else 2
