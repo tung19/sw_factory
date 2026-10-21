@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from area._util import safe_name
 from area.build import build_app
@@ -14,6 +14,9 @@ from area.spec.extract import append_assumptions
 from area.spec.review import review_spec
 
 from area.paths import WORKSPACE  # noqa: E402  (single source; AREA_WORKSPACE-aware)
+
+if TYPE_CHECKING:
+    from area.engine import Backend
 
 
 @dataclass
@@ -170,7 +173,7 @@ def run_pipeline(
     *,
     name: str = "app",
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
@@ -250,7 +253,7 @@ def iterate_pipeline(
     change_request: str,
     *,
     target: Optional[str] = None,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
@@ -285,7 +288,7 @@ def intake_pipeline(
     *,
     name: str = "intake",
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
@@ -356,7 +359,7 @@ def clone_pipeline(
     kind: str = "auto",
     use_rea: bool = False,
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,

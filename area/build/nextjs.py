@@ -14,7 +14,7 @@ from typing import Optional
 
 import yaml
 
-from area.engine import Verifier, build_agent, command_verifier, run_until
+from area.engine import Backend, Verifier, build_agent, command_verifier, run_until
 from area.spec.models import Acceptance, Spec
 
 # TDD preamble: an independent, locked acceptance suite already exists and IS
@@ -137,7 +137,7 @@ def build_app(
     app_dir: str | Path,
     *,
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
     design: str = "",

@@ -11,7 +11,7 @@ from typing import Optional
 
 import yaml
 
-from area.engine import VerifyResult, build_agent, run_until
+from area.engine import Backend, VerifyResult, build_agent, run_until
 from area.spec.models import (
     Acceptance,
     Spec,
@@ -128,7 +128,7 @@ def extract_spec(
     out_dir: str | Path,
     *,
     expected: Optional[str] = None,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> tuple[Spec, Acceptance]:
