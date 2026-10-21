@@ -31,4 +31,7 @@ test:
 lint:
 	@$(VENV)/ruff check area tests 2>/dev/null || ruff check area tests
 
-check: lint test
+typecheck:
+	@$(VENV)/mypy 2>/dev/null || mypy
+
+check: lint typecheck test

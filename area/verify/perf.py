@@ -281,7 +281,7 @@ def measure(app_dir: str | Path, *, path: str = "/", total: int = 200,
             except Exception:  # noqa: BLE001
                 break
         m = _fire_load(base, total, concurrency, req_timeout)
-        m["_server"] = script  # provenance of the measurement (string; not gated)
+        m["_server"] = script  # type: ignore[assignment]  # str provenance in an otherwise-float dict; filtered out before gating
         return m, None
     finally:
         _stop(proc)

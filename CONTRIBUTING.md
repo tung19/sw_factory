@@ -22,8 +22,13 @@ upstream fixes with `git subtree pull --prefix=vendor/software-agent-sdk <repo> 
 
 ```bash
 source .venv/bin/activate
-python -m pytest            # ~330 tests, ~2-3s
+make check     # ruff (lint) + mypy (phased subset) + pytest — what CI runs
+# or individually:  make lint  ·  make typecheck  ·  make test  (~347 tests, ~2-3s)
 ```
+
+Lint is `ruff` (pyflakes + syntax). Type-checking is `mypy` on a **phased subset**
+of already-clean modules (see `[tool.mypy]` in `pyproject.toml`); growing that list
+as modules get typed is a welcome contribution.
 
 The suite is **logic-only and agent-free** — it never spawns a build agent or hits an
 LLM (those are validated by dogfood runs). So tests must stub the agent/pipeline and

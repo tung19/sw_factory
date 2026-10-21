@@ -11,6 +11,8 @@ import signal
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -36,8 +38,6 @@ def _free_port() -> int:
 
 
 def _wait_ready(url: str, timeout: float = 60.0) -> bool:
-    import urllib.error
-
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
