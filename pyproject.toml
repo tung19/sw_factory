@@ -54,39 +54,14 @@ line-length = 100
 select = ["F", "E9"]
 
 [tool.mypy]
-# PHASED type-checking: a curated set of already-clean modules, expanded over time
-# (full typing of the ~7k-LOC codebase is a gradual effort). CI runs bare `mypy`,
-# which reads this `files` list.
+# FULL type-checking: the entire `area` package is clean, so CI checks all of it
+# (bare `mypy` reads this `files`). A new module with a type error now fails CI —
+# that is the point. Started phased (a curated clean subset) and grew the set PR by
+# PR (9 → 18 → 25 → 26 → full) until the whole package passed; `["area"]` keeps it
+# from regressing and auto-covers new modules. vendor/workspace/examples stay out.
 python_version = "3.12"
 ignore_missing_imports = true
-files = [
-  "area/cli.py",
-  "area/paths.py",
-  "area/_util.py",
-  "area/evidence.py",
-  "area/obs.py",
-  "area/provenance.py",
-  "area/demo.py",
-  "area/trace.py",
-  "area/skills.py",
-  "area/doctor.py",
-  "area/reality.py",
-  "area/preview.py",
-  "area/export.py",
-  "area/design.py",
-  "area/heal.py",
-  "area/monitor.py",
-  "area/pipeline.py",
-  "area/verify/__init__.py",
-  "area/verify/_runners.py",
-  "area/verify/audit.py",
-  "area/verify/chaos.py",
-  "area/verify/e2e.py",
-  "area/verify/holdout.py",
-  "area/verify/nfr.py",
-  "area/verify/perf.py",
-  "area/verify/product.py",
-]
+files = ["area"]
 
 [build-system]
 requires = ["hatchling"]

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from area.engine import build_agent, run_once
+from area.engine import Backend, build_agent, run_once
 from area.intake.aidlc import emit_evidence, new_trace_id
 
 # Signal an approve callback can return to re-run a bolt (regenerate).
@@ -96,7 +96,7 @@ def bolt_prompt(bolt: Bolt, requirement: str, out: Path, *, regen: bool = False)
     )
 
 
-def _agent_propose(bolt: Bolt, prompt: str, out: Path, *, backend: str,
+def _agent_propose(bolt: Bolt, prompt: str, out: Path, *, backend: Backend,
                    model: Optional[str]) -> str:
     """Default propose: run the agent once; it writes the bolt file; read it back."""
     agent = build_agent(backend, model=model)
@@ -137,7 +137,7 @@ def run_inception(
     *,
     approve_fn: ApproveFn,
     propose_fn: Optional[ProposeFn] = None,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     trace_id: Optional[str] = None,
 ) -> dict:

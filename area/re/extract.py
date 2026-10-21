@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from area.engine import build_agent, run_until
+from area.engine import Backend, build_agent, run_until
 from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier, expected_block
 from area.spec.models import Acceptance, Spec, load_acceptance, load_spec
 
@@ -47,7 +47,7 @@ def spec_from_source(
     kind: str = "auto",
     use_rea: bool = False,
     expected: Optional[str] = None,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> tuple[Spec, Acceptance]:

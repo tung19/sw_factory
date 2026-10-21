@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Iterable
+from typing import Any, Iterable
 
 from area.paths import WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware single source)
 
@@ -54,7 +54,7 @@ def lessons() -> list[dict]:
 
 def remember(symptom: str, fix: str = "", tags: Iterable[str] = ()) -> None:
     _ensure_seed()
-    rec = {
+    rec: dict[str, Any] = {
         "ts": time.time(),
         "tags": [t for t in tags if t],
         "symptom": symptom.strip()[:500],
