@@ -12,7 +12,7 @@ from typing import Optional
 
 from area._util import safe_name
 from area.build import build_app
-from area.engine import build_agent, run_until
+from area.engine import Backend, build_agent, run_until
 from area.pipeline import WORKSPACE
 from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier
 from area.spec.models import Acceptance, Spec, load_acceptance, load_spec
@@ -33,7 +33,7 @@ def heal(
     error: str,
     *,
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     rebuild: bool = True,

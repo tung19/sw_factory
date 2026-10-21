@@ -13,9 +13,12 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from area._util import safe_name
+
+if TYPE_CHECKING:
+    from area.engine import Backend
 
 from area.paths import WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware)
 DEPLOYS = WORKSPACE / ".area" / "deploys"
@@ -64,10 +67,10 @@ def _resolve(name_or_url: str, health: str) -> tuple[str, str]:
         base, name = name_or_url.rstrip("/"), "adhoc"
     else:
         name = safe_name(name_or_url)
-        base = deployed_url(name)
-        if not base:
+        url = deployed_url(name)
+        if not url:
             raise RuntimeError(f"no deployed URL for {name} (deploy first, or pass a URL)")
-        base = base.rstrip("/")
+        base = url.rstrip("/")
     url = base + (health if health.startswith("/") else "/" + health)
     return name, url
 
@@ -135,7 +138,7 @@ def cf_logs(name: str, *, seconds: int = 12) -> str:
 
 def watch(name: str, *, checks: int = 3, interval: float = 5.0, max_heals: int = 1,
           confirm: Optional[Callable[[str], bool]] = None,
-          backend: str = "acp", model: Optional[str] = None) -> bool:
+          backend: "Backend" = "acp", model: Optional[str] = None) -> bool:
     """Closed-loop: probe -> heal -> rebuild -> human gate -> redeploy."""
     name = safe_name(name)
     if not deployed_url(name):
