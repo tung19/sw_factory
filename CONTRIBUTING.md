@@ -89,6 +89,16 @@ A product name is required — the CLI prompts for it interactively and errors
 non-interactively, and won't silently overwrite an existing product. Don't commit
 anything under `workspace/`.
 
+## Releases
+
+Pre-1.0, [SemVer](https://semver.org/). A release: move the relevant
+`## [Unreleased]` notes in [`CHANGELOG.md`](CHANGELOG.md) under a new
+`## [x.y.z] — DATE` heading, commit, then tag `git tag vx.y.z && git push --tags`.
+Bump **minor** for new capabilities (a new gate, flow, or command), **patch** for
+fixes, and reserve **major** for a breaking change to the CLI/flags, the spec
+format, or the oracle-loop contract. Generated apps are not versioned with the
+factory — each is exported as its own repo.
+
 ## Commits & PRs
 
 - One logical change per commit, with a test. Explain *why* in the body, not just *what*.

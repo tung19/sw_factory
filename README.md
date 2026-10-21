@@ -76,7 +76,8 @@ gate. See [ADR-0001](docs/adr/0001-local-first-byo-everything.md) and
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the system map (spine, pipeline, the 7 gates, modules). *Start here to understand the code.*
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — setup, tests, how to add a gate/backend.
-- **[CLAUDE.md](CLAUDE.md)** — the rules the build agent follows.
+- **[docs/CASE-STUDY.md](docs/CASE-STUDY.md)** — building `taskboard` from one sentence, with the real artifacts. *Proof it works.*
+- **[CLAUDE.md](CLAUDE.md)** — the rules the build agent follows. **[SECURITY.md](SECURITY.md)** · **[CHANGELOG.md](CHANGELOG.md)**.
 - **[docs/UPGRADE-PLAN.md](docs/UPGRADE-PLAN.md)** · **[PLAN.md](PLAN.md)** — roadmap & status.
 
 ## Layout
