@@ -365,7 +365,8 @@ def _run_gate(gate: str, name: str, args) -> bool:
     return True
 
 
-def main(argv=None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the full `area` CLI parser (all subcommands + their flags)."""
     p = argparse.ArgumentParser(prog="area", description="AREA — internal AI software factory")
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -587,8 +588,11 @@ def main(argv=None) -> int:
     wa.add_argument("--yes", action="store_true", help="skip the redeploy human gate")
     wa.add_argument("--backend", default="acp", choices=["acp", "llm"])
     wa.add_argument("--model", default=None)
+    return p
 
-    args = p.parse_args(argv)
+
+def main(argv=None) -> int:
+    args = _build_parser().parse_args(argv)
 
     # P2 cost/budget cap -> env read by area/engine at call time
     if getattr(args, "budget", None) is not None:
@@ -604,6 +608,11 @@ def main(argv=None) -> int:
             print(f"[area] could not read --expect-file: {e}")
             return 1
 
+    return _dispatch(args, expected)
+
+
+def _dispatch(args, expected) -> int:
+    """Run the handler for the parsed subcommand. Returns the process exit code."""
     if args.cmd == "run":
         from area import trace
         from area.pipeline import run_pipeline

@@ -62,7 +62,7 @@ example with its spec + locked oracle + gate evidence, plus a keyless `area demo
 - [x] W2.5 bootstrap (`Makefile`: setup/demo/test/lint/check)
 - [x] W2.6 product-first README (see-it-work-in-3-min → golden path → advanced)
 - [x] W2.7 one golden path (README: single pipeline; clone/intake/inception labeled advanced)
-- [~] W2.8 CLI UX — agent-opts dedup done (`_add_agent_opts`); full `cli.main` dispatch-table split deferred (maintainability, risky)
+- [x] W2.8 CLI UX — `cli.main` split (640→~19 lines: `_build_parser` + `_dispatch`), agent-opts dedup (`_add_agent_opts`), + mypy (phased subset) in CI/`make check`. mypy caught a real latent bug (demo.py missing `import urllib.request`).
 - [x] W3.9 case study (`docs/CASE-STUDY.md` — taskboard, real artifacts + the clarify/STOP sidebar)
 - [ ] W3.10 live demo — **needs a deploy token** (owner)
 - [x] W3.11 releases (`CHANGELOG.md` + a Releases section in CONTRIBUTING: SemVer + tag flow)

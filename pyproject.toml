@@ -53,6 +53,24 @@ line-length = 100
 # (E9). Deliberately NOT the full style suite yet; tighten over time.
 select = ["F", "E9"]
 
+[tool.mypy]
+# PHASED type-checking: a curated set of already-clean modules, expanded over time
+# (full typing of the ~7k-LOC codebase is a gradual effort). CI runs bare `mypy`,
+# which reads this `files` list.
+python_version = "3.12"
+ignore_missing_imports = true
+files = [
+  "area/paths.py",
+  "area/_util.py",
+  "area/evidence.py",
+  "area/obs.py",
+  "area/provenance.py",
+  "area/demo.py",
+  "area/verify/_runners.py",
+  "area/verify/perf.py",
+  "area/verify/nfr.py",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
