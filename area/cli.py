@@ -154,6 +154,16 @@ def _inception_approver(assume_yes: bool):
     return approve
 
 
+def _add_agent_opts(sp) -> None:
+    """The agent knobs shared by the standalone gate subcommands (verify/e2e/
+    audit/chaos): which backend/model, and the retry/cost caps."""
+    sp.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    sp.add_argument("--model", default=None)
+    sp.add_argument("--max-iters", type=int, default=3)
+    sp.add_argument("--budget", type=float, default=None)
+    sp.add_argument("--agent-iters", type=int, default=None)
+
+
 def _add_common(sp):
     sp.add_argument("--name", default=None, help="project name / output folder")
     sp.add_argument("--target", default="cloudflare", choices=["cloudflare", "vercel", "plain"])
@@ -512,11 +522,7 @@ def main(argv=None) -> int:
 
     vf = sub.add_parser("verify", help="Independent holdout acceptance check of a built app")
     vf.add_argument("name")
-    vf.add_argument("--backend", default="acp", choices=["acp", "llm"])
-    vf.add_argument("--model", default=None)
-    vf.add_argument("--max-iters", type=int, default=3)
-    vf.add_argument("--budget", type=float, default=None)
-    vf.add_argument("--agent-iters", type=int, default=None)
+    _add_agent_opts(vf)
 
     ob = sub.add_parser("obs", help="Show cost/latency/outcome summary of agent runs")
     ob.add_argument("--json", action="store_true")
@@ -535,11 +541,7 @@ def main(argv=None) -> int:
 
     e2 = sub.add_parser("e2e", help="Playwright end-to-end UI verification of a built app")
     e2.add_argument("name")
-    e2.add_argument("--backend", default="acp", choices=["acp", "llm"])
-    e2.add_argument("--model", default=None)
-    e2.add_argument("--max-iters", type=int, default=3)
-    e2.add_argument("--budget", type=float, default=None)
-    e2.add_argument("--agent-iters", type=int, default=None)
+    _add_agent_opts(e2)
 
     au = sub.add_parser("audit", help="Security + static gate (tsc, npm audit, secrets) — two-tier")
     au.add_argument("name")
@@ -549,19 +551,11 @@ def main(argv=None) -> int:
                     help="npm-audit severity threshold for the deterministic tier-1 gate")
     au.add_argument("--strict", action="store_true",
                     help="tier-2: make advisory risky-pattern findings BLOCK")
-    au.add_argument("--backend", default="acp", choices=["acp", "llm"])
-    au.add_argument("--model", default=None)
-    au.add_argument("--max-iters", type=int, default=3)
-    au.add_argument("--budget", type=float, default=None)
-    au.add_argument("--agent-iters", type=int, default=None)
+    _add_agent_opts(au)
 
     ch = sub.add_parser("chaos", help="Chaos/resilience test the app and harden it")
     ch.add_argument("name")
-    ch.add_argument("--backend", default="acp", choices=["acp", "llm"])
-    ch.add_argument("--model", default=None)
-    ch.add_argument("--max-iters", type=int, default=3)
-    ch.add_argument("--budget", type=float, default=None)
-    ch.add_argument("--agent-iters", type=int, default=None)
+    _add_agent_opts(ch)
 
     pf = sub.add_parser("perf", help="Perf/load gate: boot the built app, fire load, "
                                      "measure latency/throughput/errors vs budget")

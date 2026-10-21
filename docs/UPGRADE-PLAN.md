@@ -59,5 +59,8 @@ example with its spec + locked oracle + gate evidence, plus a keyless `area demo
 - [x] W1.2 `area demo <name>` (keyless: install → build → serve → open)
 - [x] W1.3 CI lint (ruff F,E9 in CI; cleaned 12 unused-import/var findings)
 - [x] W1.4 governance (SECURITY.md, CODEOWNERS, issue/PR templates, ADR-0003 oracle-loop)
-- [ ] W2.5 bootstrap · [ ] W2.6 README · [ ] W2.7 golden path · [ ] W2.8 CLI UX
+- [x] W2.5 bootstrap (`Makefile`: setup/demo/test/lint/check)
+- [x] W2.6 product-first README (see-it-work-in-3-min → golden path → advanced)
+- [x] W2.7 one golden path (README: single pipeline; clone/intake/inception labeled advanced)
+- [~] W2.8 CLI UX — agent-opts dedup done (`_add_agent_opts`); full `cli.main` dispatch-table split deferred (maintainability, risky)
 - [ ] W3.9 case study · [ ] W3.10 live demo · [ ] W3.11 releases
