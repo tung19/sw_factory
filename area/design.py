@@ -9,12 +9,12 @@ from __future__ import annotations
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import build_agent, run_once
+from area.engine import Backend, build_agent, run_once
 from area.pipeline import WORKSPACE
 
 
 def design_stage(
-    name: str, *, backend: str = "acp", model: Optional[str] = None
+    name: str, *, backend: Backend = "acp", model: Optional[str] = None
 ) -> str:
     """Write <spec_dir>/design.md from the spec. Returns the design text."""
     name = safe_name(name)
