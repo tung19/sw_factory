@@ -57,6 +57,7 @@ example with its spec + locked oracle + gate evidence, plus a keyless `area demo
 ## Status
 - [x] W1.1 examples/ (`examples/taskboard` — source + spec + locked oracle + evidence)
 - [x] W1.2 `area demo <name>` (keyless: install → build → serve → open)
-- [ ] W1.3 CI lint · [ ] W1.4 governance
+- [x] W1.3 CI lint (ruff F,E9 in CI; cleaned 12 unused-import/var findings)
+- [x] W1.4 governance (SECURITY.md, CODEOWNERS, issue/PR templates, ADR-0003 oracle-loop)
 - [ ] W2.5 bootstrap · [ ] W2.6 README · [ ] W2.7 golden path · [ ] W2.8 CLI UX
 - [ ] W3.9 case study · [ ] W3.10 live demo · [ ] W3.11 releases

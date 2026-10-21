@@ -11,7 +11,6 @@ import signal
 import socket
 import subprocess
 import time
-import urllib.request
 import webbrowser
 from pathlib import Path
 

@@ -55,6 +55,11 @@ jobs:
       - name: Syntax check
         run: python -m compileall -q area tests
 
+      - name: Lint (ruff — pyflakes bugs + syntax)
+        run: |
+          pip install ruff==0.17.1
+          ruff check area tests
+
       - name: Run test suite
         run: python -m pytest
 

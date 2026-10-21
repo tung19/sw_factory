@@ -7,7 +7,6 @@ page), and the oracle runs `npx playwright test` until green.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name

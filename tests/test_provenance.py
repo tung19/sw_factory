@@ -1,7 +1,6 @@
 """SLSA-style build provenance: digest the app source, attest materials→gates→
 product, and verify-before-deploy as a tamper blocker. Pure logic — no agents."""
 import area.deploy as D
-import area.deploy.cloudflare as C
 import area.deploy.vercel as V
 import area.provenance as P
 

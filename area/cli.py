@@ -526,7 +526,7 @@ def main(argv=None) -> int:
     tr.add_argument("name")
     tr.add_argument("--json", action="store_true")
 
-    mm = sub.add_parser("mem", help="Show the experience store (pitfalls remembered)")
+    sub.add_parser("mem", help="Show the experience store (pitfalls remembered)")
 
     dg = sub.add_parser("design", help="Architect stage: write design.md from a spec")
     dg.add_argument("name")

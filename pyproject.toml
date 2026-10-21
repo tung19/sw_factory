@@ -42,6 +42,17 @@ openhands-tools = { path = "vendor/software-agent-sdk/openhands-tools", editable
 testpaths = ["tests"]
 addopts = "-q"
 
+[tool.ruff]
+# Lint the factory source + tests only — not the vendored SDK, the generated
+# workspace, or the (TypeScript) example apps.
+extend-exclude = ["vendor", "workspace", "examples"]
+line-length = 100
+
+[tool.ruff.lint]
+# Bug-focused rules: pyflakes (F — unused imports/vars, undefined names) + syntax
+# (E9). Deliberately NOT the full style suite yet; tighten over time.
+select = ["F", "E9"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
