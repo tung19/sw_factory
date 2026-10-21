@@ -75,9 +75,16 @@ files = [
   "area/design.py",
   "area/heal.py",
   "area/monitor.py",
+  "area/pipeline.py",
+  "area/verify/__init__.py",
   "area/verify/_runners.py",
-  "area/verify/perf.py",
+  "area/verify/audit.py",
+  "area/verify/chaos.py",
+  "area/verify/e2e.py",
+  "area/verify/holdout.py",
   "area/verify/nfr.py",
+  "area/verify/perf.py",
+  "area/verify/product.py",
 ]
 
 [build-system]
