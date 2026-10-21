@@ -2,7 +2,6 @@
 spec (never raw to the agent), re-lock the oracle (TDD), rebuild. Pure logic —
 run_pipeline is stubbed, no agents. Covers requirement composition, prior-spec
 load, target auto-detect, the pipeline wiring, and the dashboard job command."""
-from pathlib import Path
 
 import area.pipeline as P
 import area.web.jobs as J

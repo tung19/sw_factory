@@ -11,7 +11,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 # matches *.workers.dev and *.pages.dev deploy URLs
 _URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev\S*")
