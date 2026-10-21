@@ -12,8 +12,9 @@ import time
 from pathlib import Path
 from typing import Iterable
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-MEM = _ROOT / "workspace" / ".area" / "memory.jsonl"
+from area.paths import WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware single source)
+
+MEM = WORKSPACE / ".area" / "memory.jsonl"
 
 _SEED = [
     {

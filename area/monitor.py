@@ -17,8 +17,7 @@ from typing import Callable, Optional
 
 from area._util import safe_name
 
-_ROOT = Path(__file__).resolve().parent.parent
-WORKSPACE = _ROOT / "workspace"
+from area.paths import REPO as _ROOT, WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware)
 DEPLOYS = WORKSPACE / ".area" / "deploys"
 MONDIR = WORKSPACE / ".area" / "monitor"
 

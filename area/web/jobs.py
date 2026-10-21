@@ -16,8 +16,8 @@ from pathlib import Path
 
 from area._util import safe_name
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-WORKSPACE = ROOT / "workspace"
+from area.paths import REPO as ROOT, WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware)
+
 STATE_DIR = WORKSPACE / ".area"
 JOBS_JSON = STATE_DIR / "jobs.json"
 LOG_DIR = STATE_DIR / "logs"

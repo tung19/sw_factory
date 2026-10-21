@@ -80,6 +80,11 @@ the codebase should import the SDK directly.
 ## Workspace & naming
 
 Generated apps live in gitignored `workspace/apps/<name>` (+ `workspace/specs/<name>`).
+To keep them OUT of the repo entirely (isolation, lean checkout), set
+**`AREA_WORKSPACE`** to an external dir before running `area`
+(e.g. `export AREA_WORKSPACE=~/area-generated`); all generated apps/specs/.area
+telemetry then live there instead. The path layout is defined once in
+[`area/paths.py`](area/paths.py).
 A product name is required — the CLI prompts for it interactively and errors
 non-interactively, and won't silently overwrite an existing product. Don't commit
 anything under `workspace/`.

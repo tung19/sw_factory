@@ -13,7 +13,7 @@ from area.spec import Acceptance, Spec, extract_spec
 from area.spec.extract import append_assumptions
 from area.spec.review import review_spec
 
-WORKSPACE = Path(__file__).resolve().parent.parent / "workspace"
+from area.paths import WORKSPACE  # noqa: E402  (single source; AREA_WORKSPACE-aware)
 
 
 @dataclass

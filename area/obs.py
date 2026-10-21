@@ -10,8 +10,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-_ROOT = Path(__file__).resolve().parent.parent
-RUNS = _ROOT / "workspace" / ".area" / "runs.jsonl"
+from area.paths import WORKSPACE  # zero-dep constant module (no cycle risk)
+
+RUNS = WORKSPACE / ".area" / "runs.jsonl"
 
 
 def cost_of(conv) -> Optional[float]:

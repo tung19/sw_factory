@@ -20,7 +20,7 @@ import yaml
 
 from area.engine import ask_cli
 
-WORKSPACE = Path(__file__).resolve().parents[2] / "workspace"
+from area.paths import WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware single source)
 SENTINEL = "<<<PRODUCT>>>"
 _APP_GLOBS = ("app/**/*.tsx", "app/**/*.ts", "components/**/*.tsx", "*.html", "index.html")
 _MAX_FILES = 12
