@@ -486,6 +486,14 @@ def main(argv=None) -> int:
 
     sub.add_parser("doctor", help="Check the local setup (Python/Node/git/Claude/deploy creds)")
 
+    dm = sub.add_parser("demo", help="Run a committed example app locally — KEYLESS "
+                                     "(no Claude, no cost); omit name to list")
+    dm.add_argument("name", nargs="?", default=None, help="example name (omit to list)")
+    dm.add_argument("--no-open", dest="open", action="store_false", default=True,
+                    help="don't auto-open the browser")
+    dm.add_argument("--no-build", dest="build", action="store_false", default=True,
+                    help="skip the build step (reuse an existing .next)")
+
     # The coordinator + runner (multi-user SaaS data plane) live on the
     # `saas-coordinator-runner` branch. On main, AREA runs natively in Claude Code.
 
@@ -769,6 +777,17 @@ def main(argv=None) -> int:
         print(out[-1000:])
         print(f"[area] rollback: {'✅ done' if ok else '❌ failed'} — {args.name}")
         return 0 if ok else 1
+
+    if args.cmd == "demo":
+        from area.demo import list_examples, run_demo
+
+        if not args.name:
+            ex = list_examples()
+            print("[area] example apps (keyless — no Claude/cost):",
+                  ", ".join(ex) or "(none committed)")
+            print("  run one:  area demo <name>")
+            return 0
+        return run_demo(args.name, open_browser=args.open, build=args.build)
 
     if args.cmd == "doctor":
         from area.doctor import report

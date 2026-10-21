@@ -1,0 +1,94 @@
+name: taskboard
+summary: >
+  A multi-page team task board web app where users sign up and log in, then manage
+  their own private boards and tasks. Each user sees only their own boards; passwords
+  are stored hashed; data persists durably across a server restart.
+stack: nextjs
+
+entities:
+  - name: User
+    fields:
+      - {name: id, type: int, required: true}
+      - {name: email, type: string, required: true}
+      - {name: passwordHash, type: string, required: true}
+      - {name: createdAt, type: datetime, required: false}
+
+  - name: Board
+    fields:
+      - {name: id, type: int, required: true}
+      - {name: name, type: string, required: true}
+      - {name: ownerId, type: int, required: true}
+      - {name: createdAt, type: datetime, required: false}
+
+  - name: Task
+    fields:
+      - {name: id, type: int, required: true}
+      - {name: boardId, type: int, required: true}
+      - {name: title, type: string, required: true}
+      - {name: status, type: enum, required: true}   # todo | doing | done
+      - {name: createdAt, type: datetime, required: false}
+
+features:
+  - id: signup
+    title: Sign up
+    description: >
+      From the combined login/signup page, a visitor creates an account with an email
+      and a password, then is logged in and taken to their boards-list page.
+
+  - id: login
+    title: Log in
+    description: >
+      From the combined login/signup page, an existing user logs in with their email
+      and password; wrong credentials are rejected.
+
+  - id: password-hashing
+    title: Passwords stored hashed
+    description: >
+      A user's password is stored only as a cryptographic hash; the plaintext password
+      is never persisted.
+
+  - id: auth-guard
+    title: Require login for boards/tasks
+    description: >
+      Visiting the boards-list or board-detail pages while not logged in is rejected and
+      the visitor is sent to the login page.
+
+  - id: create-board
+    title: Create a board
+    description: >
+      A logged-in user creates a named board from the create-board form on the
+      boards-list page; the new board appears in their list.
+
+  - id: view-boards
+    title: View my boards
+    description: >
+      The boards-list page shows the current user's boards (and only theirs).
+
+  - id: open-board
+    title: Open a board
+    description: >
+      A logged-in user opens one of their boards to view the board-detail page listing
+      that board's tasks.
+
+  - id: add-task
+    title: Add a task
+    description: >
+      On the board-detail page, a logged-in user adds a task to the board with a title
+      and a status of todo, doing, or done.
+
+  - id: change-task-status
+    title: Change a task's status
+    description: >
+      On the board-detail page, a logged-in user changes an existing task's status among
+      todo, doing, and done via per-task status controls.
+
+  - id: user-isolation
+    title: Strict per-user isolation
+    description: >
+      A user can only ever see and act on their own boards and tasks; user A can never
+      see or reach user B's boards or tasks.
+
+  - id: durable-persistence
+    title: Durable persistence
+    description: >
+      Boards and tasks are stored durably so that they survive a server restart.

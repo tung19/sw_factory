@@ -1,0 +1,15 @@
+/node_modules
+/.next
+/out
+/data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+next-env.d.ts
+.DS_Store
+npm-debug.log*
+/test-results
+/playwright-report
+/playwright/.cache
+.taskboard_e2e_restart.log
