@@ -70,3 +70,36 @@ def test_gate_cancelled_runs_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(C, "deploy", lambda a: (order.append("d"), (True, "", None))[1])
     ok, _ = D.deploy_with_gate(tmp_path, confirm=lambda p: False)
     assert not ok and order == []
+
+
+def test_provision_d1_shlex_quotes_migration_filename(monkeypatch, tmp_path):
+    """Audit fix: an agent-authored migration filename must be shlex-quoted into
+    the `bash -lc` string so a crafted name can't inject a command."""
+    import shlex
+
+    (tmp_path / "cloudflare.config.ts").write_text(
+        'defineWorker({ name: "db", env: { DB: bindings.d1() } })')
+    mig = tmp_path / "migrations"
+    mig.mkdir()
+    evil = "0001$(touch pwned).sql"
+    (mig / evil).write_text("CREATE TABLE IF NOT EXISTS t(id TEXT);")
+
+    cmds = []
+
+    class _P:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def fake_run(argv, **kw):
+        cmds.append(argv[2] if argv and argv[0] == "bash" else " ".join(map(str, argv)))
+        return _P()
+
+    monkeypatch.setattr(C.subprocess, "run", fake_run)
+    C.provision_d1(tmp_path)
+
+    exec_cmds = [c for c in cmds if "d1 execute" in c]
+    assert exec_cmds, "no `d1 execute` command was issued"
+    assert f"--file={shlex.quote(f'migrations/{evil}')}" in exec_cmds[0]
+    # the payload only appears inside the single-quoted (inert) filename
+    assert "$(touch pwned)" not in exec_cmds[0].replace(shlex.quote(f"migrations/{evil}"), "")

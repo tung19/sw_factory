@@ -131,17 +131,24 @@ def _provided_pg_url() -> Optional[str]:
 
 
 def _apply_sql(app: Path, url: str, rel: str) -> bool:
-    """Apply one SQL file to the Postgres URL via psql. Idempotent iff the schema
-    uses IF NOT EXISTS. The URL is passed through env (never interpolated into the
-    shell) to survive the special chars in a connection string."""
+    """Apply one SQL file to the Postgres URL via psql, as ONE transaction
+    (`--single-transaction` + `ON_ERROR_STOP`), so a mid-file error rolls the whole
+    file back instead of committing a half-applied schema. The URL goes through env
+    (never interpolated into the shell) to survive a connection string's special
+    chars. Idempotent iff the schema uses IF NOT EXISTS — which keeps psql
+    error-free (returncode 0). A real error (including an "already exists" from a
+    NON-idempotent statement) now rolls back and is reported as FAILURE, rather
+    than being silently swallowed by an "already exists" substring check that let a
+    partial apply pass as success."""
     e = _env()
     e["AREA_PG_URL"] = url
     p = subprocess.run(
-        ["bash", "-lc", f'psql "$AREA_PG_URL" -v ON_ERROR_STOP=1 -f {shlex.quote(rel)} 2>&1'],
+        ["bash", "-lc",
+         f'psql "$AREA_PG_URL" --single-transaction -v ON_ERROR_STOP=1 '
+         f'-f {shlex.quote(rel)} 2>&1'],
         cwd=str(app), capture_output=True, text=True, env=e,
     )
-    out = (p.stdout + p.stderr).lower()
-    return p.returncode == 0 or "already exists" in out
+    return p.returncode == 0
 
 
 def provision_postgres(app_dir: str | Path) -> tuple[bool, str]:
