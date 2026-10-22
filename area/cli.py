@@ -603,6 +603,11 @@ def _build_parser() -> argparse.ArgumentParser:
     co.add_argument("--backend", default="acp", choices=["acp", "llm"])
     co.add_argument("--model", default=None)
 
+    cf = sub.add_parser("cf-fix", help="Deterministically fix the recurring vinext "
+                                       "gotchas (pin compat date to workerd + braces/"
+                                       "fflate audit overrides)")
+    cf.add_argument("name")
+
     mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
     mo.add_argument("target", help="app name or https URL")
     mo.add_argument("--checks", type=int, default=5)
@@ -1063,6 +1068,18 @@ def _cmd_cost(args: argparse.Namespace, expected: str | None) -> int:
     return 0 if ok else 1
 
 
+def _cmd_cf_fix(args: argparse.Namespace, expected: str | None) -> int:
+    from area.build.cf_scaffold import harden_cf_app
+    from area.pipeline import WORKSPACE
+
+    app = WORKSPACE / "apps" / safe_name(args.name)
+    if not app.is_dir():
+        print(f"[area] no app at {app}")
+        return 1
+    harden_cf_app(app)
+    return 0
+
+
 def _cmd_monitor(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
@@ -1110,8 +1127,8 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
-    "perf": _cmd_perf, "cost": _cmd_cost, "monitor": _cmd_monitor,
-    "status": _cmd_status, "watch": _cmd_watch,
+    "perf": _cmd_perf, "cost": _cmd_cost, "cf-fix": _cmd_cf_fix,
+    "monitor": _cmd_monitor, "status": _cmd_status, "watch": _cmd_watch,
 }
 
 
