@@ -1,8 +1,12 @@
 # `area adapt` — research-augmented clone & adapt (Flow B+)
 
-**Status:** spec confirmed (Tung, 2026-10-22); building in phases. This is a new
-AREA capability, not a generated app — the oracle here is AREA's own test suite
-(each phase builds to its acceptance criteria, agent-free-testable).
+**Status:** spec confirmed (Tung, 2026-10-22); **all phases P0–P4 + the capstone
+SHIPPED** (logic agent-free-tested; live LLM/web dogfood of the research +
+end-to-end build deferred until funded). This is a new AREA capability, not a
+generated app — the oracle here is AREA's own test suite. Command: `area adapt
+<reference> "<requirement>"` (research → requirement-anchored synthesis → one-shot
+clarify → spec written → `area intake` build handoff; `--seed`/`--seed-attest` for
+opt-in reference seeding).
 
 ## 1 · Engineering intent (why)
 Flow B (`area clone`) reverse-engineers ONE reference to build-to-parity; Flow A
@@ -82,7 +86,13 @@ first-class concern.
   one-shot clarify gate.
 - **P3 — data dimension:** persistence + ingest/ETL feature generation.
 - **P4 — seed-from-reference:** opt-in, attestation + robots.txt/public-only/
-  rate-limit/no-PII/provenance safeguards.
+  rate-limit/no-PII/provenance safeguards. ✅ (`area/seed.py`)
+- **Capstone — `area adapt` pipeline** ✅ (`area/adapt.py:adapt_pipeline` + CLI):
+  composes research → synthesis → data plan → one-shot clarify → writes
+  spec+acceptance → `area intake` build handoff → opt-in seed. Agent steps injected
+  (`researcher` / `reference_features`) for agent-free tests.
+
+**Shipped:** P0 `#20` · P1 `#21` · P2 `#22` · P3 `#23` · P4 `#24` · capstone (this).
 
 ## 6 · Deferred / out of scope (noted)
 Live LLM/web dogfood of the research stage (needs a funded run); the actual

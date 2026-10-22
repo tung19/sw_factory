@@ -638,6 +638,26 @@ def _build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--model", default=None)
     rs.add_argument("--json", action="store_true", help="print the brief as JSON")
 
+    ad = sub.add_parser("adapt", help="Research-augmented clone & adapt: research "
+                                      "comparable projects + a reference → a "
+                                      "requirement-anchored spec (one-shot clarify) "
+                                      "→ build handoff")
+    ad.add_argument("reference", help="reference app: git URL / repo / live URL / path")
+    ad.add_argument("requirement", help="what the adapted app must do (authoritative)")
+    ad.add_argument("--name", default=None, help="product name (slug from reference if omitted)")
+    ad.add_argument("--count", type=int, default=100, help="candidate repos to survey")
+    ad.add_argument("--top", type=int, default=5, help="top repos to analyse")
+    ad.add_argument("--budget", type=float, default=None)
+    ad.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    ad.add_argument("--model", default=None)
+    ad.add_argument("--no-clarify", dest="clarify", action="store_false", default=True,
+                    help="skip the one-shot clarify confirm (accept the filled spec)")
+    ad.add_argument("--yes", action="store_true", help="auto-confirm the one-shot clarify")
+    ad.add_argument("--seed", action="store_true",
+                    help="opt-in: seed data from the reference (needs --seed-attest)")
+    ad.add_argument("--seed-attest", action="store_true",
+                    help="attest you have the right to copy the reference's data")
+
     mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
     mo.add_argument("target", help="app name or https URL")
     mo.add_argument("--checks", type=int, default=5)
@@ -1150,6 +1170,39 @@ def _cmd_research(args: argparse.Namespace, expected: str | None) -> int:
     return 0
 
 
+def _cmd_adapt(args: argparse.Namespace, expected: str | None) -> int:
+    from area.adapt import AdaptResult, adapt_pipeline
+    from area.seed import SeedPolicy
+
+    name = _resolve_name(args.name, hint=args.reference, fallback="adapt")
+    seed_policy = SeedPolicy(attested=args.seed_attest) if args.seed else None
+
+    def _confirm(_res: "AdaptResult") -> bool:
+        return bool(getattr(args, "yes", False))  # one-shot: --yes accepts the filled spec
+
+    res = adapt_pipeline(
+        args.reference, args.requirement, name=name, summary=args.requirement[:200],
+        backend=args.backend, model=args.model, budget=args.budget,
+        count=args.count, top=args.top, clarify=args.clarify, confirm=_confirm,
+        seed_policy=seed_policy)
+
+    print(f"\n[adapt] {len(res.spec.features)} feature(s) · "
+          f"data: {res.data_plan.storage} / {res.data_plan.integration}")
+    if res.clarify_needed:
+        print("[adapt] ⏸ CLARIFY — the requirement was silent on these; review the "
+              "filled spec, then re-run with --yes (or --no-clarify) to accept:")
+        for it in res.clarify_items:
+            if it["auto_filled"]:
+                print(f"    • {it['id']} (from {it['source']})")
+        return 2
+    print(f"[adapt] spec written → {res.spec_dir}")
+    print(f"[adapt] build it: area intake {res.spec_dir} --name {name} --tdd")
+    if res.seed is not None:
+        s = res.seed
+        print(f"[adapt] seed: {'OK ' + str(s.seeded) + ' record(s)' if s.ok else 'BLOCKED — ' + s.blocked_reason}")
+    return 0
+
+
 def _cmd_monitor(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
@@ -1198,8 +1251,8 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
     "perf": _cmd_perf, "cost": _cmd_cost, "cf-fix": _cmd_cf_fix,
-    "cf-clone": _cmd_cf_clone, "research": _cmd_research, "monitor": _cmd_monitor,
-    "status": _cmd_status, "watch": _cmd_watch,
+    "cf-clone": _cmd_cf_clone, "research": _cmd_research, "adapt": _cmd_adapt,
+    "monitor": _cmd_monitor, "status": _cmd_status, "watch": _cmd_watch,
 }
 
 

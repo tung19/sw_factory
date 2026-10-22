@@ -137,3 +137,85 @@ def test_data_build_notes_mentions_storage_ingest_entities():
     # no ingest sentence when integration is none
     plain = AD.data_build_notes(AD.DataPlan(storage="sqlite/D1", integration="none", source="x"))
     assert "ingest" not in plain.lower()
+
+
+# ---- capstone: adapt_pipeline -------------------------------------------------
+
+import json as _json
+
+
+def _researcher(brief_dict):
+    def run(prompt, ws):
+        (ws / "brief.json").write_text(_json.dumps(brief_dict))
+    return run
+
+
+_BRIEF_D = {
+    "reference": "https://ref", "requirement": "build X", "candidates_considered": 80,
+    "top": [{"repo": "a/b", "url": "u", "features": ["Full text search"],
+             "data_source": "REST", "data_integration": "webhook",
+             "data_storage": "postgres"}],
+}
+
+
+def test_adapt_compose_writes_spec_when_accepted(tmp_path):
+    res = AD.adapt_pipeline(
+        "https://ref", "build X", name="app1",
+        requirement_features=[_f("login", "Login")],
+        reference_features=[_f("dashboard", "Dashboard")],
+        researcher=_researcher(_BRIEF_D), clarify=False, workspace=tmp_path)
+    assert res.clarify_needed is False
+    ids = [f.id for f in res.spec.features]
+    assert "login" in ids and res.provenance["login"] == "requirement"
+    assert res.data_plan.storage == "postgres"       # from the brief
+    sd = tmp_path / "specs" / "app1"
+    assert (sd / "spec.yaml").exists() and (sd / "acceptance.yaml").exists()
+    assert any(c.feature == "data-persistence" for c in res.acceptance.criteria)
+
+
+def test_adapt_clarify_stops_when_requirement_silent(tmp_path):
+    # no requirement features → everything auto-filled from reference/research → STOP
+    res = AD.adapt_pipeline(
+        "https://ref", "build X", name="app2",
+        requirement_features=[], reference_features=[_f("dashboard")],
+        researcher=_researcher(_BRIEF_D), clarify=True, workspace=tmp_path)
+    assert res.clarify_needed is True
+    assert not (tmp_path / "specs" / "app2" / "spec.yaml").exists()   # not written
+
+
+def test_adapt_confirm_proceeds(tmp_path):
+    res = AD.adapt_pipeline(
+        "https://ref", "build X", name="app3",
+        requirement_features=[], reference_features=[_f("dashboard")],
+        researcher=_researcher(_BRIEF_D), clarify=True,
+        confirm=lambda r: True, workspace=tmp_path)
+    assert res.clarify_needed is False
+    assert (tmp_path / "specs" / "app3" / "spec.yaml").exists()
+
+
+def test_adapt_no_clarify_when_fully_requirement(tmp_path):
+    empty_brief = {**_BRIEF_D, "top": [{"repo": "a/b", "url": "u", "features": [],
+                   "data_source": "", "data_integration": "", "data_storage": ""}]}
+    res = AD.adapt_pipeline(
+        "https://ref", "build X", name="app4",
+        requirement_features=[_f("login")], reference_features=[],
+        researcher=_researcher(empty_brief), clarify=True, workspace=tmp_path)
+    assert res.clarify_needed is False   # nothing auto-filled → no stop
+    assert (tmp_path / "specs" / "app4" / "spec.yaml").exists()
+
+
+def test_adapt_seed_opt_in(tmp_path):
+    from area.seed import SeedPolicy
+    recs = [{"id": 1, "email": "a@b.c", "title": "t"}]
+    res = AD.adapt_pipeline(
+        "https://ref", "build X", name="app5", requirement_features=[_f("x")],
+        reference_features=[], researcher=_researcher(_BRIEF_D), clarify=False,
+        seed_policy=SeedPolicy(attested=True), seed_records=recs, workspace=tmp_path)
+    assert res.seed is not None and res.seed.ok and res.seed.seeded == 1
+    assert res.seed.records[0] == {"id": 1, "title": "t"}   # PII stripped
+
+    res2 = AD.adapt_pipeline(
+        "https://ref", "build X", name="app6", requirement_features=[_f("x")],
+        reference_features=[], researcher=_researcher(_BRIEF_D), clarify=False,
+        seed_policy=SeedPolicy(), seed_records=recs, workspace=tmp_path)  # not attested
+    assert res2.seed is not None and res2.seed.ok is False   # blocked
