@@ -94,22 +94,28 @@ exit $fail
         "%SECRET_EXCLUDE%", _SECRET_EXCLUDE)
 
 
-# Tier-2 advisory: risky code patterns in the app's OWN source (not node_modules).
+# Tier-2 risky code patterns in the app's OWN source (not node_modules). The 3rd
+# field marks the INJECTION class (XSS / code-eval / SQL-injection) that BLOCKS by
+# default — a factory whose job is shipping web apps shouldn't green-light an app
+# with an injection sink. The rest (shell-exec, weak-random) stay advisory unless
+# --strict. `--no-block-injection` downgrades the injection class to advisory too.
 _RISKY = [
-    (re.compile(r"dangerouslySetInnerHTML"), "React XSS sink — dangerouslySetInnerHTML"),
-    (re.compile(r"\beval\s*\("), "eval() — code-injection risk"),
-    (re.compile(r"\bnew\s+Function\s*\("), "new Function() — dynamic code execution"),
+    (re.compile(r"dangerouslySetInnerHTML"), "React XSS sink — dangerouslySetInnerHTML", True),
+    (re.compile(r"\beval\s*\("), "eval() — code-injection risk", True),
+    (re.compile(r"\bnew\s+Function\s*\("), "new Function() — dynamic code execution", True),
     # Shell exec only: child_process, or a STANDALONE exec* call. A method call
     # like `db.exec(...)` (node:sqlite) or `regexp.exec(...)` is NOT shell exec —
     # the negative lookbehind for `.`/word char skips those. `spawn`/`spawnSync`
     # are caught via the child_process keyword (not the bare-call list) because a
     # bare `spawn(...)` is common in redux-saga / xstate and is NOT shell exec.
     (re.compile(r"child_process|(?<![.\w])(?:execSync|execFileSync|execFile|exec)\s*\("),
-     "shell exec — command-injection risk"),
-    (re.compile(r"Math\.random\s*\(\)"), "Math.random() — not cryptographically secure (use crypto)"),
-    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*\$\{"), "SQL built via string interpolation — injection risk"),
-    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*['\"`]\s*\+"), "SQL built via string concatenation — injection risk"),
+     "shell exec — command-injection risk", False),
+    (re.compile(r"Math\.random\s*\(\)"), "Math.random() — not cryptographically secure (use crypto)", False),
+    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*\$\{"), "SQL built via string interpolation — injection risk", True),
+    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*['\"`]\s*\+"), "SQL built via string concatenation — injection risk", True),
 ]
+# Messages of the injection-class subset that blocks by default.
+_INJECTION_MSGS = frozenset(msg for _rx, msg, block in _RISKY if block)
 _SCAN_DIRS = ("app", "lib", "src", "components", "server", "pages")
 _SCAN_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs"}
 
@@ -131,9 +137,21 @@ def advisory_scan(app_dir: str | Path) -> list[tuple[str, int, str]]:
                 continue
             rel = p.relative_to(app).as_posix()
             for i, line in enumerate(lines, 1):
-                for rx, msg in _RISKY:
+                for rx, msg, _block in _RISKY:
                     if rx.search(line):
                         out.append((rel, i, msg))
+    return out
+
+
+def _blocking_findings(findings: list[tuple[str, int, str]], *, strict: bool,
+                       block_injection: bool) -> list[tuple[str, int, str]]:
+    """Which tier-2 findings BLOCK the gate: the injection class (unless
+    `block_injection` is off), plus everything when `strict`."""
+    out = []
+    for f in findings:
+        is_injection = f[2] in _INJECTION_MSGS
+        if strict or (is_injection and block_injection):
+            out.append(f)
     return out
 
 
@@ -146,11 +164,14 @@ def static_audit(
     max_iters: int = 3,
     audit_level: str = "high",
     strict: bool = False,
+    block_injection: bool = True,
 ) -> bool:
     """Two-tier security + static-analysis gate. Returns True if it passes.
 
-    Tier 1 (tsc/npm-audit/secrets) always blocks. Tier 2 (risky-pattern scan) is
-    advisory unless strict=True, in which case any tier-2 finding also blocks.
+    Tier 1 (tsc/npm-audit/secrets) always blocks. Tier 2 (risky-pattern scan):
+    the INJECTION class (XSS / eval / SQL-injection) BLOCKS by default; the rest
+    (shell-exec, weak-random) are advisory unless strict=True. `block_injection=
+    False` downgrades the injection class to advisory too.
     """
     name = safe_name(name)
     app = WORKSPACE / "apps" / name
@@ -162,16 +183,20 @@ def static_audit(
     print(r.feedback)
     tier1_ok = r.ok
 
-    # Tier 2 — advisory risky-pattern review.
+    # Tier 2 — risky-pattern review (injection class blocks by default).
     findings = advisory_scan(app)
+    blocking = _blocking_findings(findings, strict=strict, block_injection=block_injection)
     if findings:
-        print(f"[area] audit tier-2 (advisory security review): {len(findings)} finding(s)"
-              + (" — BLOCKING (strict)" if strict else " — advisory only"))
-        for rel, ln, msg in findings[:20]:
-            print(f"  ⚠ {rel}:{ln} — {msg}")
+        print(f"[area] audit tier-2 (security review): {len(findings)} finding(s), "
+              f"{len(blocking)} BLOCKING")
+        block_set = set(blocking)
+        for f in findings[:20]:
+            rel, ln, msg = f
+            mark = "❌ BLOCK" if f in block_set else "⚠ advisory"
+            print(f"  {mark} {rel}:{ln} — {msg}")
     else:
         print("[area] audit tier-2: no risky patterns")
-    tier2_block = strict and bool(findings)
+    tier2_block = bool(blocking)
 
     if tier1_ok and not tier2_block:
         suffix = " (tier-2 advisory only)" if findings else ""

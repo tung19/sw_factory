@@ -212,6 +212,9 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
                     help="npm-audit severity threshold for the deterministic tier-1 gate")
     sp.add_argument("--strict", action="store_true",
                     help="audit tier-2: make advisory risky-pattern findings BLOCK")
+    sp.add_argument("--no-block-injection", action="store_true",
+                    help="downgrade the injection-class audit findings (XSS/eval/SQL-"
+                         "injection, which BLOCK by default) to advisory")
     sp.add_argument("--e2e", action="store_true", help="Playwright E2E gate after build")
     sp.add_argument("--no-e2e", action="store_true",
                     help="override the e2e gate that is otherwise FORCED before "
@@ -362,7 +365,9 @@ def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
     if gate == "audit":
         return static_audit(name, fix=True,
                             audit_level=getattr(args, "audit_level", "high"),
-                            strict=getattr(args, "strict", False), **kw)
+                            strict=getattr(args, "strict", False),
+                            block_injection=not getattr(args, "no_block_injection", False),
+                            **kw)
     if gate == "e2e":
         return e2e_verify(name, **kw)
     if gate == "chaos":
@@ -467,6 +472,8 @@ def _build_parser() -> argparse.ArgumentParser:
     it.add_argument("--perf-concurrency", type=int, default=10)
     it.add_argument("--strict", action="store_true",
                     help="make advisory gate findings (audit tier-2, nfr, perf, product) BLOCK")
+    it.add_argument("--no-block-injection", action="store_true",
+                    help="downgrade injection-class audit findings to advisory")
     it.add_argument("--product", action="store_true",
                     help="product-fit gate (advisory; --strict to enforce)")
     it.add_argument("--cost", action="store_true",
@@ -575,6 +582,9 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="npm-audit severity threshold for the deterministic tier-1 gate")
     au.add_argument("--strict", action="store_true",
                     help="tier-2: make advisory risky-pattern findings BLOCK")
+    au.add_argument("--no-block-injection", action="store_true",
+                    help="downgrade injection-class findings (XSS/eval/SQL-injection, "
+                         "which BLOCK by default) to advisory")
     _add_agent_opts(au)
 
     ch = sub.add_parser("chaos", help="Chaos/resilience test the app and harden it")
@@ -1037,6 +1047,7 @@ def _cmd_audit(args: argparse.Namespace, expected: str | None) -> int:
     ok = static_audit(
         args.name, fix=args.fix, backend=args.backend, model=args.model,
         max_iters=args.max_iters, audit_level=args.audit_level, strict=args.strict,
+        block_injection=not getattr(args, "no_block_injection", False),
     )
     print(f"\n[area] audit: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
     return 0 if ok else 1
