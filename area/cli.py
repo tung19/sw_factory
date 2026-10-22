@@ -23,6 +23,14 @@ if TYPE_CHECKING:
     from area.inception.engine import ApproveFn, Bolt
     from area.pipeline import PipelineResult
 
+# The post-build gates, in run order — the SINGLE source for the gate set. The
+# `_finish` selection, `_run_gate` dispatch, and the `--all` help string all derive
+# from this, so adding a gate can't drift one of them (a lesson from CONTRIBUTING's
+# "a gate change without a test silently drifts"). A test asserts _run_gate covers
+# every name here.
+_GATE_ORDER = ("verify", "audit", "e2e", "chaos", "nfr", "perf", "product", "cost")
+_ALL_GATES_HELP = "run all gates: " + " + ".join(_GATE_ORDER)
+
 
 def _slug_from(text: str, fallback: str) -> str:
     """A short kebab-case slug suggestion from a requirement/source string."""
@@ -245,8 +253,7 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--cost-max", type=float, default=None,
                     help="cost gate: cap TOTAL build spend at this USD (blocking; "
                          "overrides cost.yaml / the default ceiling)")
-    sp.add_argument("--all", action="store_true",
-                    help="run all gates: verify + audit + e2e + chaos + nfr + perf + product")
+    sp.add_argument("--all", action="store_true", help=_ALL_GATES_HELP)
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
     sp.add_argument("--open", dest="open", action="store_true", default=True,
@@ -277,10 +284,7 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
     _ev("build.green", {"target": getattr(args, "target", None)})
 
     all_ = getattr(args, "all", False)
-    gates = [
-        g for g in ("verify", "audit", "e2e", "chaos", "nfr", "perf", "product", "cost")
-        if all_ or getattr(args, g, False)
-    ]
+    gates = [g for g in _GATE_ORDER if all_ or getattr(args, g, False)]
     # --tdd already builds against the locked holdout suite, so the post-build
     # 'verify' gate is redundant (it would re-author a fresh suite). Skip it.
     if getattr(args, "tdd", False) and "verify" in gates:
@@ -360,32 +364,29 @@ def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
                              nfr_verify, perf_verify, product_verify, static_audit)
 
     kw = dict(backend=args.backend, model=args.model)
-    if gate == "verify":
-        return holdout_verify(name, **kw)
-    if gate == "audit":
-        return static_audit(name, fix=True,
-                            audit_level=getattr(args, "audit_level", "high"),
-                            strict=getattr(args, "strict", False),
-                            block_injection=not getattr(args, "no_block_injection", False),
-                            **kw)
-    if gate == "e2e":
-        return e2e_verify(name, **kw)
-    if gate == "chaos":
-        return chaos_verify(name, **kw)
-    if gate == "nfr":
-        return nfr_verify(name, strict=getattr(args, "strict", False),
-                          run_build=getattr(args, "nfr_build", False), **kw)
-    if gate == "perf":
-        return perf_verify(name, strict=getattr(args, "strict", False),
-                           total=getattr(args, "perf_requests", 200),
-                           concurrency=getattr(args, "perf_concurrency", 10), **kw)
-    if gate == "product":
-        return product_verify(name, strict=getattr(args, "strict", False), **kw)
-    if gate == "cost":
-        return cost_verify(name, strict=getattr(args, "strict", False),
-                           override=getattr(args, "cost_max", None),
-                           since=getattr(args, "_build_start", None), **kw)
-    return True
+    strict = getattr(args, "strict", False)
+    # Dispatch table keyed by gate name — kept in lockstep with _GATE_ORDER by
+    # test_gate_registry (every ordered gate must have a runner here).
+    runners: dict[str, Callable[[], bool]] = {
+        "verify": lambda: holdout_verify(name, **kw),
+        "audit": lambda: static_audit(
+            name, fix=True, audit_level=getattr(args, "audit_level", "high"),
+            strict=strict,
+            block_injection=not getattr(args, "no_block_injection", False), **kw),
+        "e2e": lambda: e2e_verify(name, **kw),
+        "chaos": lambda: chaos_verify(name, **kw),
+        "nfr": lambda: nfr_verify(name, strict=strict,
+                                  run_build=getattr(args, "nfr_build", False), **kw),
+        "perf": lambda: perf_verify(name, strict=strict,
+                                    total=getattr(args, "perf_requests", 200),
+                                    concurrency=getattr(args, "perf_concurrency", 10), **kw),
+        "product": lambda: product_verify(name, strict=strict, **kw),
+        "cost": lambda: cost_verify(name, strict=strict,
+                                    override=getattr(args, "cost_max", None),
+                                    since=getattr(args, "_build_start", None), **kw),
+    }
+    runner = runners.get(gate)
+    return runner() if runner else True
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -481,7 +482,7 @@ def _build_parser() -> argparse.ArgumentParser:
                          "(specs/<name>/cost.yaml blocks; default $15 advisory)")
     it.add_argument("--cost-max", type=float, default=None,
                     help="cost gate: cap total rebuild spend at this USD (blocking)")
-    it.add_argument("--all", action="store_true", help="run all gates after rebuild")
+    it.add_argument("--all", action="store_true", help=_ALL_GATES_HELP + " (after rebuild)")
     it.add_argument("--deploy", action="store_true")
     it.add_argument("--yes", action="store_true", help="skip the deploy human gate")
     it.add_argument("--open", dest="open", action="store_true", default=True,

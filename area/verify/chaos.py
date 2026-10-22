@@ -12,7 +12,7 @@ from typing import Optional
 
 from area._util import safe_name
 from area.engine import Backend, VerifyResult, build_agent, command_verifier, run_until
-from area.pipeline import WORKSPACE
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 from area.verify._runners import assert_vitest_ran
 
 CHAOS_DIR = "__tests__/_chaos"

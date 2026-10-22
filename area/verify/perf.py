@@ -43,7 +43,7 @@ from threading import Thread
 from typing import Any, Optional
 
 from area._util import safe_name
-from area.pipeline import WORKSPACE
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 from area.verify.nfr import parse_budget_yaml  # shared flat-budget parser
 
 # Metrics whose budget is a FLOOR (bigger is better); everything else is a ceiling.
