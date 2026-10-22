@@ -18,10 +18,18 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, TypeVar
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, TypeVar
 
-from area.research import ResearchBrief
-from area.spec.models import AcceptanceCriterion, Feature
+import yaml
+
+from area.paths import WORKSPACE
+from area.research import ResearchBrief, research
+from area.seed import SeedPolicy, SeedResult, seed_from_reference
+from area.spec.models import Acceptance, AcceptanceCriterion, Feature, Spec
+
+if TYPE_CHECKING:
+    from area.engine import Backend
 
 SOURCE_REQUIREMENT = "requirement"
 SOURCE_REFERENCE = "reference"
@@ -159,3 +167,81 @@ def data_build_notes(plan: DataPlan) -> str:
     if plan.entities:
         notes.append(f"Core entities: {', '.join(plan.entities)}.")
     return " ".join(notes)
+
+
+# ---- capstone: the `area adapt` pipeline --------------------------------------
+
+@dataclass
+class AdaptResult:
+    name: str
+    reference: str
+    requirement: str
+    spec: Spec
+    acceptance: Acceptance
+    provenance: dict[str, str]
+    data_plan: DataPlan
+    brief: ResearchBrief
+    build_notes: str
+    clarify_items: list[dict[str, Any]] = field(default_factory=list)
+    clarify_needed: bool = False
+    spec_dir: Optional[Path] = None
+    seed: Optional[SeedResult] = None
+
+
+def _write_spec(spec_dir: Path, spec: Spec, acc: Acceptance, brief: ResearchBrief,
+                notes: str) -> None:
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    (spec_dir / "spec.yaml").write_text(yaml.safe_dump(spec.model_dump(), sort_keys=False))
+    (spec_dir / "acceptance.yaml").write_text(
+        yaml.safe_dump(acc.model_dump(), sort_keys=False))
+    (spec_dir / "adapt-notes.md").write_text(
+        f"# adapt build notes\n\n{notes}\n\n## research brief\n"
+        f"- reference: {brief.reference}\n- candidates considered: "
+        f"{brief.candidates_considered}\n- top repos: "
+        + ", ".join(r.repo or r.url for r in brief.top) + "\n")
+
+
+def adapt_pipeline(
+    reference: str, requirement: str, *, name: str,
+    requirement_features: Optional[list[Feature]] = None,
+    reference_features: Optional[list[Feature]] = None, summary: str = "",
+    backend: "Backend" = "acp", model: Optional[str] = None,
+    budget: Optional[float] = None, count: int = 100, top: int = 5,
+    researcher: Optional[Callable[[str, Path], None]] = None,
+    clarify: bool = True,
+    confirm: Optional[Callable[["AdaptResult"], bool]] = None,
+    seed_policy: Optional[SeedPolicy] = None,
+    seed_records: Optional[list[dict[str, Any]]] = None,
+    workspace: Optional[str | Path] = None,
+) -> AdaptResult:
+    """Compose `area adapt`: P1 research → P2 requirement-anchored synthesis → P3
+    data dimension → one-shot clarify → write spec+acceptance (the build handoff) →
+    P4 opt-in seed. The agent steps (research, reference RE) are INJECTED
+    (`researcher` / `reference_features`) so the composition is testable agent-free;
+    the live build happens via the printed `area intake` handoff (reuses the
+    oracle-loop) and the seed fetch is upstream."""
+    root = Path(workspace) if workspace else WORKSPACE
+    spec_dir = root / "specs" / name
+    brief = research(reference, requirement, backend=backend, model=model,
+                     budget=budget, count=count, top=top,
+                     workspace=spec_dir / "research", runner=researcher)
+    feats, prov = synthesize_features(requirement_features or [],
+                                      reference_features or [], brief)
+    plan = synthesize_data_plan(brief)
+    acc = Acceptance(criteria=data_acceptance(plan))
+    spec = Spec(name=name, summary=summary or requirement[:200], features=feats)
+    result = AdaptResult(
+        name=name, reference=reference, requirement=requirement, spec=spec,
+        acceptance=acc, provenance=prov, data_plan=plan, brief=brief,
+        build_notes=data_build_notes(plan), clarify_items=clarify_payload(prov),
+        spec_dir=spec_dir)
+    # P5 one-shot clarify: stop when the requirement was SILENT (auto-filled from
+    # reference/research) unless the human confirms the filled spec.
+    if clarify and auto_filled(prov) and (confirm is None or not confirm(result)):
+        result.clarify_needed = True
+        return result
+    _write_spec(spec_dir, spec, acc, brief, result.build_notes)
+    # P4 opt-in seed (area.seed enforces attestation + robots/PII/cap)
+    if seed_policy is not None:
+        result.seed = seed_from_reference(reference, seed_records or [], seed_policy)
+    return result
