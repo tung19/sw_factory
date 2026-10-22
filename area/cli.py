@@ -627,6 +627,17 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="sibling app name whose toolchain (lockfile + node_modules "
                          "+ configs) is reused")
 
+    rs = sub.add_parser("research", help="`area adapt` P1: survey comparable projects "
+                                         "for a reference + requirement → a research brief")
+    rs.add_argument("reference", help="reference app: git URL / repo / live URL / path")
+    rs.add_argument("--requirement", default="", help="what the adapted app must do")
+    rs.add_argument("--count", type=int, default=100, help="candidate repos to survey")
+    rs.add_argument("--top", type=int, default=5, help="top repos to analyse")
+    rs.add_argument("--budget", type=float, default=None, help="max USD spend")
+    rs.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    rs.add_argument("--model", default=None)
+    rs.add_argument("--json", action="store_true", help="print the brief as JSON")
+
     mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
     mo.add_argument("target", help="app name or https URL")
     mo.add_argument("--checks", type=int, default=5)
@@ -1118,6 +1129,27 @@ def _cmd_cf_clone(args: argparse.Namespace, expected: str | None) -> int:
     return 0
 
 
+def _cmd_research(args: argparse.Namespace, expected: str | None) -> int:
+    import json as _json
+
+    from area.research import research, validate_brief
+
+    brief = research(args.reference, args.requirement, backend=args.backend,
+                     model=args.model, budget=args.budget, count=args.count,
+                     top=args.top)
+    if getattr(args, "json", False):
+        print(_json.dumps(brief.to_dict(), indent=2))
+    else:
+        print(f"[research] {len(brief.top)} repo(s) for {args.reference!r} "
+              f"(from {brief.candidates_considered} considered)")
+        for r in brief.top:
+            print(f"  • {r.repo} ({r.score:.2f}) — data: {r.data_source} / "
+                  f"{r.data_integration} / {r.data_storage}")
+    for issue in validate_brief(brief):
+        print(f"  ⚠ {issue}")
+    return 0
+
+
 def _cmd_monitor(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
@@ -1166,8 +1198,8 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
     "perf": _cmd_perf, "cost": _cmd_cost, "cf-fix": _cmd_cf_fix,
-    "cf-clone": _cmd_cf_clone, "monitor": _cmd_monitor, "status": _cmd_status,
-    "watch": _cmd_watch,
+    "cf-clone": _cmd_cf_clone, "research": _cmd_research, "monitor": _cmd_monitor,
+    "status": _cmd_status, "watch": _cmd_watch,
 }
 
 
