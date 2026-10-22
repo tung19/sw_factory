@@ -17,7 +17,7 @@ import json
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 PROV_REL = ".area/provenance.json"
 
@@ -78,10 +78,10 @@ def write_provenance(
     *,
     name: str,
     target: str,
-    gates: dict,
+    gates: dict[str, bool],
     spec_dir: Optional[str | Path] = None,
     builder: str = "area/openhands-acp",
-) -> dict:
+) -> dict[str, Any]:
     """Record a provenance attestation into <app>/.area/provenance.json."""
     app = Path(app_dir)
     prov = {
@@ -100,12 +100,12 @@ def write_provenance(
     return prov
 
 
-def read_provenance(app_dir: str | Path) -> Optional[dict]:
+def read_provenance(app_dir: str | Path) -> Optional[dict[str, Any]]:
     p = Path(app_dir) / PROV_REL
     if not p.exists():
         return None
     try:
-        data: dict = json.loads(p.read_text())
+        data: dict[str, Any] = json.loads(p.read_text())
         return data
     except (OSError, json.JSONDecodeError):
         return None

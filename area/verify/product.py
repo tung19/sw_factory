@@ -14,7 +14,7 @@ never wedge the pipeline.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import yaml
 
@@ -68,7 +68,7 @@ def _product_prompt(spec_text: str, acc_text: str, app_excerpt: str) -> str:
     )
 
 
-def _parse_verdict(raw: str) -> dict:
+def _parse_verdict(raw: str) -> dict[str, Any]:
     """Pure. Parse the reviewer's reply into {verdict, coverage, gaps}. Never raises.
     Defaults to a passing verdict when output is unusable (advisory, fail-open)."""
     text = (raw or "").strip()

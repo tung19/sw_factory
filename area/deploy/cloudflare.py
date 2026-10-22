@@ -17,7 +17,7 @@ from typing import Optional
 _URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev\S*")
 
 
-def _env() -> dict:
+def _env() -> dict[str, str]:
     """Env with the writable npm cache workaround (root-owned ~/.npm issue)."""
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))

@@ -14,14 +14,14 @@ into the exact same build + deploy pipeline.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from area.engine import Backend, build_agent, run_until
 from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier, expected_block
 from area.spec.models import Acceptance, Spec, load_acceptance, load_spec
 
 
-def rea_mcp_config() -> dict:
+def rea_mcp_config() -> dict[str, Any]:
     """REA MCP server (stdio via npx) for Tier 2 reverse-engineering."""
     from area.engine import mcp_stdio_server
 

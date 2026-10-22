@@ -16,6 +16,7 @@ actual model work happens inside the normal ACP build loop when a job runs.)
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from area.web import jobs as J
 
@@ -123,7 +124,7 @@ _HELP = ("Mình chưa rõ ý 🤔 Mình có thể: mô tả một phần mềm �
          "Bạn diễn đạt rõ hơn giúp mình nhé.")
 
 
-def route(message: str, app: str = "") -> dict:
+def route(message: str, app: str = "") -> dict[str, Any]:
     """Classify + build the chat response the dashboard acts on."""
     intent = classify_intent(message)
     if intent == "smalltalk":

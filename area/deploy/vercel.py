@@ -34,7 +34,7 @@ _PG_URL_KEYS = ("POSTGRES_URL", "POSTGRES_URL_NON_POOLING", "POSTGRES_PRISMA_URL
 _KV_URL_KEYS = ("KV_REST_API_URL", "KV_URL", "REDIS_URL")
 
 
-def _env() -> dict:
+def _env() -> dict[str, str]:
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e

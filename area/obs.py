@@ -63,7 +63,7 @@ def log_run(
         pass
 
 
-def load_runs() -> list[dict]:
+def load_runs() -> list[dict[str, Any]]:
     runs = []
     if RUNS.exists():
         for line in RUNS.read_text(errors="ignore").splitlines():
@@ -74,7 +74,7 @@ def load_runs() -> list[dict]:
     return runs
 
 
-def summary(runs: Optional[list[dict]] = None) -> dict:
+def summary(runs: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
     """Aggregate agent runs: cost/latency per stage PLUS determinism metrics.
 
     Determinism comes from `outer_iters` — the attempt a convergence loop
@@ -84,7 +84,7 @@ def summary(runs: Optional[list[dict]] = None) -> dict:
     excluded from the determinism rates.
     """
     runs = load_runs() if runs is None else runs
-    by_label: dict = {}
+    by_label: dict[str, dict[str, Any]] = {}
     for r in runs:
         d = by_label.setdefault(
             r.get("label", "?"),

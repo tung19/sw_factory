@@ -19,7 +19,7 @@ import subprocess
 import time
 import webbrowser
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 
 def _free_port() -> int:
@@ -57,7 +57,7 @@ def open_preview(
     opener: Callable[[str], object] = webbrowser.open,
     spawn: Optional[Callable[[], object]] = None,
     is_ready: Optional[Callable[[], bool]] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Open the built app for the user to verify. Returns a result dict describing
     what happened (never raises). `opener`/`spawn`/`is_ready` are injection seams for
     tests; by default it opens the real browser and spawns `npm run dev`."""

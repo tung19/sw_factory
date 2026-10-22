@@ -13,10 +13,11 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
+from typing import IO, Any
 
 from area._util import safe_name
 
-from area.paths import REPO as ROOT, WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware)
+from area.paths import REPO as ROOT, WORKSPACE as WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware; `as` = explicit re-export for `from area.web.jobs import WORKSPACE`)
 
 STATE_DIR = WORKSPACE / ".area"
 JOBS_JSON = STATE_DIR / "jobs.json"
@@ -30,7 +31,7 @@ _SKIP_DIRS = {
 }
 
 
-def _env() -> dict:
+def _env() -> dict[str, str]:
     e = dict(os.environ)
     home = Path.home()
     e["PATH"] = f"{home / '.local' / 'bin'}:/usr/local/bin:/opt/homebrew/bin:" + e.get("PATH", "")
@@ -44,10 +45,10 @@ class JobManager:
     def __init__(self) -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        self._procs: dict[str, tuple] = {}
-        self._jobs: dict[str, dict] = self._load()
+        self._procs: dict[str, tuple[subprocess.Popen[bytes], IO[bytes]]] = {}
+        self._jobs: dict[str, dict[str, Any]] = self._load()
 
-    def _load(self) -> dict:
+    def _load(self) -> dict[str, dict[str, Any]]:
         if JOBS_JSON.exists():
             try:
                 data = json.loads(JOBS_JSON.read_text())
@@ -69,7 +70,7 @@ class JobManager:
             pass
 
     @staticmethod
-    def _flags(p: dict) -> list[str]:
+    def _flags(p: dict[str, Any]) -> list[str]:
         """TDD + gate + deploy flags shared by run/clone/intake."""
         f: list[str] = []
         if p.get("tdd"):
@@ -98,7 +99,7 @@ class JobManager:
             f += ["--deploy", "--yes"]
         return f
 
-    def _cmd(self, kind: str, p: dict) -> list[str]:
+    def _cmd(self, kind: str, p: dict[str, Any]) -> list[str]:
         b = str(AREA_BIN)
         target = p.get("target", "cloudflare")
         if kind == "run":
@@ -131,7 +132,7 @@ class JobManager:
             return [b, "deploy", p["name"], "--yes"]
         raise ValueError(f"unknown job kind: {kind}")
 
-    def start(self, kind: str, params: dict) -> str:
+    def start(self, kind: str, params: dict[str, Any]) -> str:
         params = {**params, "name": safe_name(params.get("name", ""))}
         jid = uuid.uuid4().hex[:12]
         cmd = self._cmd(kind, params)
@@ -178,12 +179,12 @@ class JobManager:
         self._procs.pop(jid, None)
         self._save()
 
-    def list(self) -> list[dict]:
+    def list(self) -> list[dict[str, Any]]:
         for jid in list(self._procs):
             self._finalize_if_done(jid)
         return sorted(self._jobs.values(), key=lambda j: j["started"], reverse=True)
 
-    def get(self, jid: str) -> dict | None:
+    def get(self, jid: str) -> dict[str, Any] | None:
         self._finalize_if_done(jid)
         return self._jobs.get(jid)
 
@@ -196,7 +197,7 @@ class JobManager:
         return bool(j and j["status"] == "running")
 
 
-def list_apps() -> list[dict]:
+def list_apps() -> list[dict[str, Any]]:
     apps = []
     appdir = WORKSPACE / "apps"
     if appdir.exists():
@@ -211,7 +212,7 @@ def list_apps() -> list[dict]:
     return apps
 
 
-def read_spec(name: str) -> dict:
+def read_spec(name: str) -> dict[str, str]:
     sd = WORKSPACE / "specs" / safe_name(name)
     out = {"spec": "", "acceptance": ""}
     for key, fn in (("spec", "spec.yaml"), ("acceptance", "acceptance.yaml")):
@@ -225,7 +226,7 @@ def inception_dir(name: str) -> Path:
     return WORKSPACE / "specs" / safe_name(name) / "inception"
 
 
-def read_inception(name: str) -> dict:
+def read_inception(name: str) -> dict[str, Any]:
     """The four Inception artifact files (for the dashboard review/edit panel)."""
     d = inception_dir(name)
     files = {}
@@ -235,7 +236,7 @@ def read_inception(name: str) -> dict:
     return {"dir": str(d), "files": files}
 
 
-def save_inception(name: str, files: dict) -> dict:
+def save_inception(name: str, files: dict[str, str]) -> dict[str, Any]:
     """Persist the human-edited Inception artifacts back, emit a human-approved
     evidence record (correlated to the run's trace when present), and re-check the
     contract. Only *.md basenames are written (no path traversal)."""

@@ -13,7 +13,7 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from area._util import safe_name
 
@@ -49,7 +49,7 @@ def deployed_url(name: str) -> Optional[str]:
     return None
 
 
-def _probe(url: str, timeout: float = 15.0) -> dict:
+def _probe(url: str, timeout: float = 15.0) -> dict[str, Any]:
     t0 = time.time()
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "area-monitor"})
@@ -77,7 +77,7 @@ def _resolve(name_or_url: str, health: str) -> tuple[str, str]:
 
 
 def monitor(name_or_url: str, *, checks: int = 5, interval: float = 5.0,
-            health: str = "/") -> dict:
+            health: str = "/") -> dict[str, Any]:
     name, url = _resolve(name_or_url, health)
     MONDIR.mkdir(parents=True, exist_ok=True)
     log = MONDIR / f"{name}.jsonl"
@@ -98,7 +98,7 @@ def monitor(name_or_url: str, *, checks: int = 5, interval: float = 5.0,
             "results": results}
 
 
-def status(name: str, *, limit: int = 50) -> dict:
+def status(name: str, *, limit: int = 50) -> dict[str, Any]:
     name = safe_name(name)
     log = MONDIR / f"{name}.jsonl"
     recs = []
