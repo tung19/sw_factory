@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from area._util import safe_name
-from area.pipeline import WORKSPACE
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
 # Shipped build-output dirs to measure (first existing wins). Cache subdirs are
 # excluded — they are not part of what ships / cold-starts.

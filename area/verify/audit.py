@@ -17,7 +17,7 @@ from typing import Optional
 
 from area._util import safe_name
 from area.engine import Backend, build_agent, command_verifier, run_until
-from area.pipeline import WORKSPACE
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
 _LEVELS = ("low", "moderate", "high", "critical")
 

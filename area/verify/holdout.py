@@ -30,7 +30,7 @@ import yaml
 
 from area._util import safe_name
 from area.engine import Backend, Verifier, VerifyResult, build_agent, run_once, run_until
-from area.pipeline import WORKSPACE
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 from area.verify._runners import assert_vitest_ran
 
 HOLDOUT_DIR = "__tests__/_holdout"
