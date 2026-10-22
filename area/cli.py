@@ -13,6 +13,7 @@ import argparse
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -233,6 +234,14 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
                     help="product-fit gate: an INDEPENDENT reviewer judges whether the "
                          "built app delivers the spec's product + UX/fit gaps "
                          "(advisory; blocks only with --strict)")
+    sp.add_argument("--cost", action="store_true",
+                    help="hard cost-cap gate: total build spend (across retries) vs "
+                         "budget — distinct from --budget's soft per-run cap "
+                         "(specs/<name>/cost.yaml `max_usd:` blocks; default $15 "
+                         "advisory unless --strict / --cost-max)")
+    sp.add_argument("--cost-max", type=float, default=None,
+                    help="cost gate: cap TOTAL build spend at this USD (blocking; "
+                         "overrides cost.yaml / the default ceiling)")
     sp.add_argument("--all", action="store_true",
                     help="run all gates: verify + audit + e2e + chaos + nfr + perf + product")
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
@@ -266,7 +275,7 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
 
     all_ = getattr(args, "all", False)
     gates = [
-        g for g in ("verify", "audit", "e2e", "chaos", "nfr", "perf", "product")
+        g for g in ("verify", "audit", "e2e", "chaos", "nfr", "perf", "product", "cost")
         if all_ or getattr(args, g, False)
     ]
     # --tdd already builds against the locked holdout suite, so the post-build
@@ -344,8 +353,8 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
 
 
 def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
-    from area.verify import (chaos_verify, e2e_verify, holdout_verify, nfr_verify,
-                             perf_verify, product_verify, static_audit)
+    from area.verify import (chaos_verify, cost_verify, e2e_verify, holdout_verify,
+                             nfr_verify, perf_verify, product_verify, static_audit)
 
     kw = dict(backend=args.backend, model=args.model)
     if gate == "verify":
@@ -367,6 +376,10 @@ def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
                            concurrency=getattr(args, "perf_concurrency", 10), **kw)
     if gate == "product":
         return product_verify(name, strict=getattr(args, "strict", False), **kw)
+    if gate == "cost":
+        return cost_verify(name, strict=getattr(args, "strict", False),
+                           override=getattr(args, "cost_max", None),
+                           since=getattr(args, "_build_start", None), **kw)
     return True
 
 
@@ -456,6 +469,11 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="make advisory gate findings (audit tier-2, nfr, perf, product) BLOCK")
     it.add_argument("--product", action="store_true",
                     help="product-fit gate (advisory; --strict to enforce)")
+    it.add_argument("--cost", action="store_true",
+                    help="hard cost-cap gate: total rebuild spend vs budget "
+                         "(specs/<name>/cost.yaml blocks; default $15 advisory)")
+    it.add_argument("--cost-max", type=float, default=None,
+                    help="cost gate: cap total rebuild spend at this USD (blocking)")
     it.add_argument("--all", action="store_true", help="run all gates after rebuild")
     it.add_argument("--deploy", action="store_true")
     it.add_argument("--yes", action="store_true", help="skip the deploy human gate")
@@ -574,6 +592,17 @@ def _build_parser() -> argparse.ArgumentParser:
     pf.add_argument("--backend", default="acp", choices=["acp", "llm"])
     pf.add_argument("--model", default=None)
 
+    co = sub.add_parser("cost", help="Hard cost-cap gate: total build spend vs "
+                                     "budget (the most-recent build session)")
+    co.add_argument("name")
+    co.add_argument("--max", dest="cost_max", type=float, default=None,
+                    help="cap total spend at this USD (blocking; else specs/<name>/"
+                         "cost.yaml or the default $15 ceiling)")
+    co.add_argument("--strict", action="store_true",
+                    help="make the default ceiling BLOCK (exit 1)")
+    co.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    co.add_argument("--model", default=None)
+
     mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
     mo.add_argument("target", help="app name or https URL")
     mo.add_argument("--checks", type=int, default=5)
@@ -598,6 +627,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    # Stamp the invocation start so the post-build `cost` gate can sum only THIS
+    # build's agent runs (obs.runs.jsonl is global + per-run; see area/verify/cost).
+    args._build_start = time.time()
 
     # P2 cost/budget cap -> env read by area/engine at call time
     if getattr(args, "budget", None) is not None:
@@ -1017,6 +1050,19 @@ def _cmd_perf(args: argparse.Namespace, expected: str | None) -> int:
     return 0 if ok else 1
 
 
+def _cmd_cost(args: argparse.Namespace, expected: str | None) -> int:
+    from area.verify import cost_verify
+
+    # standalone: no build just ran, so sum the most-recent build SESSION
+    # (since=None → the time-gap heuristic in area/verify/cost).
+    ok = cost_verify(
+        args.name, backend=args.backend, model=args.model,
+        strict=getattr(args, "strict", False),
+        override=getattr(args, "cost_max", None), since=None,
+    )
+    return 0 if ok else 1
+
+
 def _cmd_monitor(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
@@ -1064,7 +1110,8 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
-    "perf": _cmd_perf, "monitor": _cmd_monitor, "status": _cmd_status, "watch": _cmd_watch,
+    "perf": _cmd_perf, "cost": _cmd_cost, "monitor": _cmd_monitor,
+    "status": _cmd_status, "watch": _cmd_watch,
 }
 
 
