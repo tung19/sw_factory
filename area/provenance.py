@@ -2,8 +2,17 @@
 
 After a green build + gates, AREA records a provenance attestation: WHAT spec the
 app was built from (materials), WHICH target + gates, and a content digest of the
-built source tree (product). Before deploy, that digest is re-verified — so an
-artifact modified AFTER it was gated, or never gated at all, cannot silently ship.
+built app's **SOURCE tree** (product). Before deploy, that digest is re-verified —
+so a SOURCE file modified AFTER it was gated, or an app never gated at all, cannot
+silently ship.
+
+SCOPE (be honest, don't over-trust): the product digest covers the app's own
+source files, NOT the compiled/shipped bundle (`.next`/`.open-next`/`.cloudflare`
+etc. are deterministic build outputs, excluded so a rebuild doesn't churn the
+digest). So "provenance ok" means *the source that was gated is unchanged*, not
+*the exact bytes that ship are byte-for-byte attested*. Attesting the shipped
+bundle (and capturing it AFTER the CF `harden_cf_app` mutation) is a deeper change
+left for a signed-provenance pass.
 
 This is SLSA-style provenance (materials → build → product) at the logic level and
 keyless: no external signer, but a tamper-evident record tying the product to its
@@ -21,14 +30,18 @@ from typing import Any, Optional
 
 PROV_REL = ".area/provenance.json"
 
-# Build/dependency/output dirs excluded from the artifact digest: the digest is
-# over the app's OWN source, so reinstalling deps or rebuilding doesn't change it.
-# .area is excluded too, so writing the provenance file can't alter the digest.
-_SKIP = {
+# Dirs excluded from the artifact digest so reinstalling deps / rebuilding / writing
+# the provenance file doesn't churn it. Split by scope to avoid a blind spot:
+#  - _SKIP_ANYWHERE: never app source (deps, VCS, tool + framework build caches) —
+#    skipped at ANY depth (a nested node_modules etc. is still vendor junk).
+#  - _SKIP_TOPLEVEL: build-OUTPUT names that are ALSO plausible source dir names
+#    (`build/`, `dist/`, …) — skipped ONLY at the app root, so a legitimate source
+#    file like `src/build/helpers.ts` is still digested (was silently excluded).
+_SKIP_ANYWHERE = {
     "node_modules", ".next", ".vinext", ".open-next", ".cloudflare", ".wrangler",
-    ".openhands", ".git", ".vercel", "dist", "build", "test-results",
-    "playwright-report", ".area", ".claude",
+    ".openhands", ".git", ".vercel", ".area", ".claude",
 }
+_SKIP_TOPLEVEL = {"dist", "build", "test-results", "playwright-report"}
 
 
 def _iter_source_files(app: Path) -> Iterator[tuple[Path, Path]]:
@@ -36,7 +49,9 @@ def _iter_source_files(app: Path) -> Iterator[tuple[Path, Path]]:
         if not p.is_file():
             continue
         rel = p.relative_to(app)
-        if any(part in _SKIP for part in rel.parts):
+        if any(part in _SKIP_ANYWHERE for part in rel.parts):
+            continue
+        if rel.parts and rel.parts[0] in _SKIP_TOPLEVEL:
             continue
         yield rel, p
 
@@ -56,14 +71,22 @@ def artifact_digest(app_dir: str | Path) -> str:
     return "sha256:" + h.hexdigest()
 
 
+# All spec-dir materials the build + gates actually consumed — so the attestation
+# covers the oracle (acceptance), the assumptions ledger the clarify gate used, and
+# the budgets the nfr/perf/cost gates enforced, not just the base spec.
+_MATERIALS = ("spec.yaml", "acceptance.yaml", "assumptions.yaml",
+              "nfr.yaml", "perf.yaml", "cost.yaml")
+
+
 def spec_digest(spec_dir: Optional[str | Path]) -> Optional[str]:
-    """Digest of the spec materials (spec.yaml + acceptance.yaml). None if absent."""
+    """Digest of the spec materials the build/gates used (spec + acceptance +
+    assumptions + nfr/perf/cost budgets). None if none are present."""
     if not spec_dir:
         return None
     sd = Path(spec_dir)
     h = hashlib.sha256()
     found = False
-    for fn in ("spec.yaml", "acceptance.yaml"):
+    for fn in _MATERIALS:
         p = sd / fn
         if p.exists():
             found = True

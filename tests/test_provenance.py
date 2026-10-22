@@ -110,3 +110,48 @@ def test_deploy_absent_provenance_only_warns_by_default(monkeypatch, tmp_path):
     monkeypatch.setattr(V, "deploy", lambda a: (True, "", "https://x.vercel.app"))
     ok, url = D.deploy_with_gate(tmp_path, confirm=lambda p: True)  # require=False
     assert ok and url == "https://x.vercel.app"  # absent -> warn, still deploys
+
+
+# ---- round-5 #11: dir-name blind spot + materials completeness ----------------
+
+def test_digest_skips_toplevel_build_but_keeps_nested_source(tmp_path):
+    _app(tmp_path)
+    base = P.artifact_digest(tmp_path)
+    # a TOP-LEVEL build/ is a build output → excluded (digest unchanged)
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "out.js").write_text("compiled")
+    assert P.artifact_digest(tmp_path) == base
+    # ...but a legitimate NESTED source dir named build/ is now digested
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "build").mkdir()
+    (tmp_path / "src" / "build" / "helpers.ts").write_text("export const h = 1;")
+    assert P.artifact_digest(tmp_path) != base  # nested source counted (was a blind spot)
+
+
+def test_digest_skips_nested_node_modules(tmp_path):
+    _app(tmp_path)
+    base = P.artifact_digest(tmp_path)
+    nm = tmp_path / "vendor" / "braces" / "node_modules" / "fill-range"
+    nm.mkdir(parents=True)
+    (nm / "index.js").write_text("junk")
+    assert P.artifact_digest(tmp_path) == base  # node_modules skipped at any depth
+
+
+def test_spec_digest_covers_gate_budgets(tmp_path):
+    sd = tmp_path / "specs" / "app"
+    sd.mkdir(parents=True)
+    (sd / "spec.yaml").write_text("name: app\n")
+    (sd / "acceptance.yaml").write_text("criteria: []\n")
+    base = P.spec_digest(sd)
+    assert base and base.startswith("sha256:")
+    # a committed gate budget is now part of the attested materials
+    (sd / "cost.yaml").write_text("max_usd: 5\n")
+    assert P.spec_digest(sd) != base
+    (sd / "nfr.yaml").write_text("bundle_kib: 100\n")
+    assert P.spec_digest(sd) != P.spec_digest(sd.parent / "nonexistent")  # sanity
+
+
+def test_spec_digest_none_when_empty(tmp_path):
+    sd = tmp_path / "specs" / "empty"
+    sd.mkdir(parents=True)
+    assert P.spec_digest(sd) is None
