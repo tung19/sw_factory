@@ -17,7 +17,7 @@ import json
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from area.engine import Backend, build_agent, run_until
 from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier, expected_block
@@ -72,7 +72,7 @@ def new_trace_id() -> str:
 
 
 def emit_evidence(
-    spec_dir: str | Path, trace_id: str, event: str, data: Optional[dict] = None
+    spec_dir: str | Path, trace_id: str, event: str, data: Optional[dict[str, Any]] = None
 ) -> None:
     """Append one Construction-evidence record (emit into AI-DLC's audit trail).
 

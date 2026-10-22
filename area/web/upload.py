@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import io
 from pathlib import Path
+from typing import Any
 
 from area._util import safe_name
 from area.web.jobs import WORKSPACE
@@ -45,7 +46,7 @@ def parse_file(filename: str, data: bytes) -> str:
 
 def save_intake(
     name: str, files: list[tuple[str, bytes]], description: str = ""
-) -> dict:
+) -> dict[str, Any]:
     """Parse uploads + description into an intake artifact dir.
 
     Returns {dir, files, text, chars}: `dir` feeds `area intake`, `text` is the

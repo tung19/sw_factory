@@ -19,7 +19,7 @@ unavailable reviewer never blocks a build (fail-open — it can only ADD questio
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import yaml
 
@@ -53,7 +53,7 @@ def _review_prompt(requirement: str, spec_text: str, acc_text: str, assumptions_
     )
 
 
-def _parse_review(raw: str) -> list[dict]:
+def _parse_review(raw: str) -> list[dict[str, Any]]:
     """Pure. Parse the reviewer's reply into a list of material-assumption dicts.
 
     Tolerates code fences and leading prose; reads the YAML list after the sentinel
@@ -74,7 +74,7 @@ def _parse_review(raw: str) -> list[dict]:
         return []
     if not isinstance(data, list):
         return []
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for item in data:
         if not isinstance(item, dict):
             continue
@@ -99,7 +99,7 @@ def review_spec(
     backend: str = "acp",
     model: Optional[str] = None,
     ask: Optional[Callable[[str], str]] = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Independently review requirement->spec and return EXTRA material ambiguities
     the spec stage missed. Fail-open: any error (no requirement, missing files, CLI
     unavailable, bad output) returns [] so a build is never blocked by the reviewer.

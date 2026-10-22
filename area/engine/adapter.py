@@ -21,7 +21,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Sequence
 
 from openhands.sdk import LLM, Agent, Conversation, Tool
 from openhands.sdk.agent import ACPAgent
@@ -42,7 +42,7 @@ Backend = Literal["acp", "llm"]
 _DEFAULT_TOOLS = [TerminalTool, FileEditorTool, TaskTrackerTool]
 
 
-def _filter_kwargs(cls: type, kwargs: dict) -> dict:
+def _filter_kwargs(cls: type, kwargs: dict[str, Any]) -> dict[str, Any]:
     """Keep only kwargs that are real model fields and not None.
 
     Defensive against SDK field renames between pinned bumps.
@@ -55,7 +55,7 @@ def build_agent(
     backend: Backend = "acp",
     *,
     model: Optional[str] = None,
-    mcp_config: Optional[dict] = None,
+    mcp_config: Optional[dict[str, MCPServer]] = None,
     acp_provider: str = "claude-code",
 ) -> AgentBase:
     """Construct an agent.
@@ -145,7 +145,7 @@ def _mk_conversation(
 # and "connection" matched "invalid connection string", so permanent errors were
 # retried 5× with long backoff. Keep each token distinctive to a transient fault.
 def mcp_stdio_server(*, command: str, args: Sequence[str],
-                     env: Optional[dict] = None, description: str = "") -> MCPServer:
+                     env: Optional[dict[str, str]] = None, description: str = "") -> MCPServer:
     """Build a stdio MCPServer config — keeps the OpenHands SDK import inside this
     one seam (callers like area/re must not import the SDK directly)."""
     from openhands.sdk.mcp.config import MCPServer

@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from area._util import safe_name
 from area.build import build_app
@@ -13,7 +13,7 @@ from area.spec import Acceptance, Spec, extract_spec
 from area.spec.extract import append_assumptions
 from area.spec.review import review_spec
 
-from area.paths import WORKSPACE  # noqa: E402  (single source; AREA_WORKSPACE-aware)
+from area.paths import WORKSPACE as WORKSPACE  # noqa: E402  (single source; AREA_WORKSPACE-aware; `as` = explicit re-export for the many `from area.pipeline import WORKSPACE` sites)
 
 if TYPE_CHECKING:
     from area.engine import Backend
@@ -28,10 +28,10 @@ class PipelineResult:
     app_dir: Path
     passed: bool
     clarify_needed: bool = False
-    questions: list = field(default_factory=list)
+    questions: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict]:
+def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict[str, Any]]:
     """In --clarify mode, return the MATERIAL assumptions the spec stage had to
     make (ambiguities worth asking the user about before building)."""
     if not clarify:
@@ -61,7 +61,7 @@ def _spec_review_step(
 
 
 def _clarify_result(
-    name: str, spec: Spec, acc: Acceptance, root: Path, questions: list[dict]
+    name: str, spec: Spec, acc: Acceptance, root: Path, questions: list[dict[str, Any]]
 ) -> PipelineResult:
     spec_dir = root / "specs" / name
     print(f"\n[area] ⚠ CLARIFICATION NEEDED — {len(questions)} material "

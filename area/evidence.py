@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from area._util import safe_name
 
@@ -55,7 +55,7 @@ def current_trace(name: str) -> str:
     return "aidlc-" + uuid.uuid4().hex[:12]
 
 
-def emit(name: str, event: str, data: Optional[dict] = None) -> None:
+def emit(name: str, event: str, data: Optional[dict[str, Any]] = None) -> None:
     """Append one Construction-evidence record to the app's spec-dir trail."""
     try:
         from area.intake.aidlc import emit_evidence
@@ -65,10 +65,10 @@ def emit(name: str, event: str, data: Optional[dict] = None) -> None:
         pass
 
 
-def read_trail(name: str) -> list[dict]:
+def read_trail(name: str) -> list[dict[str, Any]]:
     """The full ordered audit chain for an app: the Inception sub-trail + the
     spec-dir trail, merged by timestamp."""
-    recs: list[dict] = []
+    recs: list[dict[str, Any]] = []
     for p in (_inception_trail(name), trail_path(name)):
         if p.exists():
             for line in p.read_text(errors="ignore").splitlines():

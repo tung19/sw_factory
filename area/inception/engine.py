@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from area.engine import Backend, build_agent, run_once
 from area.intake.aidlc import emit_evidence, new_trace_id
@@ -140,7 +140,7 @@ def run_inception(
     backend: Backend = "acp",
     model: Optional[str] = None,
     trace_id: Optional[str] = None,
-) -> dict:
+) -> dict[str, Any]:
     """Run the governed Inception bolts. Returns
     {out, approved, warnings, trace_id, files}. `propose_fn(bolt, prompt)->str`
     defaults to the agent; `approve_fn(bolt, proposed)->str|REGENERATE` is the

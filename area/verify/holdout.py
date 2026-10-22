@@ -41,7 +41,7 @@ HOLDOUT_DIR = "__tests__/_holdout"
 CHALLENGE_FILE = "_CHALLENGE.md"
 
 
-def _lock(holdout: Path) -> dict:
+def _lock(holdout: Path) -> dict[str, str]:
     return {
         str(f.relative_to(holdout)): hashlib.sha256(f.read_bytes()).hexdigest()
         for f in sorted(holdout.rglob("*"))
@@ -172,7 +172,7 @@ def _test_text(holdout: Path) -> str:
     return "\n".join(out)
 
 
-def _fingerprint(holdout: Path) -> frozenset:
+def _fingerprint(holdout: Path) -> frozenset[tuple[str, str]]:
     # Key on CONTENT hash, not st_size: a rewrite with the same byte length (common
     # when an author iterates) must count as progress, not trip the stall detector.
     return frozenset(
@@ -223,7 +223,7 @@ def _authoring_oracle(
 def author_until(
     app: Path, acc_yaml: str, *, backend: Backend, model: Optional[str], tdd: bool,
     reference: Optional[str] = None, attempts: int = 4, max_no_progress: int = 2,
-) -> tuple[Path, dict]:
+) -> tuple[Path, dict[str, str]]:
     """Author the holdout suite under its OWN oracle-loop.
 
     On the keyless ACP backend we cannot strip the agent's terminal, so the
@@ -237,7 +237,7 @@ def author_until(
     label = "holdout:author" + (":tdd" if tdd else "") + (":parity" if reference else "")
     base = _author_prompt(acc_yaml, tdd=tdd, reference=reference)
 
-    prev_fp: Optional[frozenset] = None
+    prev_fp: Optional[frozenset[tuple[str, str]]] = None
     stalls = 0
     stop = "exhausted attempts"
     feedback = ""
@@ -282,7 +282,7 @@ def author_until(
 
 
 def _holdout_oracle(
-    app: Path, holdout: Path, lock: dict, *, cmd: Optional[list[str]] = None
+    app: Path, holdout: Path, lock: dict[str, str], *, cmd: Optional[list[str]] = None
 ) -> Verifier:
     """A Verifier that (1) rejects any change to the locked suite, then (2) runs
     it. `cmd` defaults to just the holdout tests; TDD passes a build+test cmd."""
@@ -331,7 +331,7 @@ def author_and_lock(
     acc_yaml: Optional[str] = None,
     app: Optional[str | Path] = None,
     reference: Optional[str] = None,
-) -> tuple[Path, dict]:
+) -> tuple[Path, dict[str, str]]:
     """TDD 'red' step: author + checksum-lock the holdout suite BEFORE any build.
 
     Returns (holdout_dir, lock). The app dir may be otherwise empty — the suite
@@ -353,7 +353,7 @@ def author_and_lock(
 
 
 def tdd_build_oracle(
-    app: str | Path, holdout: Path, lock: dict, *, target: str = "cloudflare"
+    app: str | Path, holdout: Path, lock: dict[str, str], *, target: str = "cloudflare"
 ) -> Verifier:
     """The BUILD loop's oracle in --tdd mode: production build is green AND the
     locked holdout suite passes AND the locked files are untouched."""
@@ -390,7 +390,7 @@ def readjudicate(
     *,
     backend: Backend = "acp",
     model: Optional[str] = None,
-) -> tuple[bool, dict]:
+) -> tuple[bool, dict[str, str]]:
     """Escape hatch for a WRONG locked test (evolving-tests-under-governance).
 
     The builder cannot edit locked tests; if it believes one is wrong it raises

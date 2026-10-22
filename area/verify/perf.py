@@ -40,7 +40,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Thread
-from typing import Optional
+from typing import Any, Optional
 
 from area._util import safe_name
 from area.pipeline import WORKSPACE
@@ -63,7 +63,7 @@ DEFAULT_BUDGET: dict[str, float] = {
 _URL_RE = re.compile(r"https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d+)")
 
 
-def _env() -> dict:
+def _env() -> dict[str, str]:
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
@@ -91,10 +91,10 @@ def percentile(sorted_ms: list[float], pct: float) -> float:
     return sorted_ms[k - 1]
 
 
-def evaluate(metrics: dict[str, float], budget: dict[str, float]) -> list[dict]:
+def evaluate(metrics: dict[str, float], budget: dict[str, float]) -> list[dict[str, Any]]:
     """Per-metric verdicts. Only metrics present in BOTH are gated. Direction-aware:
     a FLOOR metric passes when value >= limit; a ceiling when value <= limit."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for k, limit in budget.items():
         if k not in metrics:
             continue
@@ -139,7 +139,7 @@ def _pick_start_cmd(app: Path) -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
-def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.Popen, int, str]]:
+def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.Popen[str], int, str]]:
     """Launch the app on a FORCED free port (via PORT env) so it never collides
     with whatever holds the framework default (:3000). Detect the actual port from
     the boot banner, falling back to the forced port if the server is up but quiet.
@@ -189,7 +189,7 @@ def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.
     return proc, port, script  # type: ignore[return-value]
 
 
-def _stop(proc: subprocess.Popen) -> None:
+def _stop(proc: subprocess.Popen[str]) -> None:
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
     except (ProcessLookupError, PermissionError, OSError):

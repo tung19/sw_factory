@@ -75,7 +75,7 @@ def _dt(ts: float) -> datetime:
     return datetime.fromtimestamp(ts, timezone.utc)
 
 
-def start_pipeline(name: str, kind: str, inputs: Optional[dict] = None) -> None:
+def start_pipeline(name: str, kind: str, inputs: Optional[dict[str, Any]] = None) -> None:
     """Open a trace for a pipeline run and print its Langfuse URL (if any)."""
     global _current
     sink = _get_sink()
@@ -109,7 +109,7 @@ def log_span(
     cost: Optional[float] = None,
     passed: Optional[bool] = None,
     backend: Optional[str] = None,
-    metadata: Optional[dict] = None,
+    metadata: Optional[dict[str, Any]] = None,
 ) -> None:
     """Record one agent run as a span under the current pipeline trace."""
     import time as _t
@@ -131,7 +131,7 @@ def log_span(
         pass
 
 
-def end_pipeline(passed: Optional[bool] = None, output: Optional[dict] = None) -> None:
+def end_pipeline(passed: Optional[bool] = None, output: Optional[dict[str, Any]] = None) -> None:
     """Close + flush the current pipeline trace."""
     global _current
     if _current is not None:

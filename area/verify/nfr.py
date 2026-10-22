@@ -22,7 +22,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from area._util import safe_name
 from area.pipeline import WORKSPACE
@@ -41,7 +41,7 @@ DEFAULT_BUDGET: dict[str, int] = {
 }
 
 
-def _env() -> dict:
+def _env() -> dict[str, str]:
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
@@ -122,10 +122,10 @@ def measure(app_dir: str | Path, *, run_build: bool = False,
     return m
 
 
-def evaluate(metrics: dict[str, float], budget: dict[str, float]) -> list[dict]:
+def evaluate(metrics: dict[str, float], budget: dict[str, float]) -> list[dict[str, Any]]:
     """Per-metric verdicts. Only metrics present in BOTH the measurement and the
     budget are gated (a budget for an unmeasured metric is simply skipped)."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for k, limit in budget.items():
         if k not in metrics:
             continue

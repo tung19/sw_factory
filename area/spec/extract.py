@@ -7,7 +7,7 @@ a Pydantic validator is the oracle — invalid output loops back for a fix.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -88,7 +88,7 @@ def expected_block(expected: Optional[str]) -> str:
     )
 
 
-def load_assumptions(out_dir: str | Path) -> list[dict]:
+def load_assumptions(out_dir: str | Path) -> list[dict[str, Any]]:
     """Read the spec stage's assumptions ledger (empty if none/invalid)."""
     p = Path(out_dir) / "assumptions.yaml"
     if not p.exists():
@@ -101,7 +101,7 @@ def load_assumptions(out_dir: str | Path) -> list[dict]:
         return []
 
 
-def append_assumptions(out_dir: str | Path, items: list[dict]) -> int:
+def append_assumptions(out_dir: str | Path, items: list[dict[str, Any]]) -> int:
     """Merge extra assumption dicts into the ledger (dedup by question text).
 
     Used by the independent spec reviewer to fold the ambiguities it found into the

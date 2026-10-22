@@ -63,19 +63,16 @@ python_version = "3.12"
 ignore_missing_imports = true
 files = ["area"]
 
-# Strictness ratchet (after full coverage): every `def` in `area` must be fully
-# annotated, so NEW untyped code / implicit `Any` can't creep back in — the whole
-# point of having gotten to green. These flags are the `no-untyped-def` family plus
-# the cheap, high-value warnings:
-disallow_untyped_defs = true     # a def missing any annotation fails CI
-disallow_incomplete_defs = true  # a partially-annotated def fails too
-check_untyped_defs = true        # type-check the BODIES, not just signatures
-no_implicit_optional = true      # `x: str = None` must be `str | None`
-warn_return_any = true           # returning Any where a type is declared is an error
-warn_redundant_casts = true      # a cast() that does nothing is an error
-warn_unused_ignores = true       # a stale `# type: ignore` is an error
-# DEFERRED to a follow-up (noisier, separate cleanup): disallow_any_generics
-# (bare `dict`/`list` → ~71 type-arg), disallow_untyped_calls, full `strict`.
+# FULL strict (the end state of the mypy ratchet). `strict = true` turns on the
+# whole bundle — disallow_untyped_defs/-incomplete_defs, check_untyped_defs,
+# disallow_untyped_calls/-decorators, no_implicit_optional, disallow_any_generics
+# (bare `dict`/`list` must carry params), no_implicit_reexport (a re-exported name
+# needs `X as X` or `__all__`), strict_equality, warn_return_any/-redundant_casts/
+# -unused_ignores, extra_checks — so NEW untyped code, implicit `Any`, or bare
+# generics can't creep back in. `ignore_missing_imports` stays (the vendored
+# OpenHands SDK + a few deps ship no stubs). Journey: coverage 9→full, then
+# strictness no-untyped-def family → full strict.
+strict = true
 
 [build-system]
 requires = ["hatchling"]

@@ -53,7 +53,7 @@ playwright-report/
 """
 
 
-def _run(cmd: str, cwd: Path) -> subprocess.CompletedProcess:
+def _run(cmd: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["bash", "-lc", cmd], cwd=str(cwd), capture_output=True, text=True)
 
 

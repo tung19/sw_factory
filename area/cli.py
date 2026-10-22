@@ -14,7 +14,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from area._util import safe_name
 
@@ -256,7 +256,7 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
 
     from area import evidence
 
-    def _ev(event: str, data: dict | None = None) -> None:
+    def _ev(event: str, data: dict[str, Any] | None = None) -> None:
         evidence.emit(res.name, event, data)
 
     if not res.passed:
