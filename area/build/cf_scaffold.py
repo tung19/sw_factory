@@ -29,7 +29,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional
 
@@ -39,6 +41,20 @@ _CVE_OVERRIDES = {"fflate": "^0.7.5", "braces": "file:./vendor/braces"}
 _COMPAT_RE = re.compile(
     r'(compatibilityDate|compatibility_date)(\s*[:=]\s*)(["\'])(\d{4}-\d{2}-\d{2})(["\'])'
 )
+
+# the committed patched-braces template (CVE depth-guard). Its braces deps live
+# under `_deps/` (not `node_modules/`, which .gitignore would swallow); vendor_braces
+# materialises them into `node_modules/` in the target app.
+_TEMPLATE_BRACES = Path(__file__).resolve().parent / "templates" / "braces"
+
+# a known-good CF toolchain is cloned file-for-file (vinext-cf-build §2): reusing a
+# sibling's exact lockfile + node_modules pins the workerd the build already passes.
+_TOOLCHAIN_FILES = (
+    "package.json", "package-lock.json", "tsconfig.json", "next-env.d.ts",
+    "next.config.ts", "next.config.mjs", "next.config.js",
+    "vite.config.ts", "cloudflare.config.ts",
+)
+_TOOLCHAIN_DIRS = ("vendor", "node_modules")
 
 
 def _env() -> dict[str, str]:
@@ -157,18 +173,149 @@ def apply_cve_overrides(app: Path) -> bool:
     return changed
 
 
+def _is_cf_app(app: Path) -> bool:
+    """A vinext/Cloudflare app: has a cloudflare.config.ts or a vite config."""
+    return (app / "cloudflare.config.ts").exists() or (app / "vite.config.ts").exists()
+
+
 def harden_cf_app(app: str | Path, *, version: Optional[str] = None) -> dict[str, Any]:
-    """Apply both deterministic vinext fixes. Safe to run repeatedly (idempotent)
-    and on a non-CF app (it just reports nothing changed)."""
+    """Apply the deterministic vinext fixes. Safe to run repeatedly (idempotent)
+    and on a non-CF app (it just reports nothing changed). For a CF app it also
+    vendors the patched braces so the `braces: file:./vendor/braces` override it
+    writes actually resolves."""
     ap = Path(app)
     date = pin_compat_date(ap, version=version)
     overrides = apply_cve_overrides(ap)
-    summary: dict[str, Any] = {"compat_date": date, "cve_overrides": overrides}
+    vendored = vendor_braces(ap) if _is_cf_app(ap) else False
+    summary: dict[str, Any] = {"compat_date": date, "cve_overrides": overrides,
+                               "vendored_braces": vendored}
     if date:
         print(f"[cf-fix] pinned compatibilityDate → {date} (from installed workerd)")
     if overrides:
         print("[cf-fix] applied braces/fflate npm overrides (clears the audit CVE chain)")
-    if not date and not overrides:
+    if vendored:
+        print("[cf-fix] vendored patched braces → vendor/braces (CVE depth-guard)")
+    if not date and not overrides and not vendored:
         print("[cf-fix] nothing to change (compat date already pinned / overrides present / "
               "not a vinext app)")
     return summary
+
+
+def vendor_braces(app: str | Path) -> bool:
+    """Copy the committed patched-braces template into <app>/vendor/braces so the
+    `braces: file:./vendor/braces` override resolves offline, and materialise its
+    bundled deps (fill-range/is-number/to-regex-range) from `_deps/` into
+    `node_modules/` so the package is self-contained on first install. Idempotent;
+    returns True if written. (The depth-guard patch fixes braces' deeply-nested
+    stack-exhaustion CVE — the HIGH that `npm audit` flags for every vinext app.)"""
+    ap = Path(app)
+    if not _TEMPLATE_BRACES.is_dir():
+        return False
+    dst = ap / "vendor" / "braces"
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(_TEMPLATE_BRACES, dst)
+    _materialise_braces_deps(dst)
+    return True
+
+
+def _materialise_braces_deps(braces_dir: Path) -> None:
+    """Copy vendor/braces/_deps/* → vendor/braces/node_modules/* (npm resolves the
+    latter; `_deps` is the gitignore-safe source that survives a parent prune)."""
+    deps = braces_dir / "_deps"
+    if not deps.is_dir():
+        return
+    nm = braces_dir / "node_modules"
+    nm.mkdir(parents=True, exist_ok=True)
+    for dep in deps.iterdir():
+        if dep.is_dir():
+            d = nm / dep.name
+            if d.exists():
+                shutil.rmtree(d)
+            shutil.copytree(dep, d)
+
+
+def restore_vendored_braces(app: str | Path) -> bool:
+    """Re-seed vendor/braces/node_modules if a parent `npm install` pruned braces'
+    transitive deps (the known fill-range prune — vinext-cf-build §4). Offline:
+    re-materialises from the app's own `vendor/braces/_deps`. Returns True if a
+    restore was needed and done."""
+    ap = Path(app)
+    braces = ap / "vendor" / "braces"
+    if not braces.is_dir() or not (braces / "_deps").is_dir():
+        return False
+    if (braces / "node_modules" / "fill-range").is_dir():
+        return False  # intact, nothing to do
+    _materialise_braces_deps(braces)
+    return True
+
+
+def clone_sibling_toolchain(app: str | Path, sibling: str | Path) -> list[str]:
+    """Clone a known-good CF toolchain from `sibling` into `app` — the
+    vinext-cf-build §2 fallback: skip the fragile fresh `vinext init` and reuse a
+    sibling that already builds green, pinning the exact workerd its lockfile +
+    node_modules pair with. Copies the toolchain files/dirs that exist, then
+    rewrites `name` in package.json and the worker `name` in cloudflare.config.ts
+    to this app's basename. Returns the copied names."""
+    ap, sib = Path(app), Path(sibling)
+    copied: list[str] = []
+    ap.mkdir(parents=True, exist_ok=True)
+    for rel in _TOOLCHAIN_FILES:
+        src = sib / rel
+        if src.is_file():
+            shutil.copy2(src, ap / rel)
+            copied.append(rel)
+    for rel in _TOOLCHAIN_DIRS:
+        src = sib / rel
+        if src.is_dir():
+            dst = ap / rel
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst, symlinks=True)
+            copied.append(rel + "/")
+    name = ap.name
+    pkg = ap / "package.json"
+    if pkg.exists():
+        try:
+            j = json.loads(pkg.read_text())
+            j["name"] = name
+            pkg.write_text(json.dumps(j, indent=2) + "\n")
+        except (OSError, json.JSONDecodeError):
+            pass
+    cfg = ap / "cloudflare.config.ts"
+    if cfg.exists():
+        t = cfg.read_text()
+        t2 = re.sub(r'(\bname\s*:\s*)(["\'])[^"\']*(["\'])', rf'\1\2{name}\3', t, count=1)
+        if t2 != t:
+            cfg.write_text(t2)
+    return copied
+
+
+def _npm_run(app: Path, script: str) -> tuple[bool, str]:
+    p = subprocess.run(["npm", "run", script], cwd=str(app),
+                       capture_output=True, text=True, env=_env())
+    return p.returncode == 0, (p.stdout + "\n" + p.stderr)[-4000:]
+
+
+def build_cf_with_fallback(
+    app: str | Path, *, sibling: Optional[str | Path] = None,
+    build_script: str = "build:cf",
+    runner: Optional[Callable[[Path, str], tuple[bool, str]]] = None,
+) -> tuple[bool, str]:
+    """Run the CF build; on failure, if a known-good `sibling` is given, clone its
+    toolchain + re-harden + restore the vendored braces, then retry ONCE. `runner`
+    is injectable for tests (default: `npm run <build_script>`). Returns
+    (ok, log)."""
+    ap = Path(app)
+    run = runner or _npm_run
+    ok, log = run(ap, build_script)
+    if ok or sibling is None:
+        return ok, log
+    print(f"[cf] {build_script} failed — cloning known-good sibling toolchain "
+          f"from {sibling} and retrying")
+    clone_sibling_toolchain(ap, sibling)
+    harden_cf_app(ap)
+    restore_vendored_braces(ap)
+    ok2, log2 = run(ap, build_script)
+    return ok2, log + "\n--- after sibling-clone fallback ---\n" + log2

@@ -605,8 +605,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     cf = sub.add_parser("cf-fix", help="Deterministically fix the recurring vinext "
                                        "gotchas (pin compat date to workerd + braces/"
-                                       "fflate audit overrides)")
+                                       "fflate audit overrides + vendor patched braces)")
     cf.add_argument("name")
+
+    cc = sub.add_parser("cf-clone", help="Clone a known-good CF toolchain from a "
+                                         "sibling app (vinext-cf-build §2 fallback: "
+                                         "reuse a toolchain that already builds green)")
+    cc.add_argument("name", help="the new/target app")
+    cc.add_argument("--from", dest="sibling", required=True,
+                    help="sibling app name whose toolchain (lockfile + node_modules "
+                         "+ configs) is reused")
 
     mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
     mo.add_argument("target", help="app name or https URL")
@@ -1080,6 +1088,24 @@ def _cmd_cf_fix(args: argparse.Namespace, expected: str | None) -> int:
     return 0
 
 
+def _cmd_cf_clone(args: argparse.Namespace, expected: str | None) -> int:
+    from area.build.cf_scaffold import (clone_sibling_toolchain, harden_cf_app,
+                                        restore_vendored_braces)
+    from area.pipeline import WORKSPACE
+
+    sib = WORKSPACE / "apps" / safe_name(args.sibling)
+    if not sib.is_dir():
+        print(f"[area] no sibling app at {sib}")
+        return 1
+    app = WORKSPACE / "apps" / safe_name(args.name)
+    copied = clone_sibling_toolchain(app, sib)
+    harden_cf_app(app)
+    restore_vendored_braces(app)
+    print(f"[area] cloned {len(copied)} toolchain item(s) from {args.sibling} → "
+          f"{args.name}; run `npm run build:cf` to verify")
+    return 0
+
+
 def _cmd_monitor(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
@@ -1128,7 +1154,8 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
     "perf": _cmd_perf, "cost": _cmd_cost, "cf-fix": _cmd_cf_fix,
-    "monitor": _cmd_monitor, "status": _cmd_status, "watch": _cmd_watch,
+    "cf-clone": _cmd_cf_clone, "monitor": _cmd_monitor, "status": _cmd_status,
+    "watch": _cmd_watch,
 }
 
 
