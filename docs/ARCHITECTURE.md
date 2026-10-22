@@ -28,10 +28,14 @@ If you change one thing in this repo, do not break that independence.
 |------|-------|-----------|
 | **A — Requirement** | `area run "<requirement>"` | NL requirement → spec → build |
 | **B — Clone** | `area clone <url\|repo\|path>` | reverse-engineer a reference app → spec → behavioral-parity build (the reference *is* the oracle) |
+| **B+ — Adapt** | `area adapt <reference> "<requirement>"` | research-augmented clone & adapt: research comparable projects + the reference → a **requirement-anchored** spec (requirement wins), one-shot clarify, then build. See [`docs/features/area-adapt.md`](features/area-adapt.md) |
 | Hybrid intake | `area intake <aidlc-artifacts>` | AI-DLC Inception artifacts → spec → build |
 | Iterate | `area iterate <app> "<change>"` | fold a change into the existing spec → **re-lock** oracle → rebuild |
 
-All four converge on the **same pipeline** in [`area/pipeline.py`](../area/pipeline.py).
+Flows A/B/intake/iterate converge on the **same pipeline** in
+[`area/pipeline.py`](../area/pipeline.py); **adapt** ([`area/adapt.py`](../area/adapt.py))
+adds a research → requirement-anchored-synthesis → clarify front-end that emits a
+spec and hands off to that pipeline (`area/research.py` + `area/seed.py`).
 
 ## The pipeline, stage by stage
 
@@ -45,7 +49,7 @@ Requirement/source
 | Design | `area/design.py` | architect stage (`design.md`); auto-runs for a non-trivial app (entities or ≥3 features) |
 | Lock holdout | `area/verify/holdout.py` | an **independent subagent** authors the acceptance tests under `__tests__/_holdout/` from the spec ONLY, then they are **checksum-locked** (see "Independence enforcement") |
 | Build to green | `area/build/`, `area/engine/adapter.py` | the build agent writes app code until the **locked** holdout passes; it may never edit the holdout |
-| Gates | `area/verify/*` | the 7 gates below; a blocking failure stops the deploy |
+| Gates | `area/verify/*` | the 8 gates below; a blocking failure stops the deploy |
 | Provenance | `area/provenance.py` | SLSA-style record {spec digest → gates passed → artifact sha256} so a later deploy can prove the build wasn't modified after gating |
 | Deploy | `area/deploy/` | multi-provider (Cloudflare vinext / Vercel / plain), auto-detected; verifies provenance first |
 
@@ -61,12 +65,17 @@ Posture rule: **deterministic gates block; LLM-judgement gates are advisory unti
 | Gate | Module | Kind | Blocks? |
 |------|--------|------|---------|
 | holdout / `verify` | `holdout.py` | the locked oracle (independent agent authors, runner executes) | **yes** (the oracle) |
-| `audit` | `audit.py` | tier-1 deterministic (tsc + `npm audit` + secrets); tier-2 advisory risky-pattern scan | tier-1 yes; tier-2 on `--strict` |
+| `audit` | `audit.py` | tier-1 deterministic (tsc + `npm audit` + secrets); tier-2 risky-pattern scan | tier-1 yes; tier-2 **injection class (XSS/eval/SQL-injection) blocks by default** (`--no-block-injection` downgrades), the rest on `--strict` |
 | `e2e` | `e2e.py` | Playwright drives the real UI (one spec per AC) | **forced before deploy** for auth/session/form apps (`--no-e2e` overrides) |
 | `chaos` | `chaos.py` | adversarial inputs + resilience; hardens the app | yes (chaos suite) |
 | `nfr` | `nfr.py` | deterministic static budget (bundle/deps/install size) | spec `nfr.yaml` blocks; defaults advisory unless `--strict` |
 | `perf` | `perf.py` | boots the app, fires concurrent load, measures p50/p95/p99 + throughput + error-rate | spec `perf.yaml` blocks; defaults advisory unless `--strict` |
 | `product` | `product.py` | independent reviewer judges product-fit / UX gaps | advisory unless `--strict` |
+| `cost` | `cost.py` | hard cost cap: total build spend (across retries, app-scoped from `obs`) vs budget — the HARD complement to `--budget`'s soft per-run cap | spec `cost.yaml` (`max_usd:`) / `--cost-max` blocks; default advisory unless `--strict` |
+
+The gate set is a single source — `cli._GATE_ORDER` drives the `_finish` selection,
+the `_run_gate` dispatch, and the `--all` help, so it can't drift. Add a gate via
+the registry (see CONTRIBUTING).
 
 Why both `nfr` and `perf`: `nfr` measures the *artifact* statically (CI-friendly, no
 run); `perf` measures the *running app* (catches runtime regressions a static
@@ -112,6 +121,13 @@ the attempt it goes green on is logged as `outer_iters` (the determinism signal)
 Backend is keyless ACP (Claude Code) by default; `--backend llm` / `--model` select
 alternatives. The engine enforces the cost/step caps (`--budget`, `--agent-iters`).
 
+**Secret scoping:** while the agent runs (`_run_retry` → `conv.run()`), the engine
+**scrubs deploy/cloud secrets** (Cloudflare/Vercel/Postgres/KV/GitHub tokens, …) from
+its environment (`_scrubbed_agent_env`) and restores them after — so untrusted
+content the agent reads (cloned source, web research, a reverse-engineered app)
+can't exfiltrate them via the terminal. Deploy runs in a separate, non-agent phase,
+so it still sees the tokens.
+
 ## Observability
 
 - [`area/obs.py`](../area/obs.py) — one JSONL line per agent run (`workspace/.area/runs.jsonl`):
@@ -127,12 +143,16 @@ alternatives. The engine enforces the cost/step caps (`--budget`, `--agent-iters
 ```
 area/
   pipeline.py        the shared pipeline (run / clone / intake / iterate)
-  cli.py             the `area` command surface (see "Commands")
-  engine/adapter.py  the ONE seam to the agent engine (OpenHands SDK, vendored)
+  cli.py             the `area` command surface (see "Commands"); _GATE_ORDER registry
+  engine/adapter.py  the ONE seam to the agent engine (OpenHands SDK, vendored); secret scrub
   spec/              requirement → spec.yaml + acceptance.yaml (+ independent review)
   intake/aidlc.py    AI-DLC artifacts → spec
   re/extract.py      reverse-engineer a reference app (Flow B); REA Tier-2 config
-  verify/            the 7 gates (holdout, audit, e2e, chaos, nfr, perf, product)
+  research.py        Flow B+ P1: survey comparable projects → research brief
+  adapt.py           Flow B+ P2/P3 + capstone: requirement-anchored synthesis + data plan + the `area adapt` pipeline
+  seed.py            Flow B+ P4: opt-in attested seed-from-reference (robots/PII/cap)
+  verify/            the 8 gates (holdout, audit, e2e, chaos, nfr, perf, product, cost)
+  build/             the build prompts + cf_scaffold.py (deterministic vinext fixes)
   design.py          architect stage → design.md
   provenance.py      SLSA-style build attestation + verify-before-deploy
   reality.py         post-build "did we build what you meant?" report
@@ -153,8 +173,10 @@ docs/ · PLAN.md · CLAUDE.md · README.md · CONTRIBUTING.md
 
 ## Commands (`area --help`)
 
-`run` · `clone` · `intake` · `iterate` — build flows ·
-`verify` · `audit` · `e2e` · `chaos` · `perf` (+ `--nfr`/`--product` as gate flags) — gates ·
+`run` · `clone` · `adapt` · `intake` · `iterate` — build flows ·
+`research` — Flow B+ research stage (standalone) ·
+`verify` · `audit` · `e2e` · `chaos` · `perf` · `cost` (+ `--nfr`/`--product` as gate flags) — gates ·
+`cf-fix` · `cf-clone` — deterministic vinext build fixes ·
 `deploy` · `rollback` · `provenance` · `export` — ship ·
 `gui` · `doctor` · `obs` · `mem` · `design` · `heal` · `monitor` · `status` · `watch` — operate.
 
@@ -162,7 +184,7 @@ docs/ · PLAN.md · CLAUDE.md · README.md · CONTRIBUTING.md
 
 Each product is isolated by name:
 - `workspace/apps/<name>/` — the app source (+ `__tests__/_holdout/` the locked oracle, `.area/provenance.json`)
-- `workspace/specs/<name>/` — `spec.yaml`, `acceptance.yaml`, `assumptions.yaml`, `design.md`, `holdout.lock`, optional `nfr.yaml`/`perf.yaml` budgets
+- `workspace/specs/<name>/` — `spec.yaml`, `acceptance.yaml`, `assumptions.yaml`, `design.md`, `holdout.lock`, optional `nfr.yaml`/`perf.yaml`/`cost.yaml` budgets, and (adapt) `research/brief.json` + `adapt-notes.md`
 
 A name is required (prompted if omitted) so builds never collide. `area export <name>`
 hands a finished app off as its own git repo.
