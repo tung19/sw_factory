@@ -6,7 +6,7 @@ acceptance oracle, not a vague "looks done". Runs **local-first**: on your machi
 with your Claude and your Cloudflare/Vercel. Nothing leaves your box.
 
 ```
-requirement → spec → LOCKED independent oracle → build-to-green → 7 gates → provenance → deploy
+requirement → spec → LOCKED independent oracle → build-to-green → 8 gates → provenance → deploy
 ```
 
 ---
@@ -67,6 +67,11 @@ gate. See [ADR-0001](docs/adr/0001-local-first-byo-everything.md) and
 - **Flow B — Clone:** `area clone <url|repo|path>` — reverse-engineer a reference
   app → spec → behavioral-parity build. RE Tier-1 is built-in; **Tier-2 (`--rea`)**
   is opt-in, pinned, and only for software you're authorized to analyze.
+- **Flow B+ — Adapt:** `area adapt <reference> "<requirement>"` — research comparable
+  projects + the reference, then build a **requirement-anchored** spec (the
+  requirement wins on conflict) with a one-shot clarify. Opt-in `--seed` copies data
+  from the reference (only with `--seed-attest`). See
+  **[docs/features/area-adapt.md](docs/features/area-adapt.md)**.
 - **Intake / Inception:** `area intake <ai-dlc-artifacts>` and `area inception
   "<req>"` — a governed front-end that shapes the oracle before building.
 - **Iterate:** `area iterate <app> "<change>"` — fold a change into the spec,
@@ -74,7 +79,7 @@ gate. See [ADR-0001](docs/adr/0001-local-first-byo-everything.md) and
 
 ## Docs
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the system map (spine, pipeline, the 7 gates, modules). *Start here to understand the code.*
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the system map (spine, pipeline, the 8 gates, modules). *Start here to understand the code.*
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — setup, tests, how to add a gate/backend.
 - **[docs/CASE-STUDY.md](docs/CASE-STUDY.md)** — building `taskboard` from one sentence, with the real artifacts. *Proof it works.*
 - **[CLAUDE.md](CLAUDE.md)** — the rules the build agent follows. **[SECURITY.md](SECURITY.md)** · **[CHANGELOG.md](CHANGELOG.md)**.
@@ -83,7 +88,7 @@ gate. See [ADR-0001](docs/adr/0001-local-first-byo-everything.md) and
 ## Layout
 
 ```
-area/        the factory: intake · re · spec · engine (seam to the SDK) · verify (7 gates) · deploy · inception · web (dashboard)
+area/        the factory: intake · re · research/adapt/seed (Flow B+) · spec · engine (seam to the SDK) · verify (8 gates) · deploy · inception · web (dashboard)
 examples/    REAL apps the factory built (committed: source + spec + locked oracle + evidence)
 tools/       deterministic shell gates (lock/verify-holdout, gate, provenance)
 docs/        ARCHITECTURE, ADRs, UPGRADE-PLAN

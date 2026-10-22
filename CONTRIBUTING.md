@@ -64,14 +64,18 @@ This is the most common extension. Worked example — the `perf` gate added exac
    breach. Mirror `nfr.py` for a deterministic budget gate, or `chaos.py`/`product.py`
    for an agent-driven one. Accept `backend`/`model` even if unused (dispatch uniformity).
 2. **Export it** from `area/verify/__init__.py`.
-3. **Wire the CLI** in `area/cli.py`:
+3. **Wire the CLI** in `area/cli.py` — the gate set is a single source, `_GATE_ORDER`:
+   - add the gate name to **`_GATE_ORDER`** (this alone puts it in the `_finish`
+     selection and the `--all` help, which are generated from it);
+   - add a `"<gate>": lambda: <gate>_verify(name, …)` entry to the **`runners`** dict
+     in `_run_gate` (forward its distinctive kwargs there);
    - add `--<gate>` (and any options) in `_add_common` (and the `iterate` parser);
-   - add `<gate>` to the gate tuple in `_finish`;
-   - add a branch in `_run_gate`;
-   - optionally a standalone `area <gate> <name>` subcommand + handler.
+   - optionally a standalone `area <gate> <name>` subcommand + handler + `_HANDLERS`.
 4. **Test it** (`tests/test_<gate>.py`): the pure helpers, the pass/fail/advisory/skip
-   verdicts (monkeypatch the measurement so no real app is needed), and `_run_gate` dispatch.
-   Update `tests/test_cli_tdd.py`'s `--all` gate-set assertion.
+   verdicts (monkeypatch the measurement so no real app is needed), and `_run_gate`
+   dispatch. `tests/test_gate_registry.py` already asserts every `_GATE_ORDER` gate
+   dispatches + that `--all` lists it, so a missing `runners` entry fails CI.
+   Keep it `mypy --strict` clean — the whole `area` package is fully strict-typed.
 5. **Dogfood it** against a real built app before trusting it — live runs flush out bugs
    unit tests can't (every gate fix this repo has shipped was found that way).
 

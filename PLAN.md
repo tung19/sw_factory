@@ -75,11 +75,15 @@ LUỒNG B (Clone app):    App mẫu ──────────┘  (artifact
 ## 5. Command surface
 
 ```
-area run   "<requirement>"  [--target cloudflare|plain] [--deploy]
-area clone "<git|path|url>"  [--kind ...] [--rea] [--deploy]
-area deploy <name>           [--yes]
-area heal  <name> --error "<log>"  [--no-rebuild]
-area gui                     # dashboard http://127.0.0.1:8787
+area run    "<requirement>"   [--target cloudflare|plain] [--deploy] [--tdd] [--all]
+area clone  "<git|path|url>"  [--kind ...] [--rea] [--deploy]
+area adapt  "<reference>" "<requirement>"  [--seed --seed-attest] [--yes]   # Flow B+ (research→synthesis→clarify→build handoff)
+area research "<reference>" [--requirement ... --count --top]               # Flow B+ P1 (standalone)
+area intake "<aidlc-dir>"     · area iterate <name> "<change>"
+area <gate> <name>            # verify|audit|e2e|chaos|nfr|perf|product|cost (gate flags: --<gate>, --all, --strict)
+area cf-fix <name> · area cf-clone <name> --from <sibling>                   # deterministic vinext fixes
+area deploy <name> [--yes] · area rollback <name> · area provenance <name> · area export <name>
+area heal <name> --error "<log>" · area gui   # dashboard http://127.0.0.1:8787
 ```
 
 ## 6. Roadmap — trạng thái
@@ -91,9 +95,12 @@ area gui                     # dashboard http://127.0.0.1:8787
 | 2. Self-correct | `run_until` oracle-test (keyless) | ✅ (deviation: không dùng judge) |
 | 3. Deploy | Cloudflare + human gate + **rollback** | ✅ (guestbook live) · `area rollback` ✅ |
 | 4. Clone Tier 1 | RE app mẫu → spec → app | ✅ (source/curl) · E2E via `area e2e` ✅ |
-| 5. Tier 2 + hardening | REA opt-in; hardening | ⚠️ một phần: REA wiring ✅, compat-date fix ✅, healer ✅; **thiếu cost-cap, model-tiering, observability** |
+| 5. Tier 2 + hardening | REA opt-in; hardening | ✅ REA wiring · compat-date fix · healer · **cost-cap gate (`area cost`, gate thứ 8)** ✅ · observability (`area obs` determinism/$) ✅ · model-tiering (`--backend llm`/`--model`) ✅ |
 | + GUI | web dashboard | ✅ (ngoài plan gốc) |
 | + Chaos-audit | path-traversal, server-400, command_verifier, atomic jobs.json | ✅ đã vá |
+| + mypy full-strict | `[tool.mypy] strict=true` toàn `area` (59 modules) | ✅ (journey 9→full→strict) |
+| + Security audit remediation | 4-dim independent audit (~7/10) → 6 round vá: secrets-scan, D1/psql injection+transaction, cost app-scope, evidence trace-filter, injection-gate blocks-by-default, NFR-enforce, gate-registry, provenance, agent-env secret-scrub | ✅ (xem [docs ADR + memory]) |
+| + Flow B+ `area adapt` | research-augmented clone & adapt (research→synthesis requirement-anchored→clarify→data dimension→opt-in seed) | ✅ P0–P4 + capstone (logic; live dogfood deferred). Spec: `docs/features/area-adapt.md` |
 
 ## 7. Cấu trúc thực tế
 
@@ -104,13 +111,16 @@ SW_Factory/
 │   ├── spec/      ✅ schema + extract_spec
 │   ├── build/     ✅ nextjs (target cloudflare|plain)
 │   ├── re/        ✅ clone Tier1/Tier2 (spec_from_source, rea_mcp_config)
-│   ├── deploy/    ✅ cloudflare + human gate
+│   ├── research.py / adapt.py / seed.py  ✅ Flow B+ (`area adapt`): research→synthesis→seed
+│   ├── build/     ✅ nextjs prompts + cf_scaffold.py (deterministic vinext fixes: cf-fix/cf-clone)
+│   ├── deploy/    ✅ cloudflare + vercel, provenance-gated, human gate
 │   ├── heal.py    ✅ spec-level healer
-│   ├── pipeline.py / cli.py / _util.py  ✅
+│   ├── pipeline.py / cli.py (_GATE_ORDER registry) / _util.py  ✅
 │   ├── web/       ✅ GUI (Starlette + SSE)
-│   ├── intake/    ✅ aidlc.py (Hybrid seam: AI-DLC artifact→spec + emit evidence)
-│   ├── verify/    ⬜ rỗng (gộp vào engine oracle; CHƯA có E2E/holdout)
-│   └── memory/    ⬜ rỗng (CHƯA có experience store)
+│   ├── intake/ + inception/  ✅ AI-DLC artifact→spec + governed Inception
+│   ├── verify/    ✅ 8 gates (holdout, audit, e2e, chaos, nfr, perf, product, cost)
+│   ├── obs.py / trace.py / evidence.py / provenance.py  ✅ observability + SLSA-style attestation
+│   └── memory/    ✅ experience store (pitfalls → lessons re-injected)
 ├── workspace/     (gitignored) apps + specs sinh ra
 ├── scripts/       01–05 demo + _reference/
 ├── .mcp.json · pyproject.toml · requirements.lock · PLAN.md · README.md

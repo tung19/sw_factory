@@ -18,12 +18,39 @@ The factory's capabilities to date (grouped; see the git history for detail).
 - **Clarify-by-default** + an independent spec-vs-intent reviewer (stop on material
   ambiguity instead of guessing).
 
-### Gates (7)
+### Gates (8)
 - `holdout` (the locked oracle), `audit` (two-tier: tsc + npm-audit + secrets, +
-  advisory risky-pattern scan), `e2e` (Playwright, forced before deploying an
-  auth/session/form app), `chaos`, `nfr` (static budget), `perf` (live load),
-  `product` (independent product-fit reviewer). `--all` runs them after a build and
-  blocks the deploy on a failure.
+  a risky-pattern scan whose **injection class — XSS/eval/SQL-injection — blocks by
+  default**), `e2e` (Playwright, forced before deploying an auth/session/form app),
+  `chaos`, `nfr` (static budget, enforces a committed budget it can't measure),
+  `perf` (live load), `product` (independent product-fit reviewer), and **`cost`**
+  (hard total-spend cap, app-scoped from obs — the HARD complement to `--budget`).
+  The gate set is a single source (`_GATE_ORDER`) driving selection, dispatch, and
+  `--all`. `--all` runs them after a build and blocks the deploy on a failure.
+
+### Flow B+ — `area adapt` (research-augmented clone & adapt)
+- `area adapt <reference> "<requirement>"`: **research** comparable projects
+  (`area/research.py` — discover → rank → top-5 → analyse the data dimension →
+  brief) → **requirement-anchored synthesis** (`area/adapt.py` — the requirement
+  wins on conflict, every item tagged with its source) → a **one-shot clarify** on
+  the auto-filled gaps → a data plan (persistence + ingest/ETL) → spec written +
+  `area intake` build handoff → **opt-in `--seed`** from the reference (`area/seed.py`
+  — attestation + robots.txt / public-only / no-PII / cap). Spec:
+  `docs/features/area-adapt.md`. (Logic shipped + tested; live LLM/web dogfood deferred.)
+
+### Hardening (this cycle)
+- **mypy `--strict`** across the whole `area` package (journey: coverage → the
+  no-untyped-def family → full strict); a new untyped/`Any`/bare-generic def fails CI.
+- **Deterministic vinext fixes**: `area cf-fix` (pin compat date to the installed
+  workerd + braces/fflate audit overrides + vendored patched braces) and
+  `area cf-clone` (reuse a known-good sibling toolchain). `uv.lock` re-locked to match
+  `pyproject`.
+- **Security/correctness audit remediation** (independent 4-dimension review, ~7/10,
+  remediated over several rounds): tier-1 secrets scan catches `KEY = "…"`; D1
+  migration filename `shlex`-quoted; Vercel migrations run in one transaction; the
+  cost gate is app-scoped (obs rows tagged); the evidence trail filters by trace;
+  the agent env is scrubbed of deploy/cloud secrets while it reads untrusted content;
+  provenance covers more materials + no dir-name blind spot.
 
 ### Ship
 - Multi-provider deploy (`--target cloudflare|vercel|plain`), auto-detected, with

@@ -44,7 +44,7 @@ example with its spec + locked oracle + gate evidence, plus a keyless `area demo
 
 ### Wave 3 — case study + maturity (some needs the owner)
 9. **`docs/CASE-STUDY.md`** — the full story of one build (requirement → spec →
-   locked oracle → 7 gates → trace → evidence) with screenshots.
+   locked oracle → 8 gates → trace → evidence) with screenshots.
 10. **A live-deployed demo** (needs a deploy token) — a public URL is the strongest
     evidence.
 11. Release strategy + `CHANGELOG.md` + versioning + deprecation policy.
