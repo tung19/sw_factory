@@ -39,17 +39,20 @@ DEFAULT_MAX_USD = 15.0   # advisory ceiling unless cost.yaml / --cost-max commit
 SESSION_GAP_S = 1800.0   # runs > 30 min apart belong to different build sessions
 
 
-def build_cost(*, since: Optional[float] = None,
+def build_cost(*, name: Optional[str] = None, since: Optional[float] = None,
                runs: Optional[list[dict[str, Any]]] = None) -> float:
     """Total USD cost of this build's agent runs (from area.obs).
 
+    name:  filter to runs tagged with this app (obs stamps the app name) — so a
+           concurrent build of another app can't inflate/mask this one's spend.
     since: sum runs with ts >= since — precise (the build's own window).
     else:  sum the most-recent build session — the trailing cluster of runs
            within SESSION_GAP_S of each other (the approximate standalone view).
     """
     rows = load_runs() if runs is None else runs
     costed = [r for r in rows
-              if r.get("cost_usd") is not None and r.get("ts") is not None]
+              if r.get("cost_usd") is not None and r.get("ts") is not None
+              and (name is None or r.get("name") == name)]
     if since is not None:
         return round(sum(float(r["cost_usd"]) for r in costed
                          if float(r["ts"]) >= since), 4)
@@ -90,10 +93,23 @@ def cost_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
     """Gate: total build spend must be <= the budget. Returns True on pass, on an
     ADVISORY breach, or when no cost was recorded; False only on a BLOCKING
     breach. backend/model are accepted for dispatch uniformity (unused)."""
+    app = safe_name(name)
     cap, blocking = load_cap(name, strict=strict, override=override, root=root)
-    spent = build_cost(since=since)
+    spent = build_cost(name=app, since=since)
     if spent <= 0:
-        print("[cost] no agent cost recorded (keyless / agent-free run) — skipping")
+        # Distinguish "no runs for this app" (quiet skip) from "runs happened but
+        # the backend reported no cost" (the keyless ACP CLI) — in the latter case
+        # a committed BLOCKING cap cannot be enforced, so say so LOUDLY instead of
+        # silently passing.
+        matched = [r for r in load_runs()
+                   if r.get("name") == app
+                   and (since is None or float(r.get("ts", 0)) >= since)]
+        if blocking and matched:
+            print(f"[cost] ⚠ a blocking ${cap:.2f} cap is set but the backend "
+                  f"reported NO cost for {app}'s {len(matched)} run(s) (keyless CLI) "
+                  f"— cannot enforce; use an LLM backend with cost accounting to gate.")
+        else:
+            print("[cost] no agent cost recorded (keyless / agent-free run) — skipping")
         return True
     ok = spent <= cap
     tag = "BLOCKING" if blocking else "advisory"

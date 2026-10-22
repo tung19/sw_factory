@@ -65,16 +65,29 @@ def emit(name: str, event: str, data: Optional[dict[str, Any]] = None) -> None:
         pass
 
 
-def read_trail(name: str) -> list[dict[str, Any]]:
-    """The full ordered audit chain for an app: the Inception sub-trail + the
-    spec-dir trail, merged by timestamp."""
-    recs: list[dict[str, Any]] = []
+def read_trail(name: str, *, trace: Optional[str] = None) -> list[dict[str, Any]]:
+    """The ordered audit chain for ONE run of an app: the Inception sub-trail +
+    the spec-dir trail, filtered to a single trace_id and merged in order.
+
+    `trace` defaults to the app's CURRENT trace (the latest run) — so after an
+    `iterate` (which starts fresh builds) the view shows that run's chain, not
+    every historical build's events concatenated. Pass an explicit `trace` to
+    inspect an older run. Ordering is (ts, append-index) so equal-timestamp or
+    clock-skewed events keep a stable, file-order tiebreak instead of sorting
+    ambiguously.
+    """
+    want = trace or current_trace(name)
+    indexed: list[tuple[float, int, dict[str, Any]]] = []
+    i = 0
     for p in (_inception_trail(name), trail_path(name)):
         if p.exists():
             for line in p.read_text(errors="ignore").splitlines():
                 try:
-                    recs.append(json.loads(line))
+                    rec = json.loads(line)
                 except Exception:  # noqa: BLE001
-                    pass
-    recs.sort(key=lambda r: r.get("ts", 0))
-    return recs
+                    continue
+                if rec.get("trace") == want:
+                    indexed.append((float(rec.get("ts", 0) or 0), i, rec))
+                    i += 1
+    indexed.sort(key=lambda t: (t[0], t[1]))
+    return [rec for _, _, rec in indexed]

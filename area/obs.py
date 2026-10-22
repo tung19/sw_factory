@@ -13,6 +13,18 @@ from area.paths import WORKSPACE  # zero-dep constant module (no cycle risk)
 
 RUNS = WORKSPACE / ".area" / "runs.jsonl"
 
+# The app whose build is currently running, stamped onto each run record so a
+# per-app gate (area.verify.cost) can scope spend to ONE app even though
+# runs.jsonl is a single shared log and concurrent builds run as separate
+# processes appending to it. Set once per build by the pipeline entrypoints.
+_current_app: Optional[str] = None
+
+
+def set_app(name: Optional[str]) -> None:
+    """Tag subsequent `log_run` records with this app name (per-process)."""
+    global _current_app
+    _current_app = name
+
 
 def cost_of(conv: Any) -> Optional[float]:
     """Best-effort accumulated USD cost of a conversation."""
@@ -34,11 +46,13 @@ def log_run(
     outer_iters: Optional[int] = None,
     passed: Optional[bool] = None,
     backend: Optional[str] = None,
+    name: Optional[str] = None,
 ) -> None:
     RUNS.parent.mkdir(parents=True, exist_ok=True)
     rec = {
         "ts": time.time(),
         "label": label,
+        "name": name if name is not None else _current_app,
         "duration_s": round(duration, 2),
         "cost_usd": cost,
         "outer_iters": outer_iters,

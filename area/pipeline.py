@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from area import obs
 from area._util import safe_name
 from area.build import build_app
 from area.re import spec_from_source
@@ -200,6 +201,7 @@ def run_pipeline(
     an independent spec-vs-intent reviewer (recommendation #2) before the gate.
     """
     name = safe_name(name)
+    obs.set_app(name)  # scope this build's agent-run cost to this app (cost gate)
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] spec   : {requirement!r}")
     spec, acc = extract_spec(
@@ -317,6 +319,7 @@ def intake_pipeline(
     from area.intake import emit_evidence, spec_from_aidlc
 
     name = safe_name(name)
+    obs.set_app(name)  # scope this build's cost to this app (cost gate)
     root = Path(workspace) if workspace else WORKSPACE
     spec_dir = root / "specs" / name
     # Continue the Inception run's trace when these artifacts came from `area
@@ -381,6 +384,7 @@ def clone_pipeline(
 ) -> PipelineResult:
     """Flow B: reverse-engineer a sample app -> spec -> [independent review] -> build."""
     name = safe_name(name)
+    obs.set_app(name)  # scope this build's cost to this app (cost gate)
     if not _safe_clone_source(source):
         raise RuntimeError(
             f"refusing clone source {source!r}: it looks like a git transport "
