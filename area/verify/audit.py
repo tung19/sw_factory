@@ -22,6 +22,19 @@ from area.pipeline import WORKSPACE
 _LEVELS = ("low", "moderate", "high", "critical")
 
 
+# Hardcoded-secret detection for the tier-1 BLOCKING scan. `[[:space:]]*` around
+# the `[:=]` separator catches the common `KEY = "literal"` form (a spaced `=`,
+# the Prettier/standard JS default) that a bare `[:=]` silently missed.
+_SECRET_RE = (r"(api[_-]?key|secret|password|access[_-]?token)"
+              r"[\"']?[[:space:]]*[:=][[:space:]]*[\"' ]*[A-Za-z0-9/+_.=-]{16,}")
+# Substrings that mark a NON-secret match (env lookups / obvious placeholders).
+# NOTE: `import `/`from ` are deliberately NOT excluded — an import/from statement
+# can't match _SECRET_RE's `keyword <sep> 16+ value` shape anyway, and the old
+# bare substring dropped real hits on any line merely containing those words
+# (e.g. `const apiKey="…"; // rotated from vault`).
+_SECRET_EXCLUDE = r"process\.env|NEXT_PUBLIC|example|placeholder|dummy|changeme|your[_-]"
+
+
 def _check(audit_level: str = "high") -> str:
     """Tier-1 deterministic check script, parametrized by npm-audit severity."""
     level = audit_level if audit_level in _LEVELS else "high"
@@ -69,15 +82,16 @@ npm audit --audit-level=%LEVEL% > /tmp/_area_aud.txt 2>&1; rc=$?
 tail -15 /tmp/_area_aud.txt
 [ $rc -eq 0 ] && echo "AUDIT: ok" || { echo "AUDIT: FAIL (%LEVEL%+)"; fail=1; }
 echo "== secrets scan =="
-secret_hits=$( { grep -rnEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9/+_.=-]{16,}" app lib src components server pages 2>/dev/null; \
-     grep -nEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9/+_.=-]{16,}" .env .env.* 2>/dev/null; } \
-     | grep -viE "process\.env|NEXT_PUBLIC|example|placeholder|dummy|changeme|your[_-]|import |from " | head -10)
+secret_hits=$( { grep -rnEi "%SECRET_RE%" app lib src components server pages 2>/dev/null; \
+     grep -nEi "%SECRET_RE%" .env .env.* 2>/dev/null; } \
+     | grep -viE "%SECRET_EXCLUDE%" | head -10)
 if [ -n "$secret_hits" ]; then
   echo "$secret_hits"
   echo "SECRETS: FAIL (possible hardcoded secret)"; fail=1
 else echo "SECRETS: ok"; fi
 exit $fail
-""".replace("%LEVEL%", level)
+""".replace("%LEVEL%", level).replace("%SECRET_RE%", _SECRET_RE).replace(
+        "%SECRET_EXCLUDE%", _SECRET_EXCLUDE)
 
 
 # Tier-2 advisory: risky code patterns in the app's OWN source (not node_modules).
