@@ -83,3 +83,57 @@ def test_auto_filled_and_clarify_payload():
     assert payload["checkout"]["auto_filled"] is False
     assert payload["cart"]["auto_filled"] is True
     assert payload["wishlist"]["source"] == "research"
+
+
+# ---- P3: the data dimension ---------------------------------------------------
+
+def _rb(*storages):
+    return _brief(*[RepoAnalysis(repo=f"r/{i}", url=f"u{i}", data_storage=s,
+                                 data_integration="batch ETL", data_source="CSV upload")
+                    for i, s in enumerate(storages)])
+
+
+def test_data_plan_majority_vote():
+    plan = AD.synthesize_data_plan(_rb("postgres", "sqlite", "postgres"))
+    assert plan.storage == "postgres"          # 2x postgres beats 1x sqlite
+    assert plan.integration == "batch ETL" and plan.source == "CSV upload"
+
+
+def test_data_plan_requirement_override_wins():
+    plan = AD.synthesize_data_plan(_rb("postgres", "postgres"), storage="D1",
+                                   source="user input")
+    assert plan.storage == "D1"                 # override beats the majority
+    assert plan.source == "user input"
+    assert plan.integration == "batch ETL"      # not overridden → majority
+
+
+def test_data_plan_empty_brief_defaults():
+    plan = AD.synthesize_data_plan(_brief())
+    assert plan.storage == "sqlite/D1" and plan.integration == "none"
+    assert plan.source == "user input"
+
+
+def test_data_acceptance_persistence_and_ingest():
+    plan = AD.DataPlan(storage="postgres", integration="batch ETL", source="CSV")
+    acs = AD.data_acceptance(plan, start_index=5)
+    assert [a.id for a in acs] == ["AC-5", "AC-6"]
+    assert acs[0].feature == "data-persistence" and "postgres" in acs[0].then
+    assert acs[1].feature == "data-ingest" and "CSV" in acs[1].given
+
+
+def test_data_acceptance_no_ingest_when_integration_none():
+    plan = AD.DataPlan(storage="sqlite/D1", integration="none", source="user input")
+    acs = AD.data_acceptance(plan)
+    assert [a.id for a in acs] == ["AC-5"]      # persistence only, no ingest AC
+
+
+def test_data_build_notes_mentions_storage_ingest_entities():
+    plan = AD.DataPlan(storage="postgres", integration="webhook", source="REST API",
+                       entities=["user", "order"])
+    notes = AD.data_build_notes(plan)
+    assert "postgres" in notes and "restart" in notes
+    assert "webhook" in notes and "REST API" in notes
+    assert "user, order" in notes
+    # no ingest sentence when integration is none
+    plain = AD.data_build_notes(AD.DataPlan(storage="sqlite/D1", integration="none", source="x"))
+    assert "ingest" not in plain.lower()
