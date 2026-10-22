@@ -164,6 +164,17 @@ def nfr_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
     metrics = measure(app, run_build=run_build)
     results = evaluate(metrics, budget)
 
+    # A COMMITTED (user nfr.yaml) budget whose metric produced NO measurement must
+    # not silently pass — it's a committed guarantee we couldn't verify (e.g. an
+    # unrecognised build-output layout). When blocking, FAIL loudly.
+    nfr_yaml = (Path(root) if root else WORKSPACE) / "specs" / name / "nfr.yaml"
+    committed = parse_budget_yaml(nfr_yaml.read_text()) if nfr_yaml.exists() else {}
+    unmeasured = [k for k in committed if k not in metrics]
+    if blocking and unmeasured:
+        print(f"[area] nfr: FAIL — committed budget(s) {unmeasured} could not be "
+              "measured (no build output / unknown layout?) — not silently passing")
+        return False
+
     if not results:
         print("[area] nfr: no measurable metrics (no build output?) — skipped")
         return True
