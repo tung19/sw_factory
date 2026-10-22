@@ -16,10 +16,12 @@ clarify → build) is wired in the capstone.
 from __future__ import annotations
 
 import re
-from typing import Any, Protocol, TypeVar
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Any, Optional, Protocol, TypeVar
 
 from area.research import ResearchBrief
-from area.spec.models import Feature
+from area.spec.models import AcceptanceCriterion, Feature
 
 SOURCE_REQUIREMENT = "requirement"
 SOURCE_REFERENCE = "reference"
@@ -90,3 +92,70 @@ def clarify_payload(provenance: dict[str, str]) -> list[dict[str, Any]]:
     auto-filled (non-requirement) ones flagged for confirmation."""
     return [{"id": iid, "source": src, "auto_filled": src != SOURCE_REQUIREMENT}
             for iid, src in provenance.items()]
+
+
+# ---- P3: the data dimension ---------------------------------------------------
+# The built app's data concern, synthesized from how the researched top repos
+# handle data (storage / integration / source), with the requirement overriding.
+# Feeds (i) acceptance criteria (durable persistence + an ingest feature) and
+# (ii) a build-prompt fragment; provisioning (DB + schema) reuses area.deploy.
+
+@dataclass
+class DataPlan:
+    storage: str          # e.g. "postgres", "sqlite/D1"
+    integration: str      # e.g. "batch ETL", "webhook", "none"
+    source: str           # e.g. "CSV upload", "REST API", "user input"
+    entities: list[str] = field(default_factory=list)
+
+
+def _majority(values: list[str], default: str) -> str:
+    vals = [v.strip() for v in values if v and v.strip()]
+    if not vals:
+        return default
+    return Counter(vals).most_common(1)[0][0]
+
+
+def synthesize_data_plan(
+    brief: ResearchBrief, *, storage: Optional[str] = None,
+    integration: Optional[str] = None, source: Optional[str] = None,
+    entities: Optional[list[str]] = None,
+) -> DataPlan:
+    """A requirement-anchored data plan: a value the requirement pins (the
+    `storage`/`integration`/`source` overrides) WINS; otherwise take the majority
+    choice across the researched top repos' data analysis; else a safe default."""
+    return DataPlan(
+        storage=storage or _majority([r.data_storage for r in brief.top], "sqlite/D1"),
+        integration=integration or _majority([r.data_integration for r in brief.top], "none"),
+        source=source or _majority([r.data_source for r in brief.top], "user input"),
+        entities=list(entities or []),
+    )
+
+
+def _has_ingest(plan: DataPlan) -> bool:
+    return plan.integration.strip().lower() not in ("", "none", "n/a")
+
+
+def data_acceptance(plan: DataPlan, *, start_index: int = 5) -> list[AcceptanceCriterion]:
+    """Acceptance criteria for the data dimension: durable persistence always, plus
+    an ingest/ETL criterion when the plan calls for an integration (AC-5)."""
+    acs = [AcceptanceCriterion(
+        id=f"AC-{start_index}", feature="data-persistence",
+        given="the app has stored records", when="the server restarts",
+        then=f"the records survive (durable {plan.storage})")]
+    if _has_ingest(plan):
+        acs.append(AcceptanceCriterion(
+            id=f"AC-{start_index + 1}", feature="data-ingest",
+            given=f"a {plan.source} input in {plan.integration} form",
+            when="it is ingested", then="the records appear in the app's store"))
+    return acs
+
+
+def data_build_notes(plan: DataPlan) -> str:
+    """A build-prompt fragment telling the agent what data layer to build."""
+    notes = [f"Persist data durably in {plan.storage} (must survive a restart)."]
+    if _has_ingest(plan):
+        notes.append(f"Provide an ingest/ETL feature that imports {plan.source} data "
+                     f"via {plan.integration} into the store.")
+    if plan.entities:
+        notes.append(f"Core entities: {', '.join(plan.entities)}.")
+    return " ".join(notes)
