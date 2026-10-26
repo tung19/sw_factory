@@ -87,8 +87,8 @@ def test_clone_tdd_passes_parity_reference(monkeypatch, tmp_path):
                         lambda src, out, **k: _spec_acc())
 
     def fake_build(name, spec, acc, root, target, backend, model, build_iters,
-                   tdd=False, reference=None):
-        cap.update(tdd=tdd, reference=reference)
+                   tdd=False, reference=None, ui_dir=None):
+        cap.update(tdd=tdd, reference=reference, ui_dir=ui_dir)
         return area.pipeline.PipelineResult(
             name, spec, acc, root / "specs" / name, root / "apps" / name, True
         )
@@ -97,6 +97,7 @@ def test_clone_tdd_passes_parity_reference(monkeypatch, tmp_path):
     area.pipeline.clone_pipeline("/repo/x", name="c", tdd=True, workspace=tmp_path)
     assert cap["tdd"] is True
     assert cap["reference"] and "/repo/x" in cap["reference"]
+    assert cap["ui_dir"] is None  # no _sample/ + non-http source → no UI captured
 
 
 def test_clone_without_tdd_has_no_reference(monkeypatch, tmp_path):
@@ -105,8 +106,8 @@ def test_clone_without_tdd_has_no_reference(monkeypatch, tmp_path):
                         lambda src, out, **k: _spec_acc())
 
     def fake_build(name, spec, acc, root, target, backend, model, build_iters,
-                   tdd=False, reference=None):
-        cap.update(tdd=tdd, reference=reference)
+                   tdd=False, reference=None, ui_dir=None):
+        cap.update(tdd=tdd, reference=reference, ui_dir=ui_dir)
         return area.pipeline.PipelineResult(
             name, spec, acc, root / "specs" / name, root / "apps" / name, True
         )
@@ -114,3 +115,27 @@ def test_clone_without_tdd_has_no_reference(monkeypatch, tmp_path):
     monkeypatch.setattr(area.pipeline, "_build", fake_build)
     area.pipeline.clone_pipeline("/repo/x", name="c", tdd=False, workspace=tmp_path)
     assert cap["tdd"] is False and cap["reference"] is None
+
+
+def test_clone_captures_ui_and_passes_ui_dir(monkeypatch, tmp_path):
+    """With a cloned _sample tree, the UI-capture step runs and its _ui dir is
+    threaded to the builder (the A-path end to end)."""
+    cap = {}
+    monkeypatch.setattr(area.pipeline, "spec_from_source",
+                        lambda src, out, **k: _spec_acc())
+    sample = tmp_path / "specs" / "c" / "_sample"
+    sample.mkdir(parents=True)
+    (sample / "globals.css").write_text("body{color:#0ea5e9;font-family:Inter}")
+
+    def fake_build(name, spec, acc, root, target, backend, model, build_iters,
+                   tdd=False, reference=None, ui_dir=None):
+        cap.update(ui_dir=ui_dir, ui=spec.ui)
+        return area.pipeline.PipelineResult(
+            name, spec, acc, root / "specs" / name, root / "apps" / name, True
+        )
+
+    monkeypatch.setattr(area.pipeline, "_build", fake_build)
+    area.pipeline.clone_pipeline("/repo/x", name="c", tdd=False, workspace=tmp_path)
+    assert cap["ui_dir"] and cap["ui_dir"].endswith("/_ui")
+    assert cap["ui"].captured is True
+    assert (tmp_path / "specs" / "c" / "_ui" / "manifest.yaml").exists()

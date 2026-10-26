@@ -47,6 +47,14 @@ build to match it.
      "given/when/then", same schema as Flow A) and a thin `docs/01`/`02` for Tung to confirm.
    - If the reference is ambiguous or too large to clone whole, STOP and agree the scope
      (which features are in the clone) with Tung before locking anything.
+   - **UI evidence (automatic, so the clone LOOKS like the original).** Behavior ≠ look:
+     the spec captures features, not CSS. So `area/re/ui_capture.py` runs a deterministic,
+     best-effort snapshot of the reference's REAL UI into `workspace/specs/<name>/_ui/`
+     (rendered markup, stylesheets, design `tokens.json`, static assets, `manifest.yaml`).
+     repo/path → copied from `_sample/` (READ-only); live URL → fetched (http(s) only,
+     behind an SSRF guard, same-origin assets). A client-rendered SPA fetches thin — the
+     manifest records that caveat. This is why a clone built from only the prose spec drifts
+     visually: the `_ui/` evidence is the fix.
 
 3. **Lock the PARITY oracle — all three independence enforcements:**
    - **(c) Subagent.** Spawn a **Task subagent** whose prompt contains ONLY the
@@ -58,6 +66,14 @@ build to match it.
      thing it may read is `_sample/`.
    - **(a) Rule.** Do this BEFORE writing any implementation of the clone.
    - **(b) Checksum.** Run `tools/lock-holdout.sh <name>`. The parity oracle is now frozen.
+
+   - **Vendor the look.** The build stage copies `_ui/` into `<app>/.area-ui/` and prepends
+     a prompt block (`area/build/ui_vendor.py`) telling the builder to REPRODUCE the vendored
+     stylesheets / tokens / assets / markup — a parity clone matches the reference's look,
+     it does not re-invent a design. `.area-ui/` is reference material, kept out of the build
+     output. Caveat (record in provenance/docs): vendoring rendered markup carries the
+     reference's structure and possibly copyrighted markup — mark the clone "markup-vendored
+     from <source>".
 
 4. **Build to parity-green.** Implement the clone until the locked holdout passes. After each
    attempt run `tools/verify-holdout-intact.sh <name>`; if it reports a change you edited the

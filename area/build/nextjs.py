@@ -143,6 +143,7 @@ def build_app(
     design: str = "",
     oracle: Optional[Verifier] = None,
     tdd: bool = False,
+    ui_dir: Optional[str] = None,
 ) -> bool:
     """Scaffold + self-correct a Next.js app until the oracle passes.
 
@@ -156,7 +157,9 @@ def build_app(
     app = Path(app_dir)
     app.mkdir(parents=True, exist_ok=True)
 
-    spec_yaml = yaml.safe_dump(spec.model_dump(), sort_keys=False)
+    # exclude `ui`: it is a POINTER to vendored files (the real channel), not prose
+    # for the prompt — dumping it would only bloat the build context.
+    spec_yaml = yaml.safe_dump(spec.model_dump(exclude={"ui"}), sort_keys=False)
     acc_yaml = yaml.safe_dump(acc.model_dump(), sort_keys=False)
 
     if target == "cloudflare":
@@ -189,6 +192,16 @@ def build_app(
     if installed:
         prompt = skills_preamble(target) + prompt
         print(f"[area] skills: {', '.join('/' + n for n in installed)}")
+
+    # Vendor the captured reference UI (Flow B parity) and nudge the builder to
+    # reproduce it, so the clone matches the original's look instead of re-inventing.
+    if ui_dir:
+        from area.build.ui_vendor import install_ui_evidence, ui_preamble
+
+        vendored = install_ui_evidence(app, ui_dir)
+        if vendored:
+            prompt = ui_preamble(vendored) + prompt
+            print(f"[area] ui    : vendored reference UI ({', '.join(vendored)})")
 
     oracle = oracle or command_verifier(oracle_cmd, cwd=app)
     label = f"build:{target}" + (":tdd" if tdd else "")
