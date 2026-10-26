@@ -35,6 +35,22 @@ def test_ssrf_guard_allows_public():
 
 
 # ---- token extraction -----------------------------------------------------------
+def test_extract_tokens_font_shorthand():
+    """Regression (found dogfooding example.com, which ships ONLY the shorthand):
+    the `font:` shorthand carries the family list too."""
+    real = ("html{color-scheme:light dark;background:light-dark(#eee,#222)}"
+            "body{font:16px/1.6 system-ui,sans-serif;max-width:26em}")
+    assert extract_tokens(real)["fonts"] == ["system-ui", "sans-serif"]
+    assert extract_tokens("font: bold 14px/1.2 'Segoe UI', Arial, sans-serif;"
+                          )["fonts"] == ["Segoe UI", "Arial", "sans-serif"]
+    # keyword-only shorthand has no size token → no families
+    assert extract_tokens("font: inherit;")["fonts"] == []
+    # the longhand siblings must not be mistaken for the shorthand
+    assert extract_tokens("font-size: 12px; font-weight: 700;")["fonts"] == []
+    assert extract_tokens("font-family: Inter, sans-serif;")["fonts"] == [
+        "Inter", "sans-serif"]
+
+
 def test_extract_tokens_colors_fonts_vars():
     css = """
     :root { --brand: #1e293b; --gap: 8px; }
@@ -65,6 +81,28 @@ def test_asset_collector_links_styles_and_spa_signal():
     assert c.inline_styles and ".a{color:#abc}" in "".join(c.inline_styles)
     assert c.has_root_mount is True and c.scripts == 1
     assert c.visible_text < 200  # SPA-ish shell
+
+
+def test_asset_collector_ignores_script_and_noscript_text():
+    """Regression (found dogfooding excalidraw.com): inline <script> bodies were
+    counted as visible page text, so a textbook SPA shell measured thousands of
+    'text' chars and spa_caveat never fired."""
+    shell = (
+        '<html><body>'
+        '<noscript>You need to enable JavaScript to run this app.</noscript>'
+        '<div id="root"></div>'
+        '<script>const x = "' + ("y" * 3000) + '";</script>'
+        '</body></html>'
+    )
+    c = _AssetCollector()
+    c.feed(shell)
+    assert c.visible_text < 200 and c.has_root_mount and c.scripts == 1
+    # a real content page is NOT flagged, even with scripts present
+    page = ('<html><body><div id="root"><p>' + ("word " * 100) + '</p></div>'
+            '<script>var a=1;</script></body></html>')
+    d = _AssetCollector()
+    d.feed(page)
+    assert d.visible_text > 200
 
 
 # ---- repo/_sample copy path -----------------------------------------------------

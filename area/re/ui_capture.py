@@ -126,6 +126,13 @@ def _http_get(url: str, *, max_bytes: int) -> Optional[bytes]:
 # --------------------------------------------------------------------------- #
 # HTML asset collector (stdlib parser, no bs4 dependency)
 # --------------------------------------------------------------------------- #
+# Tags whose text content is NOT page copy. Without this, an SPA shell's inline
+# <script> bodies counted as "visible text" (found dogfooding: excalidraw.com has
+# `<div id="root"></div>` + 6 inline scripts and still measured 2615 chars of
+# "text", so spa_caveat never fired on the textbook case it exists for).
+_NON_TEXT_TAGS = {"script", "noscript", "template"}
+
+
 class _AssetCollector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -136,6 +143,7 @@ class _AssetCollector(HTMLParser):
         self.scripts = 0
         self.has_root_mount = False
         self._in_style = False
+        self._quiet = 0  # depth inside _NON_TEXT_TAGS
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         d = {k: (v or "") for k, v in attrs}
@@ -157,15 +165,19 @@ class _AssetCollector(HTMLParser):
                 self.assets.append(d["src"])
         elif tag == "div" and d.get("id", "") in ("root", "__next", "app"):
             self.has_root_mount = True
+        if tag in _NON_TEXT_TAGS:
+            self._quiet += 1
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "style":
             self._in_style = False
+        if tag in _NON_TEXT_TAGS:
+            self._quiet = max(0, self._quiet - 1)  # clamp: malformed markup
 
     def handle_data(self, data: str) -> None:
         if self._in_style:
             self.inline_styles.append(data)
-        else:
+        elif not self._quiet:
             self.visible_text += len(data.strip())
 
 

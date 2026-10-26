@@ -96,6 +96,13 @@ build to match it.
    committed floor that could NOT be measured fails loudly rather than silently passing.
    An SPA reference scores low by construction (a plain fetch sees no client-rendered
    markup) — read the caveat before tightening the threshold.
+   **What a score means (calibrated on real AREA-built Next.js apps, repo mode):** an
+   identical app scores **1.00** (tokens 1.00 / dom 1.00); a genuinely DIFFERENT app
+   scores **0.19–0.28** (tokens 0.33–0.43 / dom 0.10–0.18). So the default 0.75 sits in
+   a wide empty gap — a real clone should land near the top. Note `tokens` discriminates
+   WEAKLY on its own (two unrelated apps both using a slate/indigo Tailwind palette and
+   a system font stack still share ~40% of tokens); **`dom` is the discriminating layer**,
+   which is why it carries more weight.
 
 6. **Gates → provenance → deploy (if asked).** `tools/gate.sh <name>` (add `--e2e` for
    auth/session/form clones). `tools/provenance.sh <name>` — the attestation digest covers
