@@ -81,9 +81,26 @@ build to match it.
    holdout test is genuinely wrong, write `__tests__/_holdout/_CHALLENGE.md` and ask Tung;
    never silently change it. "Done" = the reference-grounded suite passes for real.
 
-5. **Gates → provenance → deploy (if asked).** `tools/gate.sh <name>` (add `--e2e` for
-   auth/session/form clones). `tools/provenance.sh <name>`. `tools/deploy.sh <name>` to
-   Tung's own infra. Record live URL in `docs/07`.
+5. **Grade the LOOK too — the visual-parity gate.** Behavioral green says nothing about
+   whether the clone looks like the original, and what isn't graded isn't guaranteed. Run
+   `area visual <name>` (or `area clone --visual`, `tools/gate.sh` runs it advisory).
+   Three layers, degrading by what the reference allows:
+   - **tokens** — reference colors/fonts present in the clone's CSS (any reference kind);
+   - **dom** — normalized tag+class skeleton similarity (any reference kind);
+   - **pixel** — screenshot diff, **live-URL references only** (we may not boot an
+     untrusted repo) and opt-in via `--visual-pixel` / `pixel: true`; needs
+     playwright+chromium, and skips with a recorded reason otherwise.
+   It is **ADVISORY by default** — it prints a score and writes `apps/<name>/.visual/`
+   (`score.json` + diff images) without blocking. To make it BLOCK, commit
+   `workspace/specs/<name>/visual.yaml` (`min_similarity: 0.85`) or pass `--strict`; a
+   committed floor that could NOT be measured fails loudly rather than silently passing.
+   An SPA reference scores low by construction (a plain fetch sees no client-rendered
+   markup) — read the caveat before tightening the threshold.
+
+6. **Gates → provenance → deploy (if asked).** `tools/gate.sh <name>` (add `--e2e` for
+   auth/session/form clones). `tools/provenance.sh <name>` — the attestation digest covers
+   `visual.yaml`, and a markup-vendored clone must be recorded as such.
+   `tools/deploy.sh <name>` to Tung's own infra. Record live URL in `docs/07`.
 
 ## Stop conditions
 Parity-green (done) · a budget/time cap · a stuck signal (same failure twice) → report to

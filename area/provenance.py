@@ -75,7 +75,7 @@ def artifact_digest(app_dir: str | Path) -> str:
 # covers the oracle (acceptance), the assumptions ledger the clarify gate used, and
 # the budgets the nfr/perf/cost gates enforced, not just the base spec.
 _MATERIALS = ("spec.yaml", "acceptance.yaml", "assumptions.yaml",
-              "nfr.yaml", "perf.yaml", "cost.yaml")
+              "nfr.yaml", "perf.yaml", "cost.yaml", "visual.yaml")
 
 
 def spec_digest(spec_dir: Optional[str | Path]) -> Optional[str]:

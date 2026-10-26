@@ -8,14 +8,15 @@ import area.cli as CLI
 import area.verify as V
 
 _VERIFY_FNS = ("holdout_verify", "static_audit", "e2e_verify", "chaos_verify",
-               "nfr_verify", "perf_verify", "product_verify", "cost_verify")
+               "nfr_verify", "perf_verify", "visual_verify", "product_verify",
+               "cost_verify")
 
 
 def _args():
     return SimpleNamespace(
         backend="acp", model=None, strict=False, audit_level="high",
         no_block_injection=False, nfr_build=False, perf_requests=200,
-        perf_concurrency=10, cost_max=None, _build_start=None)
+        perf_concurrency=10, visual_pixel=False, cost_max=None, _build_start=None)
 
 
 def test_every_ordered_gate_dispatches(monkeypatch):

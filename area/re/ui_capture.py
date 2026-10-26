@@ -19,13 +19,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import re
 import shutil
 import socket
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from http.client import HTTPMessage
 from html.parser import HTMLParser
 from pathlib import Path
@@ -34,6 +33,7 @@ from typing import IO, Optional
 import yaml
 
 from area.spec.models import UiEvidence
+from area.ui_tokens import extract_tokens, merge_tokens
 
 _UA = "area-ui-capture"
 _TIMEOUT = 15.0
@@ -121,51 +121,6 @@ def _http_get(url: str, *, max_bytes: int) -> Optional[bytes]:
             return data
     except (urllib.error.URLError, OSError, ValueError):
         return None
-
-
-# --------------------------------------------------------------------------- #
-# Token extraction (deterministic, unit-testable)
-# --------------------------------------------------------------------------- #
-_RE_HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-_RE_FUNC_COLOR = re.compile(r"\b(?:rgba?|hsla?)\([^)]*\)", re.IGNORECASE)
-_RE_FONT = re.compile(r"font-family\s*:\s*([^;}{]+)", re.IGNORECASE)
-_RE_VAR = re.compile(r"(--[A-Za-z0-9_-]+)\s*:\s*([^;}{]+)")
-
-
-def extract_tokens(css: str) -> dict[str, list[str]]:
-    """Pull design tokens out of CSS text: colors, font families, CSS variables."""
-    colors: list[str] = _RE_HEX.findall(css) + _RE_FUNC_COLOR.findall(css)
-    fonts: list[str] = []
-    for decl in _RE_FONT.findall(css):
-        for fam in decl.split(","):
-            f = fam.strip().strip("'\"")
-            if f and not f.startswith("var("):
-                fonts.append(f)
-    variables = [f"{n.strip()}: {v.strip()}" for n, v in _RE_VAR.findall(css)]
-    return {
-        "colors": _dedup(c.lower() for c in colors),
-        "fonts": _dedup(fonts),
-        "vars": _dedup(variables),
-    }
-
-
-def _dedup(items: Iterable[str], cap: int = 80) -> list[str]:
-    seen: dict[str, None] = {}
-    for it in items:
-        s = it.strip()
-        if s and s not in seen:
-            seen[s] = None
-        if len(seen) >= cap:
-            break
-    return list(seen)
-
-
-def _merge_tokens(acc: dict[str, list[str]], more: dict[str, list[str]]) -> None:
-    for k, vs in more.items():
-        cur = acc.setdefault(k, [])
-        for v in vs:
-            if v not in cur and len(cur) < 80:
-                cur.append(v)
 
 
 # --------------------------------------------------------------------------- #
@@ -281,7 +236,7 @@ def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
             styles.append(_copy_rel(p, sample, ui_dir, "styles"))
             if p.suffix.lower() == ".css":
                 try:
-                    _merge_tokens(tokens, extract_tokens(p.read_text(errors="ignore")))
+                    merge_tokens(tokens, extract_tokens(p.read_text(errors="ignore")))
                 except OSError:
                     pass
 
@@ -336,7 +291,7 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
 
     tokens: dict[str, list[str]] = {}
     for block in parser.inline_styles:
-        _merge_tokens(tokens, extract_tokens(block))
+        merge_tokens(tokens, extract_tokens(block))
 
     base = source
     base_netloc = urllib.parse.urlsplit(source).netloc
@@ -352,7 +307,7 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
         (ui_dir / "styles").mkdir(parents=True, exist_ok=True)
         (ui_dir / "styles" / name).write_bytes(data)
         styles.append(f"styles/{name}")
-        _merge_tokens(tokens, extract_tokens(data.decode("utf-8", errors="replace")))
+        merge_tokens(tokens, extract_tokens(data.decode("utf-8", errors="replace")))
 
     assets: list[str] = []
     for i, src in enumerate(parser.assets[:_MAX_ASSETS]):

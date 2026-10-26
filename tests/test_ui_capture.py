@@ -11,10 +11,10 @@ import yaml
 from area.re.ui_capture import (
     _AssetCollector,
     capture_ui_evidence,
-    extract_tokens,
     is_safe_http_url,
 )
 from area.spec.models import Spec, UiEvidence
+from area.ui_tokens import extract_tokens
 
 
 # ---- SSRF guard (IP literals + localhost resolve locally → no network) ----------
