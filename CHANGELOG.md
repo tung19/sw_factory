@@ -42,7 +42,6 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   checksum lock plus the oracle's executed-files check. Installing the hook into generated
   apps was considered and rejected: it would always fail open, so the claim would have
   become true on paper only.
-
 - **`tools/gate.sh` was skipping the gate CLAUDE.md calls mandatory.** Its e2e step looked
   in `workspace/apps/<app>`, a repo-relative path, while generated apps live in
   AREA_WORKSPACE — so it printed "you haven't written Playwright specs" while 12 of them

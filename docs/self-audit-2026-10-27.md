@@ -500,3 +500,38 @@ the **measurement**. That is a repeatable mistake, not a one-off, so every other
 "remediated" claim deserves the same question asked of it: after the fix, what actually
 re-measures the thing being claimed — and is that measurement in the oracle the loop
 converges on, or beside it?
+
+S1, S4, H4 and H1 were all that same shape: the *claim* existed, the *measurement* did
+not. So was M2 — a gate script that printed a reassuring warning instead of running the
+gate.
+
+**And it applies to the fixes in this document, not only to the code they fix.** Four of
+them were only confirmed by an end-to-end run, not by reading: the audit gate's false
+green needed the real control flow traced, the decoy holdout needed a real app with real
+vitest, `screen.py` needed a real 517 KB minified bundle, and `perf`'s unreproducible
+numbers needed the server actually started. Reading found none of those.
+
+Worse, three fixes written *here* were themselves defective, and each was caught by a
+measurement rather than a review:
+
+- the first S4 fix resolved the lock keys against the app root instead of the holdout
+  directory — it blocked the attack **and** every honest build, while printing a
+  plausible reason. Only the honest-green case caught it.
+- `evals.check()` imposed the repo's declared task set on any caller with its own root,
+  so every verdict came back `unpaired`. An existing test caught it.
+- the M2 workspace fix asked `.venv/bin/python` for the answer and fell back to the
+  literal `workspace/` — so wherever there was no venv it **silently reverted to the bug
+  it was fixing**. 705 local tests passed; **CI** caught it, because the local checkout
+  has a venv and CI does not.
+
+So the rule this audit actually leaves behind is narrower and more useful than "test
+end-to-end":
+
+> **Every guard must be proven to go red, and the proof must assert that it changed the
+> thing it meant to change.**
+
+Twice in one afternoon a "proof" here was hollow: a `str.replace` with the wrong
+indentation silently did nothing, and a worktree built to simulate "no venv" held the
+*committed* scripts and still reached the real venv. A `$?` read after a pipe did the
+same thing earlier. Each produced a green result that looked like evidence and was not —
+which is precisely the defect class above, turned on the person fixing it.
