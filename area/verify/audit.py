@@ -16,10 +16,23 @@ from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import build_agent, command_verifier, run_until
-from area.pipeline import WORKSPACE
+from area.engine import Backend, build_agent, command_verifier, run_until
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
 _LEVELS = ("low", "moderate", "high", "critical")
+
+
+# Hardcoded-secret detection for the tier-1 BLOCKING scan. `[[:space:]]*` around
+# the `[:=]` separator catches the common `KEY = "literal"` form (a spaced `=`,
+# the Prettier/standard JS default) that a bare `[:=]` silently missed.
+_SECRET_RE = (r"(api[_-]?key|secret|password|access[_-]?token)"
+              r"[\"']?[[:space:]]*[:=][[:space:]]*[\"' ]*[A-Za-z0-9/+_.=-]{16,}")
+# Substrings that mark a NON-secret match (env lookups / obvious placeholders).
+# NOTE: `import `/`from ` are deliberately NOT excluded — an import/from statement
+# can't match _SECRET_RE's `keyword <sep> 16+ value` shape anyway, and the old
+# bare substring dropped real hits on any line merely containing those words
+# (e.g. `const apiKey="…"; // rotated from vault`).
+_SECRET_EXCLUDE = r"process\.env|NEXT_PUBLIC|example|placeholder|dummy|changeme|your[_-]"
 
 
 def _check(audit_level: str = "high") -> str:
@@ -28,36 +41,81 @@ def _check(audit_level: str = "high") -> str:
     return r"""
 set +e
 fail=0
-echo "== tsc --noEmit =="
+echo "== tsc --noEmit (locked holdout excluded) =="
 if [ -f tsconfig.json ]; then
   npx tsc --noEmit > /tmp/_area_tsc.txt 2>&1; rc=$?
-  tail -25 /tmp/_area_tsc.txt
-  [ $rc -eq 0 ] && echo "TSC: ok" || { echo "TSC: FAIL"; fail=1; }
-else echo "(no tsconfig)"; fi
+  if [ $rc -eq 0 ]; then
+    echo "TSC: ok"
+  else
+    # The locked holdout is the ORACLE: run-verified by vitest, frozen (can't be
+    # edited to fix a type nit). So IGNORE errors confined to __tests__/_holdout/.
+    # But match BOTH file-location errors (`foo.ts(1,2): error TS...`) AND global/
+    # config errors (`error TS18003: ...`), and if a non-zero exit yields NO
+    # recognizable diagnostics at all (tsc crash, not installed, bad tsconfig),
+    # FAIL — never mask a broken type-check as green.
+    # Classify by the FILE-PATH field only (before the first "("), not the whole
+    # line — otherwise a production error whose MESSAGE merely contains the string
+    # "__tests__/_holdout/" (a string-literal type, an import path) would be
+    # misclassified as a holdout error and silently ignored.
+    all_err=$(grep -E 'error TS[0-9]' /tmp/_area_tsc.txt)
+    prod_err=$(printf '%s\n' "$all_err" | grep -vE '^[^(]*__tests__/_holdout/' | grep -E 'error TS[0-9]')
+    hold_err=$(printf '%s\n' "$all_err" | grep -E '^[^(]*__tests__/_holdout/')
+    if [ -n "$prod_err" ]; then
+      echo "$prod_err" | head -25; echo "TSC: FAIL"; fail=1
+    elif [ -n "$hold_err" ]; then
+      echo "(tsc errors are only inside the locked holdout oracle — ignored; run-verified by vitest)"
+      echo "TSC: ok"
+    else
+      tail -25 /tmp/_area_tsc.txt
+      echo "TSC: FAIL (tsc did not complete — crash / not installed / bad tsconfig)"; fail=1
+    fi
+  fi
+else
+  # No tsconfig: a pure-JS app is fine, but TypeScript files with no tsconfig are
+  # UNCHECKED — fail rather than silently skip the only type gate.
+  if find . -path ./node_modules -prune -o \( -name '*.ts' -o -name '*.tsx' \) -print 2>/dev/null | grep -q .; then
+    echo "TSC: FAIL (no tsconfig.json but TypeScript files present — types unchecked)"; fail=1
+  else echo "(no tsconfig, no TS files — skipped)"; fi
+fi
 echo "== npm audit (%LEVEL%+) =="
 npm audit --audit-level=%LEVEL% > /tmp/_area_aud.txt 2>&1; rc=$?
 tail -15 /tmp/_area_aud.txt
 [ $rc -eq 0 ] && echo "AUDIT: ok" || { echo "AUDIT: FAIL (%LEVEL%+)"; fail=1; }
 echo "== secrets scan =="
-secret_hits=$(grep -rnEi "(api[_-]?key|secret|password|access[_-]?token)[\"']?[:=][\"' ]*[A-Za-z0-9_-]{16,}" app lib src components 2>/dev/null \
-     | grep -viE "process\.env|NEXT_PUBLIC|example|placeholder|dummy|import |from " | head -10)
+secret_hits=$( { grep -rnEi "%SECRET_RE%" app lib src components server pages 2>/dev/null; \
+     grep -nEi "%SECRET_RE%" .env .env.* 2>/dev/null; } \
+     | grep -viE "%SECRET_EXCLUDE%" | head -10)
 if [ -n "$secret_hits" ]; then
   echo "$secret_hits"
   echo "SECRETS: FAIL (possible hardcoded secret)"; fail=1
 else echo "SECRETS: ok"; fi
 exit $fail
-""".replace("%LEVEL%", level)
+""".replace("%LEVEL%", level).replace("%SECRET_RE%", _SECRET_RE).replace(
+        "%SECRET_EXCLUDE%", _SECRET_EXCLUDE)
 
 
-# Tier-2 advisory: risky code patterns in the app's OWN source (not node_modules).
+# Tier-2 risky code patterns in the app's OWN source (not node_modules). The 3rd
+# field marks the INJECTION class (XSS / code-eval / SQL-injection) that BLOCKS by
+# default — a factory whose job is shipping web apps shouldn't green-light an app
+# with an injection sink. The rest (shell-exec, weak-random) stay advisory unless
+# --strict. `--no-block-injection` downgrades the injection class to advisory too.
 _RISKY = [
-    (re.compile(r"dangerouslySetInnerHTML"), "React XSS sink — dangerouslySetInnerHTML"),
-    (re.compile(r"\beval\s*\("), "eval() — code-injection risk"),
-    (re.compile(r"\bnew\s+Function\s*\("), "new Function() — dynamic code execution"),
-    (re.compile(r"child_process|\bexecSync\s*\(|\bexec\s*\("), "shell exec — command-injection risk"),
-    (re.compile(r"Math\.random\s*\(\)"), "Math.random() — not cryptographically secure (use crypto)"),
-    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*\$\{"), "SQL built via string interpolation — injection risk"),
+    (re.compile(r"dangerouslySetInnerHTML"), "React XSS sink — dangerouslySetInnerHTML", True),
+    (re.compile(r"\beval\s*\("), "eval() — code-injection risk", True),
+    (re.compile(r"\bnew\s+Function\s*\("), "new Function() — dynamic code execution", True),
+    # Shell exec only: child_process, or a STANDALONE exec* call. A method call
+    # like `db.exec(...)` (node:sqlite) or `regexp.exec(...)` is NOT shell exec —
+    # the negative lookbehind for `.`/word char skips those. `spawn`/`spawnSync`
+    # are caught via the child_process keyword (not the bare-call list) because a
+    # bare `spawn(...)` is common in redux-saga / xstate and is NOT shell exec.
+    (re.compile(r"child_process|(?<![.\w])(?:execSync|execFileSync|execFile|exec)\s*\("),
+     "shell exec — command-injection risk", False),
+    (re.compile(r"Math\.random\s*\(\)"), "Math.random() — not cryptographically secure (use crypto)", False),
+    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*\$\{"), "SQL built via string interpolation — injection risk", True),
+    (re.compile(r"(?:SELECT|INSERT|UPDATE|DELETE)\b[^;\n]*['\"`]\s*\+"), "SQL built via string concatenation — injection risk", True),
 ]
+# Messages of the injection-class subset that blocks by default.
+_INJECTION_MSGS = frozenset(msg for _rx, msg, block in _RISKY if block)
 _SCAN_DIRS = ("app", "lib", "src", "components", "server", "pages")
 _SCAN_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs"}
 
@@ -79,9 +137,21 @@ def advisory_scan(app_dir: str | Path) -> list[tuple[str, int, str]]:
                 continue
             rel = p.relative_to(app).as_posix()
             for i, line in enumerate(lines, 1):
-                for rx, msg in _RISKY:
+                for rx, msg, _block in _RISKY:
                     if rx.search(line):
                         out.append((rel, i, msg))
+    return out
+
+
+def _blocking_findings(findings: list[tuple[str, int, str]], *, strict: bool,
+                       block_injection: bool) -> list[tuple[str, int, str]]:
+    """Which tier-2 findings BLOCK the gate: the injection class (unless
+    `block_injection` is off), plus everything when `strict`."""
+    out = []
+    for f in findings:
+        is_injection = f[2] in _INJECTION_MSGS
+        if strict or (is_injection and block_injection):
+            out.append(f)
     return out
 
 
@@ -89,16 +159,19 @@ def static_audit(
     name: str,
     *,
     fix: bool = False,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
     audit_level: str = "high",
     strict: bool = False,
+    block_injection: bool = True,
 ) -> bool:
     """Two-tier security + static-analysis gate. Returns True if it passes.
 
-    Tier 1 (tsc/npm-audit/secrets) always blocks. Tier 2 (risky-pattern scan) is
-    advisory unless strict=True, in which case any tier-2 finding also blocks.
+    Tier 1 (tsc/npm-audit/secrets) always blocks. Tier 2 (risky-pattern scan):
+    the INJECTION class (XSS / eval / SQL-injection) BLOCKS by default; the rest
+    (shell-exec, weak-random) are advisory unless strict=True. `block_injection=
+    False` downgrades the injection class to advisory too.
     """
     name = safe_name(name)
     app = WORKSPACE / "apps" / name
@@ -110,16 +183,20 @@ def static_audit(
     print(r.feedback)
     tier1_ok = r.ok
 
-    # Tier 2 — advisory risky-pattern review.
+    # Tier 2 — risky-pattern review (injection class blocks by default).
     findings = advisory_scan(app)
+    blocking = _blocking_findings(findings, strict=strict, block_injection=block_injection)
     if findings:
-        print(f"[area] audit tier-2 (advisory security review): {len(findings)} finding(s)"
-              + (" — BLOCKING (strict)" if strict else " — advisory only"))
-        for rel, ln, msg in findings[:20]:
-            print(f"  ⚠ {rel}:{ln} — {msg}")
+        print(f"[area] audit tier-2 (security review): {len(findings)} finding(s), "
+              f"{len(blocking)} BLOCKING")
+        block_set = set(blocking)
+        for f in findings[:20]:
+            rel, ln, msg = f
+            mark = "❌ BLOCK" if f in block_set else "⚠ advisory"
+            print(f"  {mark} {rel}:{ln} — {msg}")
     else:
         print("[area] audit tier-2: no risky patterns")
-    tier2_block = strict and bool(findings)
+    tier2_block = bool(blocking)
 
     if tier1_ok and not tier2_block:
         suffix = " (tier-2 advisory only)" if findings else ""

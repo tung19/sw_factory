@@ -1,0 +1,16 @@
+{
+  "$comment": "AREA project settings (tracked, travels with the clone). Merged with the local, gitignored .claude/settings.local.json. The PreToolUse hook HARD-enforces the oracle-loop's independence rule: it blocks edits to a LOCKED holdout oracle at the editor level, turning CLAUDE.md's 'never edit a locked holdout' from a request into a block. NOTE: project hooks run only once the user APPROVES them in Claude Code (fresh clones must trust the project first); until then this is advisory and tools/verify-holdout-intact.sh remains the deterministic backstop. The command fails OPEN if the script can't be located (e.g. CLAUDE_PROJECT_DIR unset) so it can never block all edits. See tools/hooks/guard_holdout.py.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/tools/hooks/guard_holdout.py\"; if [ -f \"$f\" ]; then exec python3 -I \"$f\"; else exit 0; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

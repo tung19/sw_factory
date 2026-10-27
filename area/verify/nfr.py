@@ -22,10 +22,10 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from area._util import safe_name
-from area.pipeline import WORKSPACE
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
 # Shipped build-output dirs to measure (first existing wins). Cache subdirs are
 # excluded — they are not part of what ships / cold-starts.
@@ -41,7 +41,7 @@ DEFAULT_BUDGET: dict[str, int] = {
 }
 
 
-def _env() -> dict:
+def _env() -> dict[str, str]:
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
@@ -103,9 +103,13 @@ def measure(app_dir: str | Path, *, run_build: bool = False,
     m: dict[str, float] = {}
     if run_build:
         t0 = time.monotonic()
-        subprocess.run(["bash", "-lc", f"{build_cmd} 2>&1"], cwd=str(app),
-                       capture_output=True, text=True, env=_env())
+        bp = subprocess.run(["bash", "-lc", f"{build_cmd} 2>&1"], cwd=str(app),
+                            capture_output=True, text=True, env=_env())
         m["build_ms"] = int((time.monotonic() - t0) * 1000)
+        if bp.returncode != 0:
+            # don't silently time + measure a FAILED build as if it were fine
+            print("[area] nfr: ⚠ --nfr-build timing is off — the build FAILED "
+                  f"(rc={bp.returncode}); bundle metrics may be stale/partial.")
     b = _bundle_bytes(app)
     if b is not None:
         m["bundle_kib"] = b // 1024
@@ -118,10 +122,10 @@ def measure(app_dir: str | Path, *, run_build: bool = False,
     return m
 
 
-def evaluate(metrics: dict[str, float], budget: dict[str, float]) -> list[dict]:
+def evaluate(metrics: dict[str, float], budget: dict[str, float]) -> list[dict[str, Any]]:
     """Per-metric verdicts. Only metrics present in BOTH the measurement and the
     budget are gated (a budget for an unmeasured metric is simply skipped)."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for k, limit in budget.items():
         if k not in metrics:
             continue
@@ -159,6 +163,17 @@ def nfr_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
     budget, blocking = load_budget(name, strict=strict, root=root)
     metrics = measure(app, run_build=run_build)
     results = evaluate(metrics, budget)
+
+    # A COMMITTED (user nfr.yaml) budget whose metric produced NO measurement must
+    # not silently pass — it's a committed guarantee we couldn't verify (e.g. an
+    # unrecognised build-output layout). When blocking, FAIL loudly.
+    nfr_yaml = (Path(root) if root else WORKSPACE) / "specs" / name / "nfr.yaml"
+    committed = parse_budget_yaml(nfr_yaml.read_text()) if nfr_yaml.exists() else {}
+    unmeasured = [k for k in committed if k not in metrics]
+    if blocking and unmeasured:
+        print(f"[area] nfr: FAIL — committed budget(s) {unmeasured} could not be "
+              "measured (no build output / unknown layout?) — not silently passing")
+        return False
 
     if not results:
         print("[area] nfr: no measurable metrics (no build output?) — skipped")

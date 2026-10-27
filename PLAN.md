@@ -75,11 +75,15 @@ LUỒNG B (Clone app):    App mẫu ──────────┘  (artifact
 ## 5. Command surface
 
 ```
-area run   "<requirement>"  [--target cloudflare|plain] [--deploy]
-area clone "<git|path|url>"  [--kind ...] [--rea] [--deploy]
-area deploy <name>           [--yes]
-area heal  <name> --error "<log>"  [--no-rebuild]
-area gui                     # dashboard http://127.0.0.1:8787
+area run    "<requirement>"   [--target cloudflare|plain] [--deploy] [--tdd] [--all]
+area clone  "<git|path|url>"  [--kind ...] [--rea] [--deploy]
+area adapt  "<reference>" "<requirement>"  [--seed --seed-attest] [--yes]   # Flow B+ (research→synthesis→clarify→build handoff)
+area research "<reference>" [--requirement ... --count --top]               # Flow B+ P1 (standalone)
+area intake "<aidlc-dir>"     · area iterate <name> "<change>"
+area <gate> <name>            # verify|audit|e2e|chaos|nfr|perf|product|cost (gate flags: --<gate>, --all, --strict)
+area cf-fix <name> · area cf-clone <name> --from <sibling>                   # deterministic vinext fixes
+area deploy <name> [--yes] · area rollback <name> · area provenance <name> · area export <name>
+area heal <name> --error "<log>" · area gui   # dashboard http://127.0.0.1:8787
 ```
 
 ## 6. Roadmap — trạng thái
@@ -91,9 +95,12 @@ area gui                     # dashboard http://127.0.0.1:8787
 | 2. Self-correct | `run_until` oracle-test (keyless) | ✅ (deviation: không dùng judge) |
 | 3. Deploy | Cloudflare + human gate + **rollback** | ✅ (guestbook live) · `area rollback` ✅ |
 | 4. Clone Tier 1 | RE app mẫu → spec → app | ✅ (source/curl) · E2E via `area e2e` ✅ |
-| 5. Tier 2 + hardening | REA opt-in; hardening | ⚠️ một phần: REA wiring ✅, compat-date fix ✅, healer ✅; **thiếu cost-cap, model-tiering, observability** |
+| 5. Tier 2 + hardening | REA opt-in; hardening | ✅ REA wiring · compat-date fix · healer · **cost-cap gate (`area cost`, gate thứ 8)** ✅ · observability (`area obs` determinism/$) ✅ · model-tiering (`--backend llm`/`--model`) ✅ |
 | + GUI | web dashboard | ✅ (ngoài plan gốc) |
 | + Chaos-audit | path-traversal, server-400, command_verifier, atomic jobs.json | ✅ đã vá |
+| + mypy full-strict | `[tool.mypy] strict=true` toàn `area` (59 modules) | ✅ (journey 9→full→strict) |
+| + Security audit remediation | 4-dim independent audit (~7/10) → 6 round vá: secrets-scan, D1/psql injection+transaction, cost app-scope, evidence trace-filter, injection-gate blocks-by-default, NFR-enforce, gate-registry, provenance, agent-env secret-scrub | ✅ (xem [docs ADR + memory]) |
+| + Flow B+ `area adapt` | research-augmented clone & adapt (research→synthesis requirement-anchored→clarify→data dimension→opt-in seed) | ✅ P0–P4 + capstone (logic; live dogfood deferred). Spec: `docs/features/area-adapt.md` |
 
 ## 7. Cấu trúc thực tế
 
@@ -104,13 +111,16 @@ SW_Factory/
 │   ├── spec/      ✅ schema + extract_spec
 │   ├── build/     ✅ nextjs (target cloudflare|plain)
 │   ├── re/        ✅ clone Tier1/Tier2 (spec_from_source, rea_mcp_config)
-│   ├── deploy/    ✅ cloudflare + human gate
+│   ├── research.py / adapt.py / seed.py  ✅ Flow B+ (`area adapt`): research→synthesis→seed
+│   ├── build/     ✅ nextjs prompts + cf_scaffold.py (deterministic vinext fixes: cf-fix/cf-clone)
+│   ├── deploy/    ✅ cloudflare + vercel, provenance-gated, human gate
 │   ├── heal.py    ✅ spec-level healer
-│   ├── pipeline.py / cli.py / _util.py  ✅
+│   ├── pipeline.py / cli.py (_GATE_ORDER registry) / _util.py  ✅
 │   ├── web/       ✅ GUI (Starlette + SSE)
-│   ├── intake/    ✅ aidlc.py (Hybrid seam: AI-DLC artifact→spec + emit evidence)
-│   ├── verify/    ⬜ rỗng (gộp vào engine oracle; CHƯA có E2E/holdout)
-│   └── memory/    ⬜ rỗng (CHƯA có experience store)
+│   ├── intake/ + inception/  ✅ AI-DLC artifact→spec + governed Inception
+│   ├── verify/    ✅ 9 gates (holdout, audit, e2e, chaos, nfr, perf, visual, product, cost)
+│   ├── obs.py / trace.py / evidence.py / provenance.py  ✅ observability + SLSA-style attestation
+│   └── memory/    ✅ experience store (pitfalls → lessons re-injected)
 ├── workspace/     (gitignored) apps + specs sinh ra
 ├── scripts/       01–05 demo + _reference/
 ├── .mcp.json · pyproject.toml · requirements.lock · PLAN.md · README.md
@@ -143,9 +153,10 @@ SW_Factory/
 | ~~**P3**~~ | ✅ | ~~**Rollback**~~ **XONG**: `area rollback <name>` (wrangler rollback, server-side, human gate) | ⚠️ cần re-deploy thật để validate |
 | **P4** | 🟢 | **E2E/parity test** (Playwright) cho app & clone | parity test pass trên UI thật |
 | **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
+| **P5b** | 🟡 | **Model tiering THẬT** — nay đã có seam: `profiles/<kind>.yaml` (16 kind) + `area evals` đo được riêng từng kind. Chọn model theo kind là bước kế trên seam đó; profile hiện CHƯA khai `model` (cố ý — artifact chỉ chứa thứ nó thật sự điều khiển, xem `docs/secure-factory-gap-assessment.md` item 12) | mỗi kind chạy model riêng, `area evals` chứng minh không hồi quy |
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
-**Đã xong P1–P6 + design.** **Rigor thêm:** security/static gate (`area audit`) + chaos/resilience (`area chaos`). **Prod-monitoring + self-heal loop** (`area monitor/status/watch`: probe→heal→rebuild→gate→redeploy) ✅. Còn (tùy chọn): perf/load gate, NFR, CI/CD. **Tự động:** `area run ... --all [--deploy]` chạy mọi gate (verify→audit→e2e→chaos) sau build, chặn deploy nếu fail; audit/chaos tự ghi memory.
+**Đã xong P1–P6 + design.** **Rigor thêm:** security/static gate (`area audit`) + chaos/resilience (`area chaos`). **Prod-monitoring + self-heal loop** (`area monitor/status/watch`: probe→heal→rebuild→gate→redeploy) ✅. **Đủ bộ gate:** NFR ✅, **perf/load ✅** (2026-10-20), CI/CD ✅. **Tự động:** `area run ... --all [--deploy]` chạy MỌI gate (verify→audit→e2e→chaos→nfr→perf→product) sau build, chặn deploy nếu fail; audit/chaos tự ghi memory.
 
 **Command box (`area iterate` + dashboard tab "Iterate (ra lệnh)")** ✅ (2026-10-19): user ra lệnh NL cho app ĐANG CÓ ("thêm nút xoá", "đổi dark mode") → lệnh được **gộp vào spec** (`compose_amended_requirement`, không raw-to-agent) → **re-lock oracle (TDD mặc định)** → rebuild + gate; target tự nhận theo app. Giữ nguyên xương sống oracle-loop. Chạy qua job-manager (SSE timeline) + sau auth PR6. `area/pipeline.py:iterate_pipeline`, `area/cli.py` lệnh `iterate`, `area/web` kind `iterate`. 11 test.
 
@@ -167,20 +178,30 @@ SW_Factory/
 
 **Trạng thái:** POC đã validated end-to-end trên app NHỎ tự-chứa. **Chưa production** cho phần mềm thật.
 
+> **Đối chiếu kiến trúc an toàn (2026-10-27):** AREA đã được đo với *The Secure Software
+> Factory* (Agent Baseline v1, `docs/software-factory.pdf`) — xem
+> **[docs/secure-factory-gap-assessment.md](docs/secure-factory-gap-assessment.md)**.
+> Kết luận: nửa **"loops"** (oracle-loop + gates) mạnh hơn mức tài liệu đòi; nửa
+> **"boundaries"** (sandbox / network / supply-chain / identity) gần như chưa có.
+> Nhóm 1–2 của backlog (bản ghi nói đúng + bỏ fail-open) **đã làm**; nhóm 3 (screen
+> input, `verify-factory-intact`, timeout/kill-switch) và nhóm 4 (profile + evals cho
+> chính factory) còn mở. Backlog đó là **điều kiện tiên quyết** của nhánh
+> `saas-coordinator-runner` (ADR 0002): nó đẩy AREA từ Level 1 lên Level 2.
+
 ### Blocker (theo mức nghiêm trọng)
 | # | Blocker | Kế hoạch |
 |---|---|---|
 | ~~**PR1**~~ | **Scope build = app đồ chơi** (prompt hardcode "in-memory, no auth, single user") | ✅ **MỞ + validated live** (plain/`node:sqlite`): `prod_notes` — signup/login + **password hash** (AC "không plaintext"), **per-user isolation** (user A không thấy note user B), **durable qua restart** (test `vi.resetModules()` + reopen cùng file DB), holdout 6 file/**8 AC**, build GREEN (~$5.2). ⏳ còn: **cloudflare D1** (target deploy thật) + 2–3 app nữa (PR5) |
-| **PR2** | Phụ thuộc beta/mong manh (OpenHands weekly-break, vinext beta, REA lỗi) | pin + adapter đã có; cần fallback vinext ổn định; khoanh/bỏ REA |
-| **PR3** | Không tất định + chi phí ($2–6/run, có wander) | model-tiering, cap chặt, đo tỉ lệ retry; author oracle-loop ✅ đã giảm |
-| **PR4** | Thiếu gate **perf/load, NFR, CI/CD**; security gate cơ bản. **E2E gate CHỨNG MINH là BẮT BUỘC** (2026-10-19): notes_cf holdout-logic GREEN nhưng **signup VỠ live** (server-action intent không tới formData) — Playwright E2E bắt trong vài giây, logic-holdout không thể | **bật `--e2e`/`--all` trước deploy mọi app có auth/session/form** ✅ (validated live notes_cf). **CI/CD cho AREA ✅ DONE** (`.github/workflows/ci.yml`: pin deps từ requirements.lock + `pip install -e .` + pytest 126 trên push/PR→main; compileall; concurrency-cancel). Còn: perf/load + NFR gate |
+| **PR2** | Phụ thuộc beta/mong manh (OpenHands weekly-break, vinext beta, REA lỗi) | pin + adapter đã có; OpenHands **vendored in-tree** ✅. **vinext deterministic slice ✅ DONE 2026-10-22** (`area/build/cf_scaffold.py` + `area cf-fix <name>`): 2 gotcha hay vỡ nay tất định, hết phụ thuộc agent — `pin_compat_date` (workerd version LÀ ngày `1.YYYYMMDD.N` → rewrite `compatibilityDate` theo workerd đã cài), `apply_cve_overrides` (merge overrides braces(file:)/fflate để clear `npm audit --audit-level=high`), `harden_cf_app` chạy cả hai (idempotent, no-op trên app non-CF) + wired làm safety-net fail-open trong deploy path. Tests test_cf_scaffold.py (13). **vinext FULLER fallback ✅ DONE 2026-10-22** (#13, `area cf-clone` + `clone_sibling_toolchain`/`vendor_braces`/`restore_vendored_braces`/`build_cf_with_fallback` + committed patched-braces template): **validated LIVE** bằng cách bootstrap 1 vinext app THẬT trong session (token-free, $Claude-free vì build:cf là local) — compat pin 2026-10-22→2026-10-19 + build:cf XANH; audit 7 HIGH → vendor braces+fflate → 1 → bump direct vite 8.3.0→8.3.5 → **0 vulns**; fill-range prune reproduce+fix; clone sibling → app mới → build:cf XANH. Skill `vinext-cf-build` viết lại (init flags non-interactive + audit 3 nhóm). ⏳ CÒN (cần CF token): wire `build_cf_with_fallback` vào build-loop end-to-end + `wrangler deploy` clone live (PR5/PR7). khoanh/bỏ REA |
+| **PR3** | Không tất định + chi phí ($2–6/run, có wander) | model-tiering, cap chặt, đo tỉ lệ retry; author oracle-loop ✅ đã giảm. **HARD cost-cap gate ✅ DONE 2026-10-22** (`area/verify/cost.py` = gate thứ 8): `--budget` là soft per-run cap (SDK); một build RETRY nên TỔNG chi có thể vượt nhiều lần → gate này cộng cost thực của build từ `area.obs` (runs.jsonl) và CHẶN deploy nếu vượt. Posture nfr/perf: `specs/<name>/cost.yaml` (`max_usd:`) CHẶN, default $15 ADVISORY trừ `--strict`/`--cost-max`. Scope honest: obs global+per-run+không gắn app → gate sau-build chính xác (cộng run từ `args._build_start`), standalone `area cost <name>` dùng heuristic session gần nhất (gap 30′); $0 cost (keyless)→SKIP. CLI `area cost` + `--cost`/`--cost-max` + trong `_finish`/`--all`/`_run_gate`. Tests test_cost.py (15) + dogfood live obs thật (110 runs): $8.05/$15 ok, `--max 0.01`→exit 1. |
+| **PR4** | Thiếu gate **perf/load, NFR, CI/CD**; security gate cơ bản. **E2E gate CHỨNG MINH là BẮT BUỘC** (2026-10-19): notes_cf holdout-logic GREEN nhưng **signup VỠ live** (server-action intent không tới formData) — Playwright E2E bắt trong vài giây, logic-holdout không thể | **bật `--e2e`/`--all` trước deploy mọi app có auth/session/form** ✅ (validated live notes_cf). **CI/CD cho AREA ✅ DONE** (`.github/workflows/ci.yml`: pin deps từ requirements.lock + `pip install -e .` + pytest trên push/PR→main; compileall; concurrency-cancel). **NFR gate ✅** (`area/verify/nfr.py`, tất định, đo bundle/deps/weight). **perf/load gate ✅ DONE 2026-10-20** (`area/verify/perf.py` = gate thứ 7 còn thiếu): boot app build local → bắn N request đồng thời (stdlib threads+urllib, 0 dep mới) → đo p50/p95/p99 + throughput + error-rate so budget. Posture như nfr/audit-tier2: `specs/<name>/perf.yaml` CHẶN, default ADVISORY trừ `--strict`; metric có hướng (latency/error = trần ≤, throughput = sàn ≥); SKIP (không chặn build) nếu không boot/reach được app. CLI `area perf <name>` + flag `--perf`/`--perf-requests`/`--perf-concurrency` + trong `--all` + `_run_gate`. Tests `tests/test_perf.py` (15) + validated LIVE (boot thật qua banner-port-detect → load → teardown sạch, không rò process). **cost gate ✅ DONE 2026-10-22** (gate thứ 8, `area/verify/cost.py` — xem PR3). → **Đủ 8 gate (verify/audit/e2e/chaos/nfr/perf/product/cost), không còn gate nào thiếu.** |
 | **PR5** | Chỉ test app bé; chưa có app thật (DB+auth+multi-page) | mốc tiếp: 2–3 app thật có DB+auth |
 | ~~**PR6**~~ | ✅ **DONE**: dashboard có **token-auth** (`area/web/auth.py`, kiểu Jupyter). Mọi request phải có token qua `?token=`/Bearer/cookie; `?token=` set cookie HttpOnly+SameSite=Strict để fetch/SSE tự authed. Token = `AREA_GUI_TOKEN` hoặc tự sinh (in URL kèm token khi `area gui`); escape-hatch `AREA_GUI_NO_AUTH=1`. Pure-ASGI (không phá SSE). 9 test + smoke live (401 thiếu/sai token, 200 khi có). Còn (tùy): HTTPS/reverse-proxy nếu expose ngoài localhost | thêm auth + không expose công khai |
 | **PR7** | Deploy/rollback/monitor mới validate 1 lần (guestbook) | ✅ **DEPLOY D1 LIVE validated**: `area deploy gb_d1` → auto-provision D1 (`wrangler d1 create gb-d1: ok`) → deploy vinext/cf → **https://gb-d1.monbkel.workers.dev HTTP 200**. **Persist proven live** (Playwright: post message → reload → vẫn còn trong D1). Handshake wrangler-D1 ↔ vinext `bindings.d1()` **OK, không cần chỉnh** (table tạo lazy). Còn: rollback/monitor nhiều lần |
-| **PR8** | Bus factor (~2500 dòng, 1 người); Hybrid front-end chưa dựng | dựng AI-DLC front-end thật + emit evidence nối trail |
+| **PR8** | 🟡 Bus factor (~6.5k dòng, 1 người); Hybrid front-end chưa dựng | **Docs ✅** (`docs/ARCHITECTURE.md` + `CONTRIBUTING.md`). **mypy FULL STRICT ✅ DONE 2026-10-22** (`[tool.mypy] strict = true`, 56 modules): hành trình coverage 9→full (PR#1-#6) → no-untyped-def family (PR#8) → full strict (PR#9) — mọi `def` trong `area` buộc annotate đầy đủ, code mới thiếu annotation / Any ngầm / bare generic làm CI đỏ; contract `backend: Literal['acp','llm']` enforced CLI→pipeline→spec/build/re/inception. **AI-DLC front-end ✅** (PR8 phases 0-3): Phase 0 contract+fixture (`docs/aidlc-artifact-contract.md`), Phase 1 governed Inception engine (`area/inception/` + `area inception`: intent→stories→UoW→Testing-Posture, human-approved bolts, validated live ~$1.64), Phase 2 dashboard Inception tab (run→review/edit oracle→build), Phase 3 **evidence round-trip** (`area/evidence.py` + `area trace <name>`: Inception→spec→gates→provenance→deploy = ONE correlated trail). Chỉ còn Phase 4 (tùy chọn) = interop với awslabs/aidlc-workflows thật |
 
 ### "Production-ready" = done khi
 - [ ] Build được app **persistence thật + auth + multi-user**, validated live trên 2–3 app.
-- [ ] Gate **perf/load + NFR + security sâu** + **CI/CD** cho AREA.
-- [ ] Phụ thuộc beta có fallback; chi phí/độ tất định đo & kiểm soát được.
+- [x] Gate **perf/load + NFR + security sâu** + **CI/CD** cho AREA. ✅ (9 gate: verify/audit/e2e/chaos/nfr/perf/visual/product/cost; CI xanh)
+- [x] Phụ thuộc beta có fallback (OpenHands **vendored in-tree** ✅; vinext fallback **✅ ĐẦY ĐỦ** = `area cf-fix` pin compat-date/overrides + `area cf-clone` clone-sibling-toolchain + vendored patched braces, validated live 7→0 vulns + build:cf xanh); **chi phí/độ tất định ĐO ĐƯỢC ✅** (PR3 — `area obs` + `/api/metrics`: first-try-rate, retry-rate, avg attempts, $/run per-stage. Số thực hiện tại: first-try 91% · avg 1.12 attempts · $1.65/run). Kiểm soát = soft `--budget` cap **+ HARD cost-cap gate** ✅ (`area cost`/`--cost`: tổng chi build vs budget, chặn deploy nếu vượt).
 - [ ] Dashboard có auth; deploy/rollback/monitor validated nhiều lần.

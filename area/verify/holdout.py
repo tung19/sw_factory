@@ -29,8 +29,9 @@ from typing import Optional
 import yaml
 
 from area._util import safe_name
-from area.engine import Verifier, VerifyResult, build_agent, run_once, run_until
-from area.pipeline import WORKSPACE
+from area.engine import Backend, Verifier, VerifyResult, build_agent, run_once, run_until
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
+from area.verify._runners import assert_vitest_ran
 
 HOLDOUT_DIR = "__tests__/_holdout"
 # The ONE file the builder may write inside the locked dir: a challenge that a
@@ -40,12 +41,63 @@ HOLDOUT_DIR = "__tests__/_holdout"
 CHALLENGE_FILE = "_CHALLENGE.md"
 
 
-def _lock(holdout: Path) -> dict:
+def _lock(holdout: Path) -> dict[str, str]:
     return {
         str(f.relative_to(holdout)): hashlib.sha256(f.read_bytes()).hexdigest()
         for f in sorted(holdout.rglob("*"))
         if f.is_file() and f.name != CHALLENGE_FILE
     }
+
+
+def _expected_ac_count(holdout: Path) -> int:
+    """Distinct AC-<n> ids across the holdout test files = how many acceptance
+    criteria the suite must execute (≥1 test per AC), used to reject a green
+    exit that actually ran too few / zero tests."""
+    ids: set[str] = set()
+    for f in holdout.rglob("*"):
+        if f.is_file() and f.suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs"}:
+            ids |= set(re.findall(r"\bAC-\d+\b", f.read_text(errors="ignore")))
+    return len(ids)
+
+
+# Wall clock for one holdout test run.
+_TEST_TIMEOUT_S = 1800.0
+
+
+def _lock_file(app: Path) -> Optional[Path]:
+    """The on-disk lock path for a standard workspace/apps/<name> layout, else None."""
+    if app.parent.name != "apps":
+        return None  # non-standard layout (e.g. a temp clone dir)
+    return app.parent.parent / "specs" / app.name / "holdout.lock"
+
+
+def _persist_lock(app: Path) -> None:
+    """Persist the on-disk holdout.lock via the canonical tools/lock-holdout.sh, so
+    a --tdd/author-locked holdout is recognized by tools/verify-holdout-intact.sh
+    AND the PreToolUse guard hook — not only a hand-locked one. The --tdd pipeline
+    otherwise keeps the checksum in memory only. Best-effort: a failure here never
+    breaks the build (the in-memory lock in _holdout_oracle still guards it)."""
+    if _lock_file(app) is None:
+        return
+    script = Path(__file__).resolve().parents[2] / "tools" / "lock-holdout.sh"
+    if not script.exists():
+        return
+    try:
+        subprocess.run(["bash", str(script), app.name, str(app.parent.parent)],
+                       capture_output=True, text=True, timeout=30)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _clear_lock(app: Path) -> None:
+    """Remove the on-disk lock (before a sanctioned re-authoring) so the guard hook
+    can't block the independent verifier from correcting a challenged test."""
+    lf = _lock_file(app)
+    try:
+        if lf is not None and lf.exists():
+            lf.unlink()
+    except OSError:
+        pass
 
 
 def _parity_preamble(reference: str) -> str:
@@ -101,6 +153,15 @@ def _author_prompt(acc_yaml: str, *, tdd: bool, reference: Optional[str] = None)
     )
 
 
+def _app_has_source(app: Path) -> bool:
+    """Is there already an implementation for an author agent to read?"""
+    for sub in ("lib", "app", "src", "components", "server", "pages"):
+        d = app / sub
+        if d.is_dir() and any(d.rglob("*")):
+            return True
+    return False
+
+
 def _has_tests(holdout: Path) -> bool:
     return any(holdout.rglob("*.ts")) or any(holdout.rglob("*.js"))
 
@@ -124,9 +185,11 @@ def _test_text(holdout: Path) -> str:
     return "\n".join(out)
 
 
-def _fingerprint(holdout: Path) -> frozenset:
+def _fingerprint(holdout: Path) -> frozenset[tuple[str, str]]:
+    # Key on CONTENT hash, not st_size: a rewrite with the same byte length (common
+    # when an author iterates) must count as progress, not trip the stall detector.
     return frozenset(
-        (str(f.relative_to(holdout)), f.stat().st_size)
+        (str(f.relative_to(holdout)), hashlib.sha256(f.read_bytes()).hexdigest())
         for f in holdout.rglob("*")
         if f.is_file()
     )
@@ -170,10 +233,27 @@ def _authoring_oracle(
     return (not problems), " ".join(problems)
 
 
+def _locked_state(app: Path) -> str:
+    """"none" | "intact" | "tampered" — via the CANONICAL checker, so this cannot
+    drift from `tools/verify-holdout-intact.sh` or duplicate its hash format."""
+    lf = _lock_file(app)
+    if lf is None or not lf.exists():
+        return "none"
+    script = Path(__file__).resolve().parents[2] / "tools" / "verify-holdout-intact.sh"
+    if not script.exists():
+        return "none"
+    try:
+        r = subprocess.run(["bash", str(script), app.name, str(app.parent.parent)],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return "none"
+    return {0: "intact", 1: "tampered"}.get(r.returncode, "none")
+
+
 def author_until(
-    app: Path, acc_yaml: str, *, backend: str, model: Optional[str], tdd: bool,
+    app: Path, acc_yaml: str, *, backend: Backend, model: Optional[str], tdd: bool,
     reference: Optional[str] = None, attempts: int = 4, max_no_progress: int = 2,
-) -> tuple[Path, dict]:
+) -> tuple[Path, dict[str, str]]:
     """Author the holdout suite under its OWN oracle-loop.
 
     On the keyless ACP backend we cannot strip the agent's terminal, so the
@@ -184,10 +264,43 @@ def author_until(
     """
     holdout = app / HOLDOUT_DIR
     holdout.mkdir(parents=True, exist_ok=True)
+
+    # NEVER re-author over an already-locked oracle.
+    #
+    # This used to run unconditionally, and `run_once` fires BEFORE the authoring
+    # oracle is consulted — so `area verify <app>` on a --tdd-built app invoked an
+    # author agent in a directory that already held the locked holdout, let it rewrite
+    # those files, then `_persist_lock` rewrote the lock to match. A strong oracle
+    # authored pre-build FROM THE SPEC ONLY was silently replaced by one authored
+    # post-build against the implementation it could read — and because the lock was
+    # rewritten too, `tools/verify-holdout-intact.sh` then reported
+    # "✅ oracle độc lập được giữ". The tamper detector confirmed independence at the
+    # exact moment independence was lost. Proven with a stubbed agent.
+    #
+    # Replacing a locked oracle has exactly ONE sanctioned path: `readjudicate`, which
+    # clears the lock first after an independent verifier upholds a `_CHALLENGE.md`.
+    state = _locked_state(app)
+    if state == "intact":
+        print(f"[area] holdout: REUSING the locked oracle under {HOLDOUT_DIR}/ "
+              "(authored earlier and checksum-locked — not re-authoring it)")
+        return holdout, _lock(holdout)
+    if state == "tampered":
+        raise RuntimeError(
+            f"{HOLDOUT_DIR}/ no longer matches its lock — the oracle was modified. "
+            "Revert it to the locked version and fix the IMPLEMENTATION instead; if a "
+            f"test is genuinely wrong, write {CHALLENGE_FILE} so an independent "
+            "verifier can re-adjudicate and re-lock it."
+        )
+    if not tdd and _app_has_source(app):
+        print("[area] ⚠ holdout: authoring the oracle AFTER the implementation exists. "
+              "It must import the app's real modules, so it cannot be authored from "
+              "the spec ONLY — a weaker oracle than a --tdd build's pre-locked "
+              "holdout. Prefer `--tdd`.")
+
     label = "holdout:author" + (":tdd" if tdd else "") + (":parity" if reference else "")
     base = _author_prompt(acc_yaml, tdd=tdd, reference=reference)
 
-    prev_fp: Optional[frozenset] = None
+    prev_fp: Optional[frozenset[tuple[str, str]]] = None
     stalls = 0
     stop = "exhausted attempts"
     feedback = ""
@@ -225,17 +338,20 @@ def author_until(
             f"holdout authoring failed ({stop}) after {attempts} attempts: {feedback}"
         )
     lock = _lock(holdout)
+    _persist_lock(app)  # write workspace/specs/<name>/holdout.lock (hook + verify-intact)
     print(f"[area] holdout: locked {len(lock)} file(s) under {HOLDOUT_DIR}/ "
           f"(all {len(_ac_ids(acc_yaml))} AC covered)")
     return holdout, lock
 
 
 def _holdout_oracle(
-    app: Path, holdout: Path, lock: dict, *, cmd: Optional[list[str]] = None
+    app: Path, holdout: Path, lock: dict[str, str], *, cmd: Optional[list[str]] = None
 ) -> Verifier:
     """A Verifier that (1) rejects any change to the locked suite, then (2) runs
     it. `cmd` defaults to just the holdout tests; TDD passes a build+test cmd."""
     test_cmd = cmd or ["bash", "-lc", f"npx vitest run {HOLDOUT_DIR}"]
+
+    expected = _expected_ac_count(holdout)
 
     def oracle() -> VerifyResult:
         if _lock(holdout) != lock:
@@ -245,11 +361,34 @@ def _holdout_oracle(
                 "the locked acceptance tests — revert them and fix APP CODE only.",
             )
         try:
-            proc = subprocess.run(test_cmd, cwd=str(app), capture_output=True, text=True)
+            # Capped: an unbounded oracle run can hang the whole build (same gap
+            # closed in area.engine.adapter.command_verifier).
+            proc = subprocess.run(test_cmd, cwd=str(app), capture_output=True,
+                                  text=True, timeout=_TEST_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            # TimeoutExpired is a SubprocessError, NOT an OSError — without this it
+            # would escape the oracle and crash the build loop.
+            return VerifyResult(False, (
+                f"holdout runner TIMED OUT after {_TEST_TIMEOUT_S:.0f}s — the locked "
+                "suite did not finish (a hung test or watch mode?)"))
         except OSError as e:
             return VerifyResult(False, f"holdout runner failed: {e}")
         out = (proc.stdout + "\n" + proc.stderr).strip()
-        return VerifyResult(proc.returncode == 0, out[-4000:])
+        if proc.returncode != 0:
+            return VerifyResult(False, out[-4000:])
+        # Exit 0 is NOT enough: confirm the locked suite actually RAN (the app's
+        # vitest config is builder-controlled + unlocked, so passWithNoTests / a
+        # non-matching include can exit 0 with zero tests collected).
+        ran, why = assert_vitest_ran(out, expected)
+        if not ran:
+            return VerifyResult(
+                False,
+                f"ORACLE DID NOT RUN: build/exit was green but {why}. The locked "
+                f"acceptance suite must EXECUTE (check vitest config: "
+                f"passWithNoTests / include must match {HOLDOUT_DIR}/).\n\n"
+                + out[-3500:],
+            )
+        return VerifyResult(True, out[-4000:])
 
     return oracle
 
@@ -259,12 +398,12 @@ def _holdout_oracle(
 def author_and_lock(
     name: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     acc_yaml: Optional[str] = None,
     app: Optional[str | Path] = None,
     reference: Optional[str] = None,
-) -> tuple[Path, dict]:
+) -> tuple[Path, dict[str, str]]:
     """TDD 'red' step: author + checksum-lock the holdout suite BEFORE any build.
 
     Returns (holdout_dir, lock). The app dir may be otherwise empty — the suite
@@ -286,7 +425,7 @@ def author_and_lock(
 
 
 def tdd_build_oracle(
-    app: str | Path, holdout: Path, lock: dict, *, target: str = "cloudflare"
+    app: str | Path, holdout: Path, lock: dict[str, str], *, target: str = "cloudflare"
 ) -> Verifier:
     """The BUILD loop's oracle in --tdd mode: production build is green AND the
     locked holdout suite passes AND the locked files are untouched."""
@@ -321,9 +460,9 @@ def readjudicate(
     holdout: Path,
     acc_yaml: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
-) -> tuple[bool, dict]:
+) -> tuple[bool, dict[str, str]]:
     """Escape hatch for a WRONG locked test (evolving-tests-under-governance).
 
     The builder cannot edit locked tests; if it believes one is wrong it raises
@@ -338,6 +477,10 @@ def readjudicate(
     if challenge is None:
         return False, _lock(holdout)
     before = _lock(holdout)
+    # This is the sanctioned path for CORRECTING a challenged locked test. Clear
+    # the on-disk lock first so the guard hook can't block the independent
+    # verifier's edit; the suite is re-locked (and re-persisted) below.
+    _clear_lock(app)
     task = (
         "You are the INDEPENDENT acceptance verifier (NOT the implementer). The "
         f"builder challenges the locked tests under {HOLDOUT_DIR}/ as wrong. "
@@ -357,6 +500,7 @@ def readjudicate(
     finally:
         agent.close()
     after = _lock(holdout)
+    _persist_lock(app)  # re-persist the (possibly corrected) locked suite
     changed = after != before
     print(
         f"[area] holdout: re-adjudicated challenge -> "
@@ -370,7 +514,7 @@ def readjudicate(
 def holdout_verify(
     name: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> bool:

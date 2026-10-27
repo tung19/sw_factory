@@ -1,0 +1,72 @@
+criteria:
+  - id: AC-1
+    feature: signup
+    given: a visitor is on the combined login/signup page and no account exists for the email
+    when: they submit the signup form with a valid email and password
+    then: an account is created, they are logged in, and they land on the boards-list page
+
+  - id: AC-2
+    feature: login
+    given: an account already exists for a given email and password
+    when: the visitor submits the login form with the correct email and password
+    then: they are logged in and taken to the boards-list page
+
+  - id: AC-3
+    feature: login
+    given: an account already exists for a given email
+    when: the visitor submits the login form with the wrong password
+    then: login is rejected, no session is created, and they remain on the login page
+
+  - id: AC-4
+    feature: password-hashing
+    given: a visitor signs up with a known plaintext password
+    when: the account record is read back from the persistent store
+    then: the stored password value is a hash that differs from the plaintext and the plaintext does not appear in storage
+
+  - id: AC-5
+    feature: auth-guard
+    given: a visitor who is not logged in
+    when: they request the boards-list page or a board-detail page
+    then: access is rejected and they are redirected to the login page
+
+  - id: AC-6
+    feature: create-board
+    given: a logged-in user on the boards-list page
+    when: they submit the create-board form with a board name
+    then: a new board owned by that user is persisted and appears in their boards list
+
+  - id: AC-7
+    feature: view-boards
+    given: a logged-in user who owns one or more boards
+    when: they open the boards-list page
+    then: the page lists exactly their own boards and no boards owned by other users
+
+  - id: AC-8
+    feature: open-board
+    given: a logged-in user who owns a board containing tasks
+    when: they open that board
+    then: the board-detail page loads and lists that board's tasks
+
+  - id: AC-9
+    feature: add-task
+    given: a logged-in user viewing one of their boards
+    when: they submit the add-task form with a title and a status of todo, doing, or done
+    then: a new task with that title and status is persisted and shown on the board-detail page
+
+  - id: AC-10
+    feature: change-task-status
+    given: a logged-in user viewing one of their boards that has an existing task
+    when: they use the task's status control to set a new status among todo, doing, done
+    then: the task's status is updated, persisted, and reflected on the board-detail page
+
+  - id: AC-11
+    feature: user-isolation
+    given: user B owns a board (and its tasks) and user A is logged in
+    when: user A attempts to view or act on user B's board or tasks
+    then: access is denied and none of user B's boards or tasks are exposed to user A
+
+  - id: AC-12
+    feature: durable-persistence
+    given: a logged-in user has created boards and tasks
+    when: the server is restarted and the user logs in again
+    then: their previously created boards and tasks are still present with the same data

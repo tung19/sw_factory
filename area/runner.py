@@ -5,6 +5,9 @@ nothing but AREA's own commands ever runs.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 import asyncio
 import os
 import sys
@@ -17,10 +20,10 @@ from area.net.protocol import (
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def handle_control(msg: dict) -> dict | None:
+def handle_control(msg: dict[str, Any]) -> dict[str, Any] | None:
     """Non-job control messages the runner answers locally from its OWN state:
     `chat` (routed through the governed, keyless chat box) and `apps` (the apps in
-    this runner's workspace). Returns a reply dict, or None if not a control msg."""
+    this runner's workspace). Returns a reply dict[str, Any], or None if not a control msg."""
     t = msg.get("type")
     if t == "chat":
         from area.web.chat import classify_intent, is_factory_question
@@ -59,8 +62,8 @@ def _area_cmd() -> list[str]:
     return [sys.executable, "-m", "area.cli"]
 
 
-def _env() -> dict:
-    e = dict(os.environ)
+def _env() -> dict[str, Any]:
+    e = dict[str, Any](os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     e["OPENHANDS_SUPPRESS_BANNER"] = "1"
     e["PYTHONUNBUFFERED"] = "1"
@@ -71,7 +74,7 @@ def _env() -> dict:
 _BACKEND_KINDS = {"run", "clone", "intake", "iterate"}
 
 
-def job_argv_for(kind: str, params: dict | None) -> list[str]:
+def job_argv_for(kind: str, params: dict[str, Any] | None) -> list[str]:
     """`area` args for a job, honoring AREA_RUNNER_BACKEND (headless/container
     runners set it to 'llm' with LLM_API_KEY+LLM_MODEL; the default keyless 'acp'
     needs a Claude Code login on the runner)."""
@@ -82,7 +85,7 @@ def job_argv_for(kind: str, params: dict | None) -> list[str]:
     return argv
 
 
-def _store_chunk(uploads: dict, msg: dict, *, max_chunks: int = 1024) -> None:
+def _store_chunk(uploads: dict[str, Any], msg: dict[str, Any], *, max_chunks: int = 1024) -> None:
     """Accumulate one base64 chunk of a requirement-doc upload, keyed by its uid.
     So an upload of ANY size crosses the relay as a sequence of small frames (each
     under the coordinator's per-frame cap) and is reassembled here."""
@@ -90,7 +93,7 @@ def _store_chunk(uploads: dict, msg: dict, *, max_chunks: int = 1024) -> None:
     if not uid:
         return
     try:
-        i, n = int(msg.get("i")), int(msg.get("n"))
+        i, n = int(msg.get("i") or 0), int(msg.get("n") or 0)
     except (TypeError, ValueError):
         return
     rec = uploads.setdefault(uid, {"name": str(msg.get("name") or "document"), "n": n, "parts": {}})
@@ -99,7 +102,7 @@ def _store_chunk(uploads: dict, msg: dict, *, max_chunks: int = 1024) -> None:
         rec["parts"][i] = str(msg.get("data") or "")
 
 
-def _decode_doc(p: dict, uploads: dict | None) -> tuple[str | None, bytes | None]:
+def _decode_doc(p: dict[str, Any], uploads: dict[str, Any] | None) -> tuple[str | None, bytes | None]:
     """Resolve an attached requirement doc to (name, bytes): either a chunked upload
     (doc_uid, reassembled from `uploads`) or a small inline base64 (doc_b64). Pops
     the doc keys from p. Returns (None, None) if absent/incomplete."""
@@ -121,16 +124,18 @@ def _decode_doc(p: dict, uploads: dict | None) -> tuple[str | None, bytes | None
     return None, None
 
 
-def fold_requirement_doc(params: dict | None, uploads: dict | None = None) -> tuple[dict, str | None]:
+def fold_requirement_doc(params: dict[str, Any] | None, uploads: dict[str, Any] | None = None) -> tuple[dict[str, Any], str | None]:
     """Fold an uploaded requirement doc (chunked upload or inline base64) into the
     run job's `requirement`, extracting text with the same parser the local
     dashboard uses. Returns (params, note_or_None); never raises."""
-    p = dict(params or {})
+    p = dict[str, Any](params or {})
     try:
         doc_name, raw = _decode_doc(p, uploads)
     except Exception as e:  # noqa: BLE001
         return p, f"doc parse warn: {e}"
-    if raw is None:
+    if raw is None or doc_name is None:
+        # _decode_doc only ever yields bytes together with a name; stating the
+        # invariant here is better than casting it away.
         return p, None
     from area.web.upload import parse_file
 
@@ -145,12 +150,12 @@ def fold_requirement_doc(params: dict | None, uploads: dict | None = None) -> tu
     return p, None
 
 
-async def _exec_job(ws, job: dict, uploads: dict | None = None) -> None:
+async def _exec_job(ws: Any, job: dict[str, Any], uploads: dict[str, Any] | None = None) -> None:
     jid = job["id"]
     params, note = fold_requirement_doc(job.get("params"), uploads)
     alive = True
 
-    async def tell(obj) -> None:
+    async def tell(obj: dict[str, Any]) -> None:
         """Stream a frame to the UI, but never let a dead socket kill the build: if
         the ws has dropped we stop sending and keep running."""
         nonlocal alive
@@ -183,7 +188,7 @@ async def _exec_job(ws, job: dict, uploads: dict | None = None) -> None:
     await tell(status_msg(jid, "done" if rc == 0 else "failed", rc))
 
 
-async def _keepalive(ws, interval: float = 25.0) -> None:
+async def _keepalive(ws: Any, interval: float = 25.0) -> None:
     """Send a tiny app-level ping periodically to keep an idle socket alive. The
     coordinator drops `ping` frames (never relays them). Exits quietly when the
     socket is gone (cancelled by the serve loop)."""
@@ -200,7 +205,7 @@ async def _serve_once(url: str, token: str | None) -> None:
     socket closes (raises on any connection problem so the caller can reconnect)."""
     import websockets
 
-    uploads: dict = {}  # in-flight requirement-doc uploads, reassembled by uid
+    uploads: dict[str, Any] = {}  # in-flight requirement-doc uploads, reassembled by uid
     # Lenient ping_timeout + an app-level keepalive keep the socket warm so an idle
     # connection isn't torn down ("no close frame") between jobs.
     async with websockets.connect(url, max_size=None, ping_interval=15, ping_timeout=30) as ws:
@@ -225,7 +230,9 @@ async def _serve_once(url: str, token: str | None) -> None:
 
 
 async def _run(coord_url: str, token: str | None, *,
-               max_attempts: int | None = None, _sleep=asyncio.sleep) -> None:
+               max_attempts: int | None = None,
+               _sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+               ) -> None:
     """Keep a runner connected. Reconnects with capped exponential backoff after a
     dropped/closed socket (e.g. a coordinator redeploy) — the UI already auto-
     reconnects, so now the data plane does too. max_attempts bounds the loop (for

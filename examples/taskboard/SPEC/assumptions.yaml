@@ -1,0 +1,54 @@
+assumptions:
+  - question: >
+      The app is called a "team task board" but the requirement demands strict per-user
+      isolation. Does "team" imply any sharing, collaboration, or inviting others?
+    assumption: >
+      No sharing or collaboration. "Team task board" is the product category/name only;
+      every board is private to its creator and there is no invite, membership, or
+      cross-user visibility of any kind.
+    material: true
+
+  - question: What identifier do users sign up and log in with — email or username?
+    assumption: Email address as the unique login identifier.
+    material: false
+
+  - question: Which fields/actions beyond those listed are in scope (rename/delete boards, edit/delete tasks, assign tasks to people, due dates)?
+    assumption: >
+      Out of scope. Only the listed actions exist: create board, view boards, open board,
+      add task (title + status), change task status. No rename, delete, assignment, or
+      due dates.
+    material: true
+
+  - question: Where and how is data persisted to survive a server restart?
+    assumption: >
+      A real on-disk database (e.g. SQLite/Postgres), not in-memory state. The specific
+      engine is an implementation detail; durability across restart is the requirement.
+    material: true
+
+  - question: How are passwords hashed?
+    assumption: A vetted adaptive password hash (e.g. bcrypt/scrypt/argon2) with per-user salt.
+    material: false
+
+  - question: How is a logged-in session maintained?
+    assumption: A signed, HTTP-only session cookie established on signup/login.
+    material: false
+
+  - question: When adding a task, is a status required or does it default?
+    assumption: >
+      The add-task form lets the user pick todo|doing|done and defaults to "todo" if none
+      is chosen.
+    material: false
+
+  - question: What happens when someone signs up with an email that already exists?
+    assumption: Signup is rejected with an error; emails are unique.
+    material: false
+
+  - question: Are there password strength or email-format rules, and is email verification required?
+    assumption: >
+      Minimal validation only (non-empty email in valid format, non-empty password with a
+      small minimum length); no email verification step.
+    material: false
+
+  - question: Can a user have multiple boards with the same name?
+    assumption: Yes; board names are not required to be unique per user.
+    material: false

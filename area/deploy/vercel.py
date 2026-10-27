@@ -34,7 +34,11 @@ _PG_URL_KEYS = ("POSTGRES_URL", "POSTGRES_URL_NON_POOLING", "POSTGRES_PRISMA_URL
 _KV_URL_KEYS = ("KV_REST_API_URL", "KV_URL", "REDIS_URL")
 
 
-def _env() -> dict:
+# Wall clock for one provider-CLI invocation.
+_CLI_TIMEOUT_S = 900.0
+
+
+def _env() -> dict[str, str]:
     e = dict(os.environ)
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
@@ -95,29 +99,42 @@ def needs_kv(app_dir: str | Path) -> bool:
     return bool(_KV_SIGNALS.search(_app_source_text(Path(app_dir))))
 
 
-def _vercel(app: Path, args: str):
+def _capped(cmd: list[str], *, cwd: Path, env: dict[str, str], what: str,
+            ) -> "subprocess.CompletedProcess[str]":
+    """Run a provider CLI with a wall clock, returning a FAILED CompletedProcess on
+    timeout instead of raising. Callers here only inspect returncode/stdout, so a
+    synthesised failure keeps every call site's contract intact while making a hung
+    CLI impossible."""
+    try:
+        return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
+                              env=env, timeout=_CLI_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            cmd, 124,
+            f"{what} TIMED OUT after {_CLI_TIMEOUT_S:.0f}s and was killed", "")
+
+
+def _vercel(app: Path, args: str) -> subprocess.CompletedProcess[str]:
     """Run `npx vercel <args>`. Auth comes from the VERCEL_TOKEN env var (the CLI
     reads it automatically; _env() propagates it) or a prior `vercel login` — never
     a `--token` CLI flag, which would leak the secret into the process table and
     any captured command output."""
-    return subprocess.run(
+    return _capped(
         ["bash", "-lc", f"npx -y vercel {args} 2>&1"],
-        cwd=str(app), capture_output=True, text=True, env=_env(),
-    )
+        cwd=app, env=_env(), what=f"vercel {args.split()[0] if args else ''}")
 
 
-def _vercel_env_add(app: Path, key: str, value: str, target: str = "production"):
+def _vercel_env_add(app: Path, key: str, value: str, target: str = "production") -> subprocess.CompletedProcess[str]:
     """Set a project env var on Vercel, feeding the VALUE through stdin (never the
     argv/`ps` — same discipline as the token). `vercel env add` reads the value
     from stdin when the input isn't a TTY. Idempotent-ish: a pre-existing key makes
     the CLI error, which the caller treats as non-fatal."""
     e = _env()
     e["AREA_ENV_VAL"] = value
-    return subprocess.run(
+    return _capped(
         ["bash", "-lc",
          f'printf %s "$AREA_ENV_VAL" | npx -y vercel env add {shlex.quote(key)} {shlex.quote(target)} 2>&1'],
-        cwd=str(app), capture_output=True, text=True, env=e,
-    )
+        cwd=app, env=e, what=f"vercel env add {key}")
 
 
 def _provided_pg_url() -> Optional[str]:
@@ -131,17 +148,25 @@ def _provided_pg_url() -> Optional[str]:
 
 
 def _apply_sql(app: Path, url: str, rel: str) -> bool:
-    """Apply one SQL file to the Postgres URL via psql. Idempotent iff the schema
-    uses IF NOT EXISTS. The URL is passed through env (never interpolated into the
-    shell) to survive the special chars in a connection string."""
+    """Apply one SQL file to the Postgres URL via psql, as ONE transaction
+    (`--single-transaction` + `ON_ERROR_STOP`), so a mid-file error rolls the whole
+    file back instead of committing a half-applied schema. The URL goes through env
+    (never interpolated into the shell) to survive a connection string's special
+    chars. Idempotent iff the schema uses IF NOT EXISTS — which keeps psql
+    error-free (returncode 0). A real error (including an "already exists" from a
+    NON-idempotent statement) now rolls back and is reported as FAILURE, rather
+    than being silently swallowed by an "already exists" substring check that let a
+    partial apply pass as success."""
     e = _env()
     e["AREA_PG_URL"] = url
-    p = subprocess.run(
-        ["bash", "-lc", f'psql "$AREA_PG_URL" -v ON_ERROR_STOP=1 -f {shlex.quote(rel)} 2>&1'],
-        cwd=str(app), capture_output=True, text=True, env=e,
-    )
-    out = (p.stdout + p.stderr).lower()
-    return p.returncode == 0 or "already exists" in out
+    # Capped: this applies a schema to PRODUCTION. A timeout leaves the single
+    # transaction to be rolled back by the server, so report failure.
+    p = _capped(
+        ["bash", "-lc",
+         f'psql "$AREA_PG_URL" --single-transaction -v ON_ERROR_STOP=1 '
+         f'-f {shlex.quote(rel)} 2>&1'],
+        cwd=app, env=e, what=f"psql -f {rel}")
+    return p.returncode == 0
 
 
 def provision_postgres(app_dir: str | Path) -> tuple[bool, str]:
@@ -228,7 +253,17 @@ def deploy(app_dir: str | Path) -> tuple[bool, str, Optional[str]]:
     """
     app = Path(app_dir)
     cmd = ["bash", "-lc", "npx -y vercel deploy --prod --yes 2>&1"]
-    proc = subprocess.run(cmd, cwd=str(app), capture_output=True, text=True, env=_env())
+    # Capped: a wrangler/vercel CLI waiting on a prompt or a stuck upload would
+    # otherwise hang the deploy indefinitely.
+    try:
+        proc = subprocess.run(cmd, cwd=str(app), capture_output=True, text=True,
+                              env=_env(), timeout=_CLI_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        # Report a stuck CLI as a failed deploy instead of letting the exception
+        # escape — the caller's contract is (ok, log, url).
+        return False, (f"vercel TIMED OUT after {_CLI_TIMEOUT_S:.0f}s and was killed "
+                       "— deploy not confirmed; check the Vercel dashboard before "
+                       "retrying."), None
     out = (proc.stdout + "\n" + proc.stderr).strip()
     m = _URL_RE.search(out)
     return proc.returncode == 0, out[-4000:], (m.group(0) if m else None)

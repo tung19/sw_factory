@@ -7,12 +7,13 @@ page), and the oracle runs `npx playwright test` until green.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import build_agent, command_verifier, run_until
-from area.pipeline import WORKSPACE
+from area.engine import Backend, VerifyResult, build_agent, command_verifier, run_until
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
+from area.verify._runners import assert_playwright_ran
+from area.verify.perf import _free_port
 
 E2E_DIR = "e2e"
 
@@ -20,7 +21,7 @@ E2E_DIR = "e2e"
 def e2e_verify(
     name: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> bool:
@@ -32,21 +33,41 @@ def e2e_verify(
         raise RuntimeError(f"no app at {app}")
     acc_yaml = acc_path.read_text() if acc_path.exists() else ""
 
+    # Pin a free port: the framework default (:3000) is often taken (a local
+    # Langfuse, another dev server), and reuseExistingServer:true would latch
+    # onto that FOREIGN server and silently test the wrong app. Bind our own.
+    port = _free_port()
+
     task = (
         "Add Playwright END-TO-END tests that drive the REAL UI of this app and "
         "assert EACH acceptance criterion below.\n"
         "- Install Playwright: `npm i -D @playwright/test` and "
         "`npx playwright install chromium`.\n"
-        "- Create playwright.config.ts with a `webServer` block that starts the "
-        "app (e.g. `npm run dev`) on a port and a matching `baseURL`; "
-        "`reuseExistingServer: true`.\n"
+        f"- IMPORTANT: port 3000 may be taken on this machine. Use port {port} "
+        f"for EVERYTHING. In playwright.config.ts set `use.baseURL = "
+        f"'http://localhost:{port}'` and a `webServer` block "
+        f"`{{ command: <dev command bound to port {port}>, "
+        f"url: 'http://localhost:{port}', reuseExistingServer: false, "
+        f"timeout: 120000 }}` — the dev command is framework-specific (Next: "
+        f"`npm run dev -- -p {port}`; Vite: `npm run dev -- --port {port}`). Do "
+        "NOT use port 3000 and do NOT set reuseExistingServer:true (it would "
+        "reuse a foreign server already on that port).\n"
         f"- One spec per AC under {E2E_DIR}/ . Interact THROUGH the UI (goto, "
         "fill, click, expect visible text) — do NOT import internal modules.\n"
         "- Make `npx playwright test` pass. Run it yourself and fix the APP and "
         "tests until green.\n\n"
         f"=== acceptance.yaml ===\n{acc_yaml}"
     )
-    oracle = command_verifier(["bash", "-lc", "npx playwright test 2>&1"], cwd=app)
+    base = command_verifier(["bash", "-lc", "npx playwright test 2>&1"], cwd=app)
+
+    def oracle() -> VerifyResult:
+        r = base()
+        if r.ok:
+            ran, why = assert_playwright_ran(r.feedback)
+            if not ran:
+                return VerifyResult(False, f"e2e exit was green but {why} — the "
+                                    "E2E specs must actually run.\n\n" + r.feedback[-2500:])
+        return r
 
     agent = build_agent(backend, model=model)
     try:

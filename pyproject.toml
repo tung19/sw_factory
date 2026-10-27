@@ -4,9 +4,11 @@ version = "0.0.0"
 description = "AREA — internal AI software factory (OpenHands SDK execution core)"
 readme = "README.md"
 requires-python = ">=3.12"
-# Engine deps are installed + pinned during Phase 0 (see requirements.lock / README).
-# OpenHands SDK releases weekly with breaking changes, so we PIN exact versions
-# and keep all engine calls behind area/engine (adapter) to contain churn.
+# Engine (OpenHands SDK) is VENDORED in-tree via git subtree under
+# vendor/software-agent-sdk (MIT) — AREA owns + can modify it, and `git subtree pull`
+# brings upstream fixes. [tool.uv.sources] below points these at the in-tree copy;
+# the pip path (scripts/install.sh, CI) installs them editable from vendor/.
+# All engine calls stay behind area/engine (adapter) to contain churn.
 dependencies = [
     "openhands-sdk==1.55.1",
     "openhands-tools==1.55.1",
@@ -28,10 +30,49 @@ area = "area.cli:main"
 # Reproducibility guard: don't resolve to packages newer than this when locking.
 # exclude-newer = "2026-10-17"
 
+[tool.uv.sources]
+# The engine is vendored in-tree (git subtree: vendor/software-agent-sdk). uv
+# installs these two from the in-tree copy (editable) instead of PyPI, so edits
+# to the vendored SDK take effect immediately. `git subtree pull` updates it.
+openhands-sdk = { path = "vendor/software-agent-sdk/openhands-sdk", editable = true }
+openhands-tools = { path = "vendor/software-agent-sdk/openhands-tools", editable = true }
+
 [tool.pytest.ini_options]
 # AREA's own (dogfood) test suite. Pure orchestrator logic — no live agents.
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+# Lint the factory source + tests only — not the vendored SDK, the generated
+# workspace, or the (TypeScript) example apps.
+extend-exclude = ["vendor", "workspace", "examples"]
+line-length = 100
+
+[tool.ruff.lint]
+# Bug-focused rules: pyflakes (F — unused imports/vars, undefined names) + syntax
+# (E9). Deliberately NOT the full style suite yet; tighten over time.
+select = ["F", "E9"]
+
+[tool.mypy]
+# FULL type-checking: the entire `area` package is clean, so CI checks all of it
+# (bare `mypy` reads this `files`). A new module with a type error now fails CI —
+# that is the point. Started phased (a curated clean subset) and grew the set PR by
+# PR (9 → 18 → 25 → 26 → full) until the whole package passed; `["area"]` keeps it
+# from regressing and auto-covers new modules. vendor/workspace/examples stay out.
+python_version = "3.12"
+ignore_missing_imports = true
+files = ["area"]
+
+# FULL strict (the end state of the mypy ratchet). `strict = true` turns on the
+# whole bundle — disallow_untyped_defs/-incomplete_defs, check_untyped_defs,
+# disallow_untyped_calls/-decorators, no_implicit_optional, disallow_any_generics
+# (bare `dict`/`list` must carry params), no_implicit_reexport (a re-exported name
+# needs `X as X` or `__all__`), strict_equality, warn_return_any/-redundant_casts/
+# -unused_ignores, extra_checks — so NEW untyped code, implicit `Any`, or bare
+# generics can't creep back in. `ignore_missing_imports` stays (the vendored
+# OpenHands SDK + a few deps ship no stubs). Journey: coverage 9→full, then
+# strictness no-untyped-def family → full strict.
+strict = true
 
 [build-system]
 requires = ["hatchling"]

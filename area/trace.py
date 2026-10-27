@@ -16,18 +16,18 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
-_sink = None          # active sink (a _LangfuseSink, a test fake, or None)
+_sink: Any = None          # active sink (a _LangfuseSink, a test fake, or None)
 _resolved = False     # have we tried to build the default sink yet?
-_current = None       # the trace for the pipeline currently running
+_current: Any = None       # the trace for the pipeline currently running
 
 
 class _LangfuseSink:
-    def __init__(self, client) -> None:
+    def __init__(self, client: Any) -> None:
         self._c = client
 
-    def trace(self, **kw):
+    def trace(self, **kw: Any) -> Any:
         return self._c.trace(**kw)
 
     def flush(self) -> None:
@@ -37,7 +37,7 @@ class _LangfuseSink:
             pass
 
 
-def set_sink(sink) -> None:
+def set_sink(sink: Any) -> None:
     """Inject a sink (tests) or force-disable with None. Marks resolution done."""
     global _sink, _resolved, _current
     _sink = sink
@@ -45,7 +45,7 @@ def set_sink(sink) -> None:
     _current = None
 
 
-def _default_sink():
+def _default_sink() -> Optional["_LangfuseSink"]:
     pk, sk = os.getenv("LANGFUSE_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY")
     if not (pk and sk):
         return None
@@ -59,7 +59,7 @@ def _default_sink():
         return None
 
 
-def _get_sink():
+def _get_sink() -> Any:
     global _sink, _resolved
     if not _resolved:
         _sink = _default_sink()
@@ -75,7 +75,7 @@ def _dt(ts: float) -> datetime:
     return datetime.fromtimestamp(ts, timezone.utc)
 
 
-def start_pipeline(name: str, kind: str, inputs: Optional[dict] = None) -> None:
+def start_pipeline(name: str, kind: str, inputs: Optional[dict[str, Any]] = None) -> None:
     """Open a trace for a pipeline run and print its Langfuse URL (if any)."""
     global _current
     sink = _get_sink()
@@ -109,7 +109,7 @@ def log_span(
     cost: Optional[float] = None,
     passed: Optional[bool] = None,
     backend: Optional[str] = None,
-    metadata: Optional[dict] = None,
+    metadata: Optional[dict[str, Any]] = None,
 ) -> None:
     """Record one agent run as a span under the current pipeline trace."""
     import time as _t
@@ -131,7 +131,7 @@ def log_span(
         pass
 
 
-def end_pipeline(passed: Optional[bool] = None, output: Optional[dict] = None) -> None:
+def end_pipeline(passed: Optional[bool] = None, output: Optional[dict[str, Any]] = None) -> None:
     """Close + flush the current pipeline trace."""
     global _current
     if _current is not None:

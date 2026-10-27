@@ -1,62 +1,99 @@
-# AREA
+# AREA — autonomous software factory
 
-Internal AI software factory. Two entry flows, one shared pipeline:
+Give it a requirement in plain language; it produces a **working, gated,
+optionally-deployed app** — and it proves the work with an independent, locked
+acceptance oracle, not a vague "looks done". Runs **local-first**: on your machine,
+with your Claude and your Cloudflare/Vercel. Nothing leaves your box.
 
-- **Flow A — Requirement:** natural-language requirement → spec → develop → self-correcting loop → deploy.
-- **Flow B — Clone:** a sample app → reverse-engineer (2 tiers) → spec → same pipeline.
-
-**Execution core:** [OpenHands `software-agent-sdk`](https://github.com/OpenHands/software-agent-sdk) (pinned, wrapped by `area/engine`).
-Full design + rationale (and why not MetaGPT / Specora / REA-as-core): see [PLAN.md](PLAN.md).
-
-## Quickstart (local-first)
-
-AREA runs on **your** machine with **your** accounts — your Claude, your
-Cloudflare/Vercel. Nothing (code, credentials) leaves your machine. See
-[docs/adr/0001](docs/adr/0001-local-first-byo-everything.md) for why.
-
-```bash
-git clone <this repo> && cd SW_Factory
-bash scripts/install.sh      # venv + install + environment check
-area doctor                  # re-check anytime (Python/Node/git/Claude/deploy)
-area gui                     # dashboard at http://127.0.0.1:8787 (auto-opens)
+```
+requirement → spec → LOCKED independent oracle → build-to-green → 9 gates → provenance → deploy
 ```
 
-Then: log in to **your** Claude (Claude Code keyless, or `export ANTHROPIC_API_KEY=…`),
-and — when you deploy — **your** Cloudflare/Vercel. Export a finished app as its
-own repo with `area export <app> --repo <your-url> --push`.
+---
 
-## Phase 0 — setup
-
-Prereqs installed so far: `uv`, project skeleton, pinned engine deps.
+## See it work in 3 minutes — no Claude key, no cost
 
 ```bash
-# 1. Create the Python 3.12 virtualenv (OpenHands requires >=3.12)
-uv venv --python 3.12
-
-# 2. Install engine deps (pinned — see requirements.lock)
-uv pip install -r requirements.lock
-
-# 3. Configure an LLM key
-cp config/llm.example.env config/llm.env   # then edit config/llm.env
-
-# 4. Smoke-test the engine (needs an LLM key; Docker only for sandboxed runtimes)
-set -a && source config/llm.env && set +a
-uv run python scripts/01_hello_world.py
+git clone https://github.com/tung19/sw_factory && cd sw_factory
+make setup          # or: bash scripts/install.sh
+area demo taskboard # install → build → serve → opens your browser
 ```
 
-## Reverse-engineering tiers (Flow B)
+`taskboard` is a **real app the factory built** (multi-page, signup/login with
+hashed passwords, per-user isolation, durable sqlite). It's committed under
+[`examples/taskboard/`](examples/taskboard/) with its **spec, the independent
+locked oracle, and the gate evidence** (18/18 holdout, 0 vulns, e2e on a real
+browser, ~505 req/s). Read its [README](examples/taskboard/README.md) to see the
+oracle-loop end to end.
 
-- **Tier 1 (default, low risk):** OpenHands' built-in browser + repomix + grep. No REA.
-- **Tier 2 (opt-in, authorized targets only):** REA MCP server, declared in `.mcp.json`.
-  **Pin `rea-agents` to an exact version before real use** — it ships breaking changes
-  across minor versions. Only point it at software you are authorized to analyze.
+## Build your own app (the golden path)
+
+This is the one pipeline everything serves:
+
+```bash
+area doctor                                   # check your setup once
+area run "a todo app: add/list/complete/delete tasks, filter by status, persist" \
+         --name todo --target plain --tdd     # lock an independent oracle, build to green
+# add gates:  --audit --e2e --chaos --all     # (e2e is forced before deploying an auth app)
+# deploy:     area deploy todo                 # to YOUR Cloudflare/Vercel (needs your token)
+area trace todo                               # the end-to-end audit trail
+```
+
+`--tdd` authors the acceptance tests **first** (by a separate agent, from the spec
+only), **checksum-locks** them, then builds app code until that frozen suite
+passes. The builder can never edit the oracle — so "green" means the independent
+tests actually passed. See **[ADR-0003](docs/adr/0003-oracle-loop-independence.md)**.
+
+## Setup & requirements
+
+- **Python ≥ 3.12**, **Node**, **git** — and **Claude** (Claude Code keyless, or
+  `export ANTHROPIC_API_KEY=…`). Cloudflare/Vercel only when you deploy.
+- `make setup` creates the venv (via `uv`), installs the in-tree engine, and runs
+  `area doctor`. `area doctor` re-checks anytime.
+- **Keep generated apps out of the repo:** `export AREA_WORKSPACE=~/area-generated`
+  (apps/specs then live there instead of in the checkout).
+
+## Why local-first
+
+AREA runs on **your** machine with **your** accounts; there is no central service
+holding anyone's code or secrets. Deploys go to your infra and require an explicit
+gate. See [ADR-0001](docs/adr/0001-local-first-byo-everything.md) and
+[SECURITY.md](SECURITY.md).
+
+## Beyond the golden path (advanced / optional)
+
+- **Dashboard:** `area gui` — a web UI for the same pipeline (upload a doc, watch
+  the stages, iterate, see metrics).
+- **Flow B — Clone:** `area clone <url|repo|path>` — reverse-engineer a reference
+  app → spec → behavioral-parity build. RE Tier-1 is built-in; **Tier-2 (`--rea`)**
+  is opt-in, pinned, and only for software you're authorized to analyze.
+- **Flow B+ — Adapt:** `area adapt <reference> "<requirement>"` — research comparable
+  projects + the reference, then build a **requirement-anchored** spec (the
+  requirement wins on conflict) with a one-shot clarify. Opt-in `--seed` copies data
+  from the reference (only with `--seed-attest`). See
+  **[docs/features/area-adapt.md](docs/features/area-adapt.md)**.
+- **Intake / Inception:** `area intake <ai-dlc-artifacts>` and `area inception
+  "<req>"` — a governed front-end that shapes the oracle before building.
+- **Iterate:** `area iterate <app> "<change>"` — fold a change into the spec,
+  re-lock the oracle, rebuild.
+
+## Docs
+
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the system map (spine, pipeline, the 9 gates, modules). *Start here to understand the code.*
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — setup, tests, how to add a gate/backend.
+- **[docs/CASE-STUDY.md](docs/CASE-STUDY.md)** — building `taskboard` from one sentence, with the real artifacts. *Proof it works.*
+- **[CLAUDE.md](CLAUDE.md)** — the rules the build agent follows. **[SECURITY.md](SECURITY.md)** · **[CHANGELOG.md](CHANGELOG.md)**.
+- **[docs/secure-factory-gap-assessment.md](docs/secure-factory-gap-assessment.md)** — AREA measured against the *Secure Software Factory* reference architecture: what it enforces, what it does not, and the prioritized backlog. *Read before adding autonomy.*
+- **[docs/UPGRADE-PLAN.md](docs/UPGRADE-PLAN.md)** · **[PLAN.md](PLAN.md)** — roadmap & status.
 
 ## Layout
 
 ```
-area/        orchestrator (intake, re, spec, engine, verify, deploy, memory)
-workspace/   generated apps land here
-config/      llm.env (gitignored) + examples
-scripts/     runnable smoke tests / demos
-PLAN.md      architecture plan (audited)
+area/        the factory: intake · re · research/adapt/seed (Flow B+) · spec · engine (seam to the SDK) · verify (9 gates) · deploy · inception · web (dashboard)
+examples/    REAL apps the factory built (committed: source + spec + locked oracle + evidence)
+profiles/    one versioned artifact per agent kind — what `area evals` grades
+tools/       deterministic shell gates (lock/verify-holdout, verify-factory-intact, gate, provenance)
+docs/        ARCHITECTURE, ADRs, UPGRADE-PLAN
+vendor/      the engine (OpenHands SDK), vendored in-tree
+workspace/   default output (apps/<name> + specs/<name>) — override with AREA_WORKSPACE
 ```

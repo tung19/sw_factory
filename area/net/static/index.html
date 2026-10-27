@@ -278,7 +278,14 @@ function sendJob(){if(!RUNNER){stat('Cần runner để chạy lệnh này.',tru
   const k=$('kind').value,name=$('advName').value.trim(),v=$('advBig').value.trim(),p={};
   if(k==='iterate'){p.name=name;p.instruction=v;}
   else if(k==='clone'){p.source=v;p.name=name||'clone';}
-  else if(k==='deploy'){p.name=name;}
+  else if(k==='deploy'){p.name=name;
+    // A relayed deploy runs unattended on the runner, so it can never show the
+    // interactive PRODUCTION gate. Take the approval HERE and send it; the runner
+    // refuses a deploy job without confirm:true (area/net/protocol.py).
+    if(!confirm('Sẽ DEPLOY LÊN PRODUCTION trên hạ tầng của runner, không hỏi lại.\n\n'
+      +'Nếu app dùng database, bước đó sẽ TẠO + MIGRATE database production.\n\nTiếp tục?')){
+      stat('Đã hủy deploy.',true);return;}
+    p.confirm=true;}
   else if(k==='export'){p.name=name;if(v){p.repo=v;p.push=true;}}
   const id=rid();activeJob=id;logBuf='';renderLog();renderPipe();
   send({type:'job',id,kind:k,params:p});}

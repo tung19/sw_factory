@@ -8,12 +8,12 @@ app (not just happy-path tests).
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import build_agent, command_verifier, run_until
-from area.pipeline import WORKSPACE
+from area.engine import Backend, VerifyResult, build_agent, command_verifier, run_until
+from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
+from area.verify._runners import assert_vitest_ran
 
 CHAOS_DIR = "__tests__/_chaos"
 
@@ -21,7 +21,7 @@ CHAOS_DIR = "__tests__/_chaos"
 def chaos_verify(
     name: str,
     *,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> bool:
@@ -51,9 +51,19 @@ def chaos_verify(
 
     task = as_prompt(recall(tags=["chaos", "build"], text=name)) + task
 
-    oracle = command_verifier(
+    base = command_verifier(
         ["bash", "-lc", f"npx vitest run {CHAOS_DIR} 2>&1"], cwd=app
     )
+
+    def oracle() -> VerifyResult:
+        r = base()
+        if r.ok:
+            ran, why = assert_vitest_ran(r.feedback, 1)
+            if not ran:
+                return VerifyResult(False, f"chaos exit was green but {why} — the "
+                                    "chaos suite must actually run.\n\n" + r.feedback[-2500:])
+        return r
+
     agent = build_agent(backend, model=model)
     try:
         passed, _ = run_until(

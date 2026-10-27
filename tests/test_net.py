@@ -33,12 +33,33 @@ def test_job_argv_kinds():
     a = P.job_argv("run", {"requirement": "todo app", "name": "t", "tdd": True})
     assert a[:2] == ["run", "todo app"] and "--name" in a and "--tdd" in a
     assert "--deploy" not in a  # deploy is opt-in
-    d = P.job_argv("run", {"requirement": "x", "deploy": True})
-    assert "--deploy" in d and "--yes" in d  # build → gates → deploy, headless
+    d = P.job_argv("run", {"requirement": "x", "deploy": True, "confirm": True})
+    assert "--deploy" in d and "--yes" in d  # build → gates → approved deploy
     assert P.job_argv("iterate", {"name": "t", "instruction": "add X"}) == ["iterate", "t", "add X"]
-    assert P.job_argv("deploy", {"name": "t"}) == ["deploy", "t", "--yes"]
+    assert P.job_argv("deploy", {"name": "t", "confirm": True}) == ["deploy", "t", "--yes"]
     e = P.job_argv("export", {"name": "t", "repo": "u", "push": True})
     assert e == ["export", "t", "--repo", "u", "--push"]
+
+
+def test_deploy_over_the_wire_needs_explicit_approval():
+    """A relayed job cannot show the interactive PRODUCTION gate, so the approval has
+    to be IN the request. `job_argv` used to emit `--yes` unconditionally, which
+    re-opened the fail-open that `area/web/jobs.py` closes for the local dashboard:
+    a coordinator could deploy to the runner's infra with no human in the loop.
+    Absent `confirm`, both deploy-bearing shapes must REFUSE, not approve."""
+    for kind, params in (("deploy", {"name": "t"}),
+                         ("run", {"requirement": "x", "deploy": True})):
+        with pytest.raises(ValueError, match="explicit approval"):
+            P.job_argv(kind, params)
+        # a falsy confirm is not an approval either
+        with pytest.raises(ValueError, match="explicit approval"):
+            P.job_argv(kind, {**params, "confirm": False})
+    # ... and the runner's wrapper inherits the refusal (it must not add --yes back)
+    import area.runner as R
+
+    with pytest.raises(ValueError):
+        R.job_argv_for("deploy", {"name": "t"})
+    assert "--yes" in R.job_argv_for("deploy", {"name": "t", "confirm": True})
 
 
 def test_job_argv_unknown_raises():
@@ -148,7 +169,7 @@ def test_runner_job_argv_backend_passthrough(monkeypatch):
     assert a[a.index("--backend") + 1] == "llm"
     # kinds without --backend aren't touched
     assert "--backend" not in R.job_argv_for("doctor", {})
-    assert "--backend" not in R.job_argv_for("deploy", {"name": "t"})
+    assert "--backend" not in R.job_argv_for("deploy", {"name": "t", "confirm": True})
 
 
 def test_exec_job_survives_dead_ws_and_drains(monkeypatch):

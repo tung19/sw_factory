@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
-MEM = _ROOT / "workspace" / ".area" / "memory.jsonl"
+from area.paths import WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware single source)
+
+MEM = WORKSPACE / ".area" / "memory.jsonl"
 
 _SEED = [
     {
@@ -28,7 +28,7 @@ _SEED = [
 ]
 
 
-def _load() -> list[dict]:
+def _load() -> list[dict[str, Any]]:
     out = []
     if MEM.exists():
         for line in MEM.read_text(errors="ignore").splitlines():
@@ -47,14 +47,14 @@ def _ensure_seed() -> None:
                 f.write(json.dumps({**s, "ts": time.time()}) + "\n")
 
 
-def lessons() -> list[dict]:
+def lessons() -> list[dict[str, Any]]:
     _ensure_seed()
     return _load()
 
 
 def remember(symptom: str, fix: str = "", tags: Iterable[str] = ()) -> None:
     _ensure_seed()
-    rec = {
+    rec: dict[str, Any] = {
         "ts": time.time(),
         "tags": [t for t in tags if t],
         "symptom": symptom.strip()[:500],
@@ -72,7 +72,7 @@ def remember(symptom: str, fix: str = "", tags: Iterable[str] = ()) -> None:
         pass
 
 
-def recall(tags: Iterable[str] = (), text: str = "", limit: int = 5) -> list[dict]:
+def recall(tags: Iterable[str] = (), text: str = "", limit: int = 5) -> list[dict[str, Any]]:
     _ensure_seed()
     tagset = {t.lower() for t in tags}
     words = {w for w in text.lower().split() if len(w) > 3}
@@ -88,7 +88,7 @@ def recall(tags: Iterable[str] = (), text: str = "", limit: int = 5) -> list[dic
     return [e for _, _, e in scored[:limit]]
 
 
-def as_prompt(lessons_: list[dict]) -> str:
+def as_prompt(lessons_: list[dict[str, Any]]) -> str:
     if not lessons_:
         return ""
     lines = ["=== Known pitfalls from past runs (avoid these) ==="]

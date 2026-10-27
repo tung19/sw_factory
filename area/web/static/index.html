@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="referrer" content="no-referrer"/>
 <title>AREA — AI Software Factory</title>
 <style>
   :root{
@@ -160,6 +161,7 @@
         <button id="tabIntake" onclick="setTab('intake')">Intake (tài liệu)</button>
         <button id="tabClone" onclick="setTab('clone')">Clone</button>
         <button id="tabIterate" onclick="setTab('iterate')">Iterate (ra lệnh)</button>
+        <button id="tabInception" onclick="setTab('inception')">Inception</button>
       </div>
 
       <div id="paneRun">
@@ -199,6 +201,18 @@
         <label>Ra lệnh cho AREA (yêu cầu thay đổi, bằng lời)</label>
         <textarea id="iterInstruction" placeholder="VD: thêm nút xoá note · đổi sang dark mode · signup phải chặn username trùng…"></textarea>
         <p class="meta" style="margin:6px 0 0">Lệnh được gộp vào <b>spec</b> rồi <b>khóa lại test (oracle)</b> và build — không đưa thẳng cho agent. Target tự nhận theo app. Tên ở dưới bị bỏ qua.</p>
+      </div>
+
+      <div id="paneInception" style="display:none">
+        <label>Mô tả phần mềm (AI-DLC Inception)</label>
+        <textarea id="incReq" placeholder="VD: form phản hồi: khách gửi tên + lời nhắn; ai cũng xem được danh sách theo thứ tự mới nhất…"></textarea>
+        <div class="row">
+          <div><label>Tên sản phẩm</label><input id="incName" placeholder="myapp"/></div>
+          <div><label>Target (cho bước build)</label><select id="incTarget"><option>cloudflare</option><option>vercel</option><option>plain</option></select></div>
+        </div>
+        <p class="meta" style="margin:6px 0 0">AI đề xuất từng <b>bolt</b> (intent → user stories → Units of Work → <b>Testing Posture</b>). Xong, bạn <b>duyệt/sửa</b> artifact — nhất là Testing Posture (= oracle) — rồi mới build.</p>
+        <button class="go" id="incBtn" onclick="startInception()">Chạy Inception</button>
+        <div id="incReview"></div>
       </div>
 
       <div id="sharedControls">
@@ -275,6 +289,11 @@
     <h2>Apps &amp; Export <button class="btn" style="float:right;padding:2px 7px" onclick="refreshApps()">↻</button></h2>
     <div class="applist" id="appsList"><div class="empty">chưa có app</div></div>
   </div>
+
+  <div class="sidepanel card">
+    <h2>Metrics — chi phí &amp; độ tất định <button class="btn" style="float:right;padding:2px 7px" onclick="refreshMetrics()">↻</button></h2>
+    <div id="metricsBox"><div class="empty">chưa có dữ liệu run</div></div>
+  </div>
 </div>
 </div>
 
@@ -296,16 +315,25 @@ const GUI_TOKEN=new URLSearchParams(location.search).get('token');
 if(GUI_TOKEN){
   const _fetch=window.fetch;
   window.fetch=(u,o)=>{o=o||{};o.headers=Object.assign({},o.headers,{'Authorization':'Bearer '+GUI_TOKEN});return _fetch(u,o);};
+  // Strip the token from the visible URL + history so it can't leak via history,
+  // Referer, or a shared screenshot. The cookie (set by the first ?token= load)
+  // carries same-origin auth; GUI_TOKEN stays in memory for Bearer/SSE. Other
+  // query params (e.g. ?job=) are preserved.
+  try{const u=new URL(location.href);u.searchParams.delete('token');
+    history.replaceState({}, '', u.pathname+(u.search||'')+u.hash);}catch(_){ }
 }
 // EventSource can't set headers, so pass the token as a query param for SSE.
 function sse(url){return new EventSource(GUI_TOKEN?url+(url.includes('?')?'&':'?')+'token='+encodeURIComponent(GUI_TOKEN):url);}
 
 function setTab(t){
   tab=t;
-  ['run','intake','clone','iterate'].forEach(k=>{
+  ['run','intake','clone','iterate','inception'].forEach(k=>{
     $('tab'+k[0].toUpperCase()+k.slice(1)).classList.toggle('active',k===t);
     $('pane'+k[0].toUpperCase()+k.slice(1)).style.display=k===t?'':'none';
   });
+  // Inception is a self-contained flow (its own controls) — it doesn't use the
+  // shared gate/deploy controls or the main build button.
+  $('sharedControls').style.display = t==='inception'?'none':'';
   $('goBtn').textContent = t==='clone'?'Bắt đầu clone'
     :(t==='intake'?'Ingest & build':(t==='iterate'?'Ra lệnh & rebuild':'Bắt đầu build'));
 }
@@ -365,6 +393,15 @@ wireDrop('dropIntake','fileIntake','intake');
 
 function gates(){
   const p={tdd:$('tdd').checked, deploy:$('deploy').checked};
+  // Ticking "deploy" means a PRODUCTION deploy will run unattended at the end of the
+  // build, so take the approval here and send it (confirm:true). The server refuses a
+  // deploy job without it rather than assuming --yes. See area/web/jobs.py.
+  if(p.deploy){
+    if(!confirm('Build xong sẽ DEPLOY LÊN PRODUCTION ngay, không hỏi lại.\n\n'
+      +'Nếu app dùng database, bước đó sẽ TẠO + MIGRATE database production.\n\nTiếp tục?')){
+      p.deploy=false; $('deploy').checked=false;
+    } else { p.confirm=true; }
+  }
   if($('clarify').checked) p.clarify=true;
   const exp=$('expected').value.trim(); if(exp) p.expected=exp;
   if($('gateAll').checked) p.all=true;
@@ -418,11 +455,55 @@ async function startJob(){
   }finally{$('goBtn').disabled=false;}
 }
 
+// ---- Inception (AI-DLC front-end): run bolts → review/edit artifacts → build ----
+async function startInception(){
+  const name=$('incName').value.trim(), req=$('incReq').value.trim();
+  if(!name){alert('Cần nhập Tên sản phẩm');return;}
+  if(!req){alert('Cần nhập Requirement');return;}
+  $('incBtn').disabled=true;
+  try{
+    const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({kind:'inception',params:{name,requirement:req,target:$('incTarget').value}})});
+    const j=await r.json();
+    if(j.id){$('incReview').innerHTML='<p class="meta">Đang chạy các bolt… xem tiến trình bên phải; xong sẽ hiện artifact để duyệt.</p>';openLog(j.id);refreshJobs();}
+    else alert(j.error||'thất bại');
+  }finally{$('incBtn').disabled=false;}
+}
+
+async function loadInception(name,target){
+  const d=await (await fetch('/api/apps/'+name+'/inception')).json();
+  const files=d.files||{}, box=$('incReview');
+  if(!Object.keys(files).length){box.innerHTML='<p class="meta">Không thấy artifact — xem log bên phải.</p>';return;}
+  setTab('inception');
+  let html='<p class="meta" style="margin:10px 0 4px"><b>Duyệt & sửa artifact</b> trước khi build — Testing Posture là <b>oracle</b>:</p>';
+  Object.keys(files).sort().forEach(fn=>{
+    html+=`<label>${esc(fn)}</label><textarea class="incEdit" data-fn="${esc(fn)}" style="min-height:120px;font-family:ui-monospace,monospace">${esc(files[fn])}</textarea>`;
+  });
+  html+=`<button class="go" style="margin-top:8px" onclick="saveAndBuild('${esc(name)}','${esc(target||'cloudflare')}')">Lưu &amp; build (TDD)</button>`;
+  box.innerHTML=html;
+}
+
+async function saveAndBuild(name,target){
+  const files={};document.querySelectorAll('#incReview .incEdit').forEach(t=>files[t.dataset.fn]=t.value);
+  const s=await (await fetch('/api/inception/save',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({name,files})})).json();
+  if(s.error){alert('Lưu lỗi: '+s.error);return;}
+  if(s.warnings&&s.warnings.length&&!confirm('Cảnh báo contract:\n- '+s.warnings.join('\n- ')+'\n\nVẫn build?'))return;
+  const j=await (await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({kind:'intake',params:{name,artifacts:s.dir,target,tdd:true,audit:true,e2e:true,chaos:true}})})).json();
+  if(j.id){openLog(j.id);refreshJobs();} else alert(j.error||'build thất bại');
+}
+
 async function deployApp(name){
-  if(!confirm('Deploy "'+name+'" lên Cloudflare production?'))return;
+  // This answer IS the production approval, so it has to travel to the server
+  // (confirm:true). The provider is auto-detected, so don't claim "Cloudflare".
+  if(!confirm('Deploy "'+name+'" lên PRODUCTION?\n\n'
+    +'Nếu app dùng database, bước này sẽ TẠO + MIGRATE database production.'))return;
   const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({kind:'deploy',params:{name}})});
-  const j=await r.json(); if(j.id){openLog(j.id);refreshJobs();}
+    body:JSON.stringify({kind:'deploy',params:{name,confirm:true}})});
+  const j=await r.json();
+  if(j.id){openLog(j.id);refreshJobs();}
+  else if(j.error){alert('Deploy bị từ chối: '+j.error);}
 }
 
 // ---- pipeline visualization (parsed live from the streamed [area] markers) ----
@@ -515,8 +596,11 @@ function openLog(jid){
     const tm=logBuf.match(/\[area\] trace : (\S+)/);
     if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}
     renderPipe();};
-  es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();
-    try{const j=JSON.parse(e.data);if(j.url){logBuf+='\n🌐 '+j.url+'\n';$('log').textContent=logBuf;showPreview(j.url);}}catch(_){ }
+  es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();refreshMetrics();
+    try{const j=JSON.parse(e.data);
+      if(j.url){logBuf+='\n🌐 '+j.url+'\n';$('log').textContent=logBuf;showPreview(j.url);}
+      if(j.kind==='inception'&&j.name&&j.exit===0){loadInception(j.name,(j.params&&j.params.target)||'cloudflare');}
+    }catch(_){ }
     renderPipe();});
   es.onerror=()=>{es.close();};
 }
@@ -546,9 +630,21 @@ function renderJobs(jobs){
     d.innerHTML=`<span class="dot ${j.status}"></span>
       <span class="grow"><b>${j.kind}</b> · ${esc(j.name||'')}<span class="meta">${flags} ${fmtTime(j.started)}</span></span>
       ${j.url?`<a href="${j.url}" target="_blank" onclick="event.stopPropagation()">open ↗</a>`:''}
+      ${j.status==='running'?`<button class="mini" title="dừng job + mọi process con"
+        onclick="event.stopPropagation();cancelJob('${j.id}')">stop</button>`:''}
       <span class="badge">${j.status}</span>`;
     box.appendChild(d);
   });
+}
+
+// The kill switch. A build that thrashes costs real money and the cost gate only
+// measures AFTER the fact, so stopping one has to be possible from here.
+async function cancelJob(jid){
+  if(!confirm('Dừng job này? Toàn bộ process con (npm/node/playwright) sẽ bị kill.'))return;
+  const r=await fetch('/api/jobs/'+jid,{method:'DELETE'});
+  const j=await r.json();
+  if(!r.ok) alert('Không dừng được: '+(j.error||r.status));
+  refreshJobs();
 }
 async function refreshJobs(){const r=await fetch('/api/jobs');renderJobs(await r.json());}
 
@@ -569,11 +665,28 @@ async function refreshApps(){
       d.innerHTML=`<span class="grow"><b>${esc(a.name)}</b>${a.url?` <a href="${a.url}" target="_blank" onclick="event.stopPropagation()">↗</a>`:''}</span>`;
       const mk=(txt,fn,cls)=>{const b=document.createElement('button');b.className='mini'+(cls?' '+cls:'');b.textContent=txt;b.onclick=fn;return b;};
       d.appendChild(mk('spec',()=>viewSpec(a.name)));
+      d.appendChild(mk('trace',()=>viewTrace(a.name)));
       d.appendChild(mk('export',()=>exportApp(a.name),'exp'));
       if(a.built) d.appendChild(mk('deploy',()=>deployApp(a.name)));
       box.appendChild(d);
     });
   }
+}
+
+async function refreshMetrics(){
+  const box=$('metricsBox'); if(!box)return;
+  let s; try{ s=await (await fetch('/api/metrics')).json(); }catch(e){ return; }
+  if(!s||!s.runs){box.innerHTML='<div class="empty">chưa có dữ liệu run</div>';return;}
+  const pct=x=>x==null?'–':Math.round(x*100)+'%';
+  const det = s.first_try_rate!=null
+    ? `<div class="approw"><span class="grow">first-try <b>${pct(s.first_try_rate)}</b> · retry ${pct(s.retry_rate)} · avg <b>${s.avg_iters}</b> attempt</span></div>`
+    : '';
+  const rows=Object.entries(s.by_label).sort().map(([lbl,d])=>{
+    const ft=d.conv_n?` · first-try ${d.first_try}/${d.conv_n}`:'';
+    return `<div class="approw"><span class="grow"><b>${esc(lbl)}</b> ·n${d.n} ok${d.ok}${ft}</span><span class="meta">$${(d.avg_cost||0).toFixed(2)}/run</span></div>`;
+  }).join('');
+  box.innerHTML=`<div class="approw"><span class="grow">${s.runs} run · tổng <b>$${s.total_cost_usd}</b>`
+    +`${s.avg_cost_usd!=null?` · avg $${s.avg_cost_usd}/run`:''}</span></div>`+det+rows;
 }
 
 async function exportApp(name){
@@ -590,6 +703,21 @@ async function exportApp(name){
   $('modal').classList.add('open');
 }
 
+async function viewTrace(name){
+  const recs=await (await fetch('/api/apps/'+name+'/trace')).json();
+  $('mTitle').textContent=name+' — audit trail';
+  if(!recs.length){$('mBody').innerHTML='<p class="meta">chưa có trail (chạy Inception/Run để tạo)</p>';}
+  else{
+    const body=recs.map(r=>{
+      const ts=new Date((r.ts||0)*1000).toLocaleTimeString();
+      const d=r.data?Object.entries(r.data).filter(([k])=>k!=='requirement').map(([k,v])=>k+'='+JSON.stringify(v)).join(' '):'';
+      return ts+'  '+(r.event||'')+'  '+d+'  ['+((r.trace||'').slice(0,14))+']';
+    }).join('\n');
+    $('mBody').innerHTML=`<p class="meta">${recs.length} sự kiện — Inception → spec → gates → provenance → deploy</p><pre>${esc(body)}</pre>`;
+  }
+  $('modal').classList.add('open');
+}
+
 async function viewSpec(name){
   const r=await fetch('/api/apps/'+name+'/spec');const s=await r.json();
   $('mTitle').textContent=name+' — spec';
@@ -599,7 +727,7 @@ async function viewSpec(name){
 }
 function closeModal(){$('modal').classList.remove('open');}
 
-refreshJobs();refreshApps();renderPipe();
+refreshJobs();refreshApps();refreshMetrics();renderPipe();
 setInterval(()=>{if(!es||es.readyState===2)refreshJobs();},4000);
 // deep-link: /?job=<id> or /?job=latest auto-opens that job's live view
 (function(){

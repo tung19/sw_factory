@@ -1,0 +1,6 @@
+abe56efb294ef3f1a0df2e574d41e570d89f8b6a1c5641b78dede8df9775bf0c  ./CONTRACT.md
+0e1c98e0895e8a03cf2281e1c26cffd5ab1951b5adc0378c019bff5734e8b626  ./auth.holdout.test.ts
+127e716842eb5a1051730ebef50d81b1d1608a3e8d6e9b827ed40ae5183dd7ef  ./boards.holdout.test.ts
+666908dfcf03038f91081c97915d8cf75ebfbdfcee7074c13cbabd78a929fc0b  ./durability.holdout.test.ts
+19473a66c66d237e7d4893b7d90623fc0b2b969d5637115f90666a4ccd7d6e88  ./isolation.holdout.test.ts
+8f2b02c10b2becf6e23f9b44c0d8a993c2dfd39f837941dff7c990cc54b39989  ./tasks.holdout.test.ts

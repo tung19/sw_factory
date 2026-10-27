@@ -186,7 +186,8 @@ def test_gate_vercel_provisions_postgres_before_deploy(monkeypatch, tmp_path):
                         lambda a: (order.append("provision-pg"), (True, "ok"))[1])
     monkeypatch.setattr(V, "deploy",
                         lambda a: (order.append("deploy"), (True, "", "https://x.vercel.app"))[1])
-    ok, url = D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    ok, url = D.deploy_with_gate(tmp_path, confirm=lambda p: True,
+                                 require_provenance=False)  # provisioning, not the gate
     assert ok and order == ["provision-pg", "deploy"] and url == "https://x.vercel.app"
 
 
@@ -228,5 +229,33 @@ def test_gate_vercel_skips_provision_for_stateless(monkeypatch, tmp_path):
                         lambda a: (order.append("provision-kv"), (True, ""))[1])
     monkeypatch.setattr(V, "deploy",
                         lambda a: (order.append("deploy"), (True, "", None))[1])
-    D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    D.deploy_with_gate(tmp_path, confirm=lambda p: True, require_provenance=False)
     assert order == ["deploy"]  # stateless -> no provisioning
+
+
+def test_apply_sql_single_transaction_and_honest_failure(monkeypatch, tmp_path):
+    """Audit fix: apply migrations in ONE transaction and report a real psql error
+    as failure, rather than letting an 'already exists' substring mask a partial
+    (rolled-back) apply as success."""
+    cmds = []
+
+    class _P:
+        def __init__(self, rc, out=""):
+            self.returncode = rc
+            self.stdout = out
+            self.stderr = ""
+
+    def _runner(rc, out=""):
+        def fake_run(argv, **kw):
+            cmds.append(argv[2] if argv and argv[0] == "bash" else " ".join(map(str, argv)))
+            return _P(rc, out)
+        return fake_run
+
+    monkeypatch.setattr(V.subprocess, "run", _runner(0))
+    assert V._apply_sql(tmp_path, "postgres://x", "migrations/0001.sql") is True
+    assert "--single-transaction" in cmds[-1]
+
+    # a non-zero psql exit is a FAILURE even when the output mentions "already exists"
+    monkeypatch.setattr(V.subprocess, "run",
+                        _runner(1, "ERROR: relation \"t\" already exists"))
+    assert V._apply_sql(tmp_path, "postgres://x", "migrations/0001.sql") is False

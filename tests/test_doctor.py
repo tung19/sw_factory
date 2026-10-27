@@ -5,7 +5,11 @@ import area.doctor as D
 
 def test_report_shape():
     rows = D.report()
-    assert len(rows) == 6
+    # Derived, not hardcoded: a count literal silently rots every time a check is
+    # added (it did, when the workspace check landed).
+    checks = [n for n in dir(D) if n.startswith("check_")]
+    assert len(rows) == len(checks), f"report() must return every check_*: {checks}"
+    assert len({r[0] for r in rows}) == len(rows), "duplicate check names"
     for name, status, detail, fix in rows:
         assert isinstance(name, str) and status in ("ok", "warn", "fail")
         assert isinstance(detail, str) and isinstance(fix, str)

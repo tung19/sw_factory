@@ -7,11 +7,11 @@ a Pydantic validator is the oracle — invalid output loops back for a fix.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
-from area.engine import VerifyResult, build_agent, run_until
+from area.engine import Backend, Verifier, VerifyResult, build_agent, run_until
 from area.spec.models import (
     Acceptance,
     Spec,
@@ -35,6 +35,11 @@ Write these YAML files in the current working directory, nothing else:
      - id: <kebab-case-id>
        title: <short>
        description: <what the user can do>
+   ui:                    # OPTIONAL — the app's intended/observed LOOK (helps parity)
+     description: <one line on the visual style / layout, if evident>
+     palette: [<notable colors you saw/intend, e.g. "#1e293b", "indigo-600">]
+     # For a CLONE, the factory ALSO captures the reference's real stylesheets,
+     # assets and markup automatically — this block is just extra context.
 
 2) acceptance.yaml
    criteria:              # at least one; EVERY feature id must be covered
@@ -57,7 +62,7 @@ faithful to the requirement — do not invent scope.
 """
 
 
-def _spec_verifier(out: Path):
+def _spec_verifier(out: Path) -> Verifier:
     def _run() -> VerifyResult:
         problems: list[str] = []
         try:
@@ -88,7 +93,7 @@ def expected_block(expected: Optional[str]) -> str:
     )
 
 
-def load_assumptions(out_dir: str | Path) -> list[dict]:
+def load_assumptions(out_dir: str | Path) -> list[dict[str, Any]]:
     """Read the spec stage's assumptions ledger (empty if none/invalid)."""
     p = Path(out_dir) / "assumptions.yaml"
     if not p.exists():
@@ -101,12 +106,34 @@ def load_assumptions(out_dir: str | Path) -> list[dict]:
         return []
 
 
+def append_assumptions(out_dir: str | Path, items: list[dict[str, Any]]) -> int:
+    """Merge extra assumption dicts into the ledger (dedup by question text).
+
+    Used by the independent spec reviewer to fold the ambiguities it found into the
+    same assumptions.yaml the --clarify gate reads. Returns how many were newly added.
+    """
+    if not items:
+        return 0
+    p = Path(out_dir) / "assumptions.yaml"
+    existing = load_assumptions(out_dir)
+    seen = {str(a.get("question", "")).strip().lower() for a in existing}
+    added = [a for a in items
+             if str(a.get("question", "")).strip()
+             and str(a.get("question", "")).strip().lower() not in seen]
+    if not added:
+        return 0
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.safe_dump({"assumptions": existing + added}, sort_keys=False,
+                                allow_unicode=True))
+    return len(added)
+
+
 def extract_spec(
     requirement: str,
     out_dir: str | Path,
     *,
     expected: Optional[str] = None,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> tuple[Spec, Acceptance]:

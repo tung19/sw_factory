@@ -1,0 +1,16 @@
+{
+  "_type": "area.slsa-like/v1",
+  "name": "taskboard",
+  "builtAt": "2026-10-20T11:25:26Z",
+  "builder": "area/openhands-acp",
+  "target": "plain",
+  "materials": {
+    "spec": "sha256:4e4e5ba38df2002171c08d9e3489e3d03a9663c4174a6eeef9f0fc3297921d66"
+  },
+  "gates": {
+    "holdout_tdd": true
+  },
+  "product": {
+    "artifactDigest": "sha256:9d5b25bdf6fe064d1ffb8b94c20009c186e82494491e9cb0790fd2193f74023b"
+  }
+}

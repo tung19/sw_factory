@@ -12,8 +12,7 @@ side-effecting part (one `claude -p` subprocess per turn, in a neutral cwd).
 """
 from __future__ import annotations
 
-import subprocess
-import tempfile
+from typing import Any
 
 SENTINEL = "<<<SPEC_READY>>>"
 
@@ -36,7 +35,7 @@ _SYSTEM = (
 )
 
 
-def build_prompt(history: list[dict] | None, message: str) -> str:
+def build_prompt(history: list[dict[str, Any]] | None, message: str) -> str:
     """Compose the single-shot prompt from the system brief + recent history + the
     latest user message. Pure."""
     lines: list[str] = []
@@ -50,7 +49,7 @@ def build_prompt(history: list[dict] | None, message: str) -> str:
             f"=== NGƯỜI DÙNG VỪA NÓI ===\n{(message or '').strip()}")
 
 
-def parse_reply(raw: str) -> dict:
+def parse_reply(raw: str) -> dict[str, Any]:
     """Split a model turn into {reply, ready, requirement}. When the SPEC sentinel
     is present, everything after it is the handoff requirement. Pure."""
     text = (raw or "").strip()
@@ -65,17 +64,14 @@ def parse_reply(raw: str) -> dict:
 
 
 def _ask_llm(prompt: str) -> str:
-    """One keyless turn via the Claude Code CLI (print mode). Runs in a throwaway
-    empty dir so the agent has nothing to explore — it just answers."""
-    with tempfile.TemporaryDirectory() as d:
-        p = subprocess.run(
-            ["claude", "-p", prompt],
-            cwd=d, capture_output=True, text=True, timeout=180,
-        )
-        return (p.stdout or p.stderr or "").strip()
+    """One keyless turn through the engine seam (logged to obs). Raises on failure;
+    intake_turn catches and degrades to a non-ready reply."""
+    from area.engine import ask_cli
+
+    return ask_cli(prompt, label="intake").strip()
 
 
-def intake_turn(history: list[dict] | None, message: str) -> dict:
+def intake_turn(history: list[dict[str, Any]] | None, message: str) -> dict[str, Any]:
     """One conversational intake turn. Returns {reply, ready, requirement}; never
     raises (a model/CLI failure degrades to a plain, non-ready reply)."""
     try:

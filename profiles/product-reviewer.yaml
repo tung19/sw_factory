@@ -1,0 +1,36 @@
+# AREA agent profile — see area/profile.py for what this file controls.
+#
+# This file is DESCRIPTIVE of what the code does today: every `defaults` value is
+# null, so adopting profiles changed no behaviour. Tune a value here and it becomes
+# the default for this kind (a CLI flag still wins), and the change shows up as a new
+# `digest` that `area evals` compares against the previous version's measured runs.
+
+kind: product-reviewer
+description: >-
+  Judges product fit (did we build the right thing?) rather than spec conformance.
+
+# obs labels this kind owns (globs); how a run is attributed to this profile
+labels:
+  - "product"
+
+# dotted names whose SOURCE is hashed into the digest: edit a prompt -> new version
+prompt_sources:
+  - area.verify.product._product_prompt
+  - area.verify.product.product_verify
+
+skills: none
+
+# applied when the caller passes nothing; null = today's global behaviour
+defaults:
+  agent_iters: null
+  budget_usd: null
+  max_iters: null
+
+notes: |
+  Advisory unless --strict. An LLM judge, so promoting it to blocking needs a
+  false-positive measurement first — which is exactly what evals are for.
+  WHY IT HAS NO MEASURED RUNS (triaged 2026-10-27): opt-in (`--product`) and never
+  requested. Note the circularity this creates: SECURITY.md and CONTRIBUTING say an
+  LLM-judgement gate may only be promoted to blocking after its false-positive rate is
+  measured — which cannot happen until it runs at all. Running it on a few real builds
+  is the cheapest way to unblock that decision.

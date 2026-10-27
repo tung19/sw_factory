@@ -1,0 +1,8 @@
+# Default owner for everything in this repo.
+* @tung19
+
+# The factory's enforcement core — change with extra care (audit-reviewed).
+/area/verify/        @tung19
+/area/engine/        @tung19
+/tools/              @tung19
+/.claude/            @tung19

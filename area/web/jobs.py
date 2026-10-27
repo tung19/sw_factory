@@ -13,11 +13,12 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
+from typing import IO, Any
 
-from area._util import safe_name
+from area._util import kill_process_group, safe_name
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-WORKSPACE = ROOT / "workspace"
+from area.paths import REPO as ROOT, WORKSPACE as WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware; `as` = explicit re-export for `from area.web.jobs import WORKSPACE`)
+
 STATE_DIR = WORKSPACE / ".area"
 JOBS_JSON = STATE_DIR / "jobs.json"
 LOG_DIR = STATE_DIR / "logs"
@@ -30,7 +31,7 @@ _SKIP_DIRS = {
 }
 
 
-def _env() -> dict:
+def _env() -> dict[str, str]:
     e = dict(os.environ)
     home = Path.home()
     e["PATH"] = f"{home / '.local' / 'bin'}:/usr/local/bin:/opt/homebrew/bin:" + e.get("PATH", "")
@@ -44,10 +45,10 @@ class JobManager:
     def __init__(self) -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        self._procs: dict[str, tuple] = {}
-        self._jobs: dict[str, dict] = self._load()
+        self._procs: dict[str, tuple[subprocess.Popen[bytes], IO[bytes]]] = {}
+        self._jobs: dict[str, dict[str, Any]] = self._load()
 
-    def _load(self) -> dict:
+    def _load(self) -> dict[str, dict[str, Any]]:
         if JOBS_JSON.exists():
             try:
                 data = json.loads(JOBS_JSON.read_text())
@@ -69,13 +70,37 @@ class JobManager:
             pass
 
     @staticmethod
-    def _flags(p: dict) -> list[str]:
+    def _deploy_approval(p: dict[str, Any]) -> list[str]:
+        """Turn the request's EXPLICIT approval into the deploy gate's --yes.
+
+        A dashboard job runs non-interactively, so it can never show the production
+        gate — which is why this used to hardcode `--yes` and thereby bypass the one
+        human approval before production. The approval now has to travel in the
+        request (`confirm: true`), so it is a recorded operator decision rather than
+        a silent default. Missing it refuses the job instead of approving it."""
+        if not p.get("confirm"):
+            raise ValueError(
+                "deploy requires explicit approval: send confirm=true. A dashboard "
+                "job cannot display the interactive PRODUCTION gate, so the approval "
+                "must be in the request.")
+        return ["--yes"]
+
+    @staticmethod
+    def _flags(p: dict[str, Any]) -> list[str]:
         """TDD + gate + deploy flags shared by run/clone/intake."""
         f: list[str] = []
         if p.get("tdd"):
             f.append("--tdd")
+        # clarify + spec-review are DEFAULT-ON in the CLI now; emit the explicit
+        # flag when on (harmless no-op) and --no-* only on an explicit opt-out.
         if p.get("clarify"):
             f.append("--clarify")
+        elif "clarify" in p:
+            f.append("--no-clarify")
+        if p.get("spec_review"):
+            f.append("--spec-review")
+        elif "spec_review" in p:
+            f.append("--no-spec-review")
         if p.get("expected"):
             f += ["--expect", str(p["expected"])]
         if p.get("design"):
@@ -87,10 +112,10 @@ class JobManager:
                 if p.get(g):
                     f.append("--" + g)
         if p.get("deploy"):
-            f += ["--deploy", "--yes"]
+            f += ["--deploy", *JobManager._deploy_approval(p)]
         return f
 
-    def _cmd(self, kind: str, p: dict) -> list[str]:
+    def _cmd(self, kind: str, p: dict[str, Any]) -> list[str]:
         b = str(AREA_BIN)
         target = p.get("target", "cloudflare")
         if kind == "run":
@@ -103,6 +128,12 @@ class JobManager:
         if kind == "intake":
             return [b, "intake", p["artifacts"], "--name", p["name"],
                     "--target", target] + self._flags(p)
+        if kind == "inception":
+            # AI-DLC front-end: produce artifacts with --yes (auto-accept each
+            # bolt); the dashboard provides the human gate AFTER, via review/edit
+            # of the artifacts before the build is kicked off.
+            return [b, "inception", p["requirement"], "--name", p["name"],
+                    "--yes", "--target", target]
         if kind == "iterate":
             # The "command box": fold a NL change request into the spec + rebuild.
             # TDD is on by default in the CLI; only pass --no-tdd on explicit opt-out.
@@ -114,17 +145,21 @@ class JobManager:
                 cmd.append("--no-tdd")
             return cmd + [f for f in self._flags(p) if f != "--tdd"]
         if kind == "deploy":
-            return [b, "deploy", p["name"], "--yes"]
+            return [b, "deploy", p["name"], *self._deploy_approval(p)]
         raise ValueError(f"unknown job kind: {kind}")
 
-    def start(self, kind: str, params: dict) -> str:
+    def start(self, kind: str, params: dict[str, Any]) -> str:
         params = {**params, "name": safe_name(params.get("name", ""))}
         jid = uuid.uuid4().hex[:12]
         cmd = self._cmd(kind, params)
         log = LOG_DIR / f"{jid}.log"
         f = open(log, "wb")
         proc = subprocess.Popen(
-            cmd, cwd=str(ROOT), stdout=f, stderr=subprocess.STDOUT, env=_env()
+            cmd, cwd=str(ROOT), stdout=f, stderr=subprocess.STDOUT, env=_env(),
+            # Own process group, so cancel() can stop the whole tree. Without it a
+            # cancelled job's children (node/npm/playwright) keep running — and
+            # killpg would target the dashboard's own group.
+            start_new_session=True,
         )
         self._procs[jid] = (proc, f)
         self._jobs[jid] = {
@@ -135,6 +170,30 @@ class JobManager:
         }
         self._save()
         return jid
+
+    def cancel(self, jid: str) -> bool:
+        """Stop a running job and everything it spawned. False if there is nothing to
+        stop (unknown id, or already finished).
+
+        This is the kill switch the factory had no way to pull: a build that thrashes
+        costs real money, and the cost gate only measures AFTER the fact."""
+        entry = self._jobs.get(jid)
+        pf = self._procs.get(jid)
+        if not entry or entry.get("status") != "running" or not pf:
+            return False
+        proc, f = pf
+        kill_process_group(proc)
+        try:
+            f.flush()
+            f.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self._procs.pop(jid, None)
+        entry["status"] = "cancelled"
+        entry["ended"] = time.time()
+        entry["exit"] = proc.poll()
+        self._save()
+        return True
 
     def _finalize_if_done(self, jid: str) -> None:
         entry = self._jobs.get(jid)
@@ -164,12 +223,12 @@ class JobManager:
         self._procs.pop(jid, None)
         self._save()
 
-    def list(self) -> list[dict]:
+    def list(self) -> list[dict[str, Any]]:
         for jid in list(self._procs):
             self._finalize_if_done(jid)
         return sorted(self._jobs.values(), key=lambda j: j["started"], reverse=True)
 
-    def get(self, jid: str) -> dict | None:
+    def get(self, jid: str) -> dict[str, Any] | None:
         self._finalize_if_done(jid)
         return self._jobs.get(jid)
 
@@ -182,7 +241,7 @@ class JobManager:
         return bool(j and j["status"] == "running")
 
 
-def list_apps() -> list[dict]:
+def list_apps() -> list[dict[str, Any]]:
     apps = []
     appdir = WORKSPACE / "apps"
     if appdir.exists():
@@ -197,7 +256,7 @@ def list_apps() -> list[dict]:
     return apps
 
 
-def read_spec(name: str) -> dict:
+def read_spec(name: str) -> dict[str, str]:
     sd = WORKSPACE / "specs" / safe_name(name)
     out = {"spec": "", "acceptance": ""}
     for key, fn in (("spec", "spec.yaml"), ("acceptance", "acceptance.yaml")):
@@ -205,6 +264,53 @@ def read_spec(name: str) -> dict:
         if p.exists():
             out[key] = p.read_text(errors="ignore")
     return out
+
+
+def inception_dir(name: str) -> Path:
+    return WORKSPACE / "specs" / safe_name(name) / "inception"
+
+
+def read_inception(name: str) -> dict[str, Any]:
+    """The four Inception artifact files (for the dashboard review/edit panel)."""
+    d = inception_dir(name)
+    files = {}
+    if d.is_dir():
+        for f in sorted(d.glob("*.md")):
+            files[f.name] = f.read_text(errors="ignore")
+    return {"dir": str(d), "files": files}
+
+
+def save_inception(name: str, files: dict[str, str]) -> dict[str, Any]:
+    """Persist the human-edited Inception artifacts back, emit a human-approved
+    evidence record (correlated to the run's trace when present), and re-check the
+    contract. Only *.md basenames are written (no path traversal)."""
+    from area.inception import validate_artifacts
+    from area.intake.aidlc import emit_evidence, new_trace_id
+
+    d = inception_dir(name)
+    d.mkdir(parents=True, exist_ok=True)
+    written = []
+    for fn, content in (files or {}).items():
+        base = Path(str(fn)).name
+        if base.endswith(".md") and isinstance(content, str):
+            (d / base).write_text(content)
+            written.append(base)
+    # reuse the run's trace_id if the trail has one, so the human-approved event
+    # correlates with the inception run that produced the artifacts
+    trace = new_trace_id()
+    trail = d / "aidlc_trace.jsonl"
+    if trail.exists():
+        try:
+            import json as _json
+
+            lines = [l for l in trail.read_text().splitlines() if l.strip()]
+            if lines:
+                trace = _json.loads(lines[-1]).get("trace", trace)
+        except Exception:  # noqa: BLE001
+            pass
+    emit_evidence(d, trace, "inception.human_approved", {"files": written})
+    return {"ok": True, "dir": str(d), "written": written,
+            "warnings": validate_artifacts(d)}
 
 
 def app_tree(name: str, limit: int = 300) -> list[str]:

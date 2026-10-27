@@ -1,16 +1,23 @@
 name: CI
 
 # AREA's own CI: run the dogfood test suite (pure orchestrator logic — no live
-# agents, no network, no npm) on every push / PR to main. This is the automated
-# regression guard called for in PLAN §11 (PR4 "CI cho AREA", PR8 bus-factor):
-# the oracle-policy tests (lock/challenge ordering, gate wiring, deploy routing,
-# auth gate, iterate composition) must stay green before anything merges.
+# agents, no network, no npm) on every push to main and on EVERY pull request. This is
+# the automated regression guard called for in PLAN §11 (PR4 "CI cho AREA", PR8
+# bus-factor): the oracle-policy tests (lock/challenge ordering, gate wiring, deploy
+# routing, auth gate, iterate composition) must stay green before anything merges.
 
 on:
   push:
     branches: [main]
+  # Deliberately NOT filtered by base branch. A `branches: [main]` filter here means a
+  # STACKED pr — base = another feature branch — gets no CI at all, and that bit this
+  # repo repeatedly: #28, #29, #31 and #32 each sat with zero `test` runs while looking
+  # reviewable. Retargeting such a PR to main does not fix it either, because the
+  # default activity types are opened/synchronize/reopened, so changing a base fires
+  # nothing (found the hard way: #32 had to be closed and reopened to get a run).
+  # The suite is ~1.5 min and `concurrency` below cancels superseded runs, so testing
+  # every PR regardless of target is cheap next to shipping an untested stack.
   pull_request:
-    branches: [main]
 
 # A newer push to the same branch/PR cancels the older run.
 concurrency:
@@ -36,12 +43,16 @@ jobs:
           # requirements.lock was frozen on macOS, so it pins pyobjc-* — macOS-only
           # packages that cannot build on the Linux runner. Strip them (nothing on
           # Linux requires them; they are darwin-marked in the real dep metadata).
-          grep -ivE '^pyobjc' requirements.lock > requirements.ci.txt
+          # Strip pyobjc-* (macOS-only, can't build on Linux) AND openhands-* — the
+          # engine is vendored in-tree (git subtree) and installed editable below,
+          # so it must NOT be pulled from PyPI (that would shadow the vendored copy).
+          grep -ivE '^pyobjc|^openhands-' requirements.lock > requirements.ci.txt
           # The lock is a complete flat resolution, so install it with --no-deps:
-          # pip then installs exactly these pins without re-resolving (and so never
-          # re-introduces the stripped pyobjc). area.engine imports openhands-sdk at
-          # module load, so the suite genuinely needs it installed.
+          # pip then installs exactly these pins without re-resolving.
           pip install --no-deps -r requirements.ci.txt
+          # Engine (OpenHands SDK) vendored in-tree: install the two packages editable
+          # from vendor/ so area.engine's module-load imports resolve to the in-tree copy.
+          pip install --no-deps -e vendor/software-agent-sdk/openhands-sdk -e vendor/software-agent-sdk/openhands-tools
           # The `area` package itself (editable) — so `import area` + the `area`
           # console script resolve. Deps already satisfied above.
           pip install -e . --no-deps
@@ -51,17 +62,39 @@ jobs:
       - name: Syntax check
         run: python -m compileall -q area tests
 
+      - name: Lint (ruff — pyflakes bugs + syntax)
+        run: |
+          pip install ruff==0.17.1
+          ruff check area tests
+
+      - name: Type-check (mypy — phased subset from pyproject)
+        run: |
+          pip install mypy==2.4.0
+          mypy
+
       - name: Run test suite
         run: python -m pytest
 
       # The coordinator that actually runs on Cloudflare is JS, not Python, so its
       # access policy (token gate, one-runner-per-channel, relay whitelist) needs
       # its own oracle. Node ships on ubuntu-latest; no deps, no network.
+      # coordinator-cf/ lives ONLY on the saas-coordinator-runner branch (CLAUDE.md:
+      # "Not in scope on this branch") — so skip cleanly on main, where it is absent.
       - name: Coordinator Worker policy tests (Node)
-        run: node --test coordinator-cf/test/worker.test.mjs
+        run: |
+          if [ -f coordinator-cf/test/worker.test.mjs ]; then
+            node --test coordinator-cf/test/worker.test.mjs
+          else
+            echo "coordinator-cf absent on this branch — skipping (saas-coordinator-runner only)"
+          fi
 
       # The Worker serves its own copy of the dashboard UI; it must not drift from
       # the canonical one (the deploy script re-syncs it, but a manual edit to one
       # side would go unnoticed otherwise).
       - name: Coordinator UI is in sync
-        run: diff -u area/net/static/index.html coordinator-cf/public/index.html
+        run: |
+          if [ -f coordinator-cf/public/index.html ]; then
+            diff -u area/net/static/index.html coordinator-cf/public/index.html
+          else
+            echo "coordinator-cf absent on this branch — skipping (saas-coordinator-runner only)"
+          fi

@@ -2,7 +2,10 @@
   "mcpServers": {
     "rea": {
       "command": "npx",
-      "args": ["-y", "rea-agents"]
+      "args": ["-y", "rea-agents@6.7.0", "--mcp"],
+      "env": {
+        "npm_config_cache": "${HOME}/.cache/npm-area"
+      }
     }
   }
 }

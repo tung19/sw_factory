@@ -13,12 +13,14 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from area._util import safe_name
 
-_ROOT = Path(__file__).resolve().parent.parent
-WORKSPACE = _ROOT / "workspace"
+if TYPE_CHECKING:
+    from area.engine import Backend
+
+from area.paths import WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware)
 DEPLOYS = WORKSPACE / ".area" / "deploys"
 MONDIR = WORKSPACE / ".area" / "monitor"
 
@@ -40,13 +42,14 @@ def deployed_url(name: str) -> Optional[str]:
                           key=lambda r: r.get("ts", 0), reverse=True)
             for j in rows:
                 if j.get("name") == name and j.get("url"):
-                    return j["url"]
+                    url: str = j["url"]
+                    return url
         except Exception:
             pass
     return None
 
 
-def _probe(url: str, timeout: float = 15.0) -> dict:
+def _probe(url: str, timeout: float = 15.0) -> dict[str, Any]:
     t0 = time.time()
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "area-monitor"})
@@ -65,16 +68,16 @@ def _resolve(name_or_url: str, health: str) -> tuple[str, str]:
         base, name = name_or_url.rstrip("/"), "adhoc"
     else:
         name = safe_name(name_or_url)
-        base = deployed_url(name)
-        if not base:
+        url = deployed_url(name)
+        if not url:
             raise RuntimeError(f"no deployed URL for {name} (deploy first, or pass a URL)")
-        base = base.rstrip("/")
+        base = url.rstrip("/")
     url = base + (health if health.startswith("/") else "/" + health)
     return name, url
 
 
 def monitor(name_or_url: str, *, checks: int = 5, interval: float = 5.0,
-            health: str = "/") -> dict:
+            health: str = "/") -> dict[str, Any]:
     name, url = _resolve(name_or_url, health)
     MONDIR.mkdir(parents=True, exist_ok=True)
     log = MONDIR / f"{name}.jsonl"
@@ -95,7 +98,7 @@ def monitor(name_or_url: str, *, checks: int = 5, interval: float = 5.0,
             "results": results}
 
 
-def status(name: str, *, limit: int = 50) -> dict:
+def status(name: str, *, limit: int = 50) -> dict[str, Any]:
     name = safe_name(name)
     log = MONDIR / f"{name}.jsonl"
     recs = []
@@ -110,7 +113,10 @@ def status(name: str, *, limit: int = 50) -> dict:
     return {"name": name, "url": deployed_url(name), "samples": len(recs),
             "uptime_pct": round(100 * ok / len(recs), 1) if recs else None,
             "avg_ms": round(sum(lat) / len(lat)) if lat else None,
-            "p95_ms": (lat[int(len(lat) * 0.95) - 1] if lat else None),
+            # nearest-rank p95: index = ceil(0.95*n)-1, clamped (the old
+            # int(0.95*n)-1 under-reported — e.g. gave ~p90 for n=10, lat[-1] for n=1)
+            "p95_ms": (lat[min(len(lat) - 1, max(0, (len(lat) * 95 + 99) // 100 - 1))]
+                       if lat else None),
             "recent_failures": [r for r in recs if not r.get("ok")][-5:]}
 
 
@@ -133,7 +139,7 @@ def cf_logs(name: str, *, seconds: int = 12) -> str:
 
 def watch(name: str, *, checks: int = 3, interval: float = 5.0, max_heals: int = 1,
           confirm: Optional[Callable[[str], bool]] = None,
-          backend: str = "acp", model: Optional[str] = None) -> bool:
+          backend: "Backend" = "acp", model: Optional[str] = None) -> bool:
     """Closed-loop: probe -> heal -> rebuild -> human gate -> redeploy."""
     name = safe_name(name)
     if not deployed_url(name):

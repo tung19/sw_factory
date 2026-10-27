@@ -14,22 +14,27 @@ into the exact same build + deploy pipeline.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from area.engine import build_agent, run_until
+from area.engine import Backend, build_agent, run_until
 from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier, expected_block
 from area.spec.models import Acceptance, Spec, load_acceptance, load_spec
 
 
-def rea_mcp_config() -> dict:
+def rea_mcp_config() -> dict[str, Any]:
     """REA MCP server (stdio via npx) for Tier 2 reverse-engineering."""
-    from openhands.sdk.mcp.config import MCPServer
+    from area.engine import mcp_stdio_server
 
     return {
-        "rea": MCPServer(
-            transport="stdio",
+        # `--mcp` makes rea-agents speak MCP on stdio; bare `rea` just prints help
+        # and exits, so the client sees the connection close. The clean npm cache
+        # dodges the root-owned ~/.npm EACCES crash on first launch. PIN the exact
+        # version: `-y rea-agents` would auto-install whatever latest resolves
+        # (supply-chain risk + it ships breaking changes across minors).
+        "rea": mcp_stdio_server(
             command="npx",
-            args=["-y", "rea-agents"],
+            args=["-y", "rea-agents@6.7.0", "--mcp"],
+            env={"npm_config_cache": str(Path.home() / ".cache" / "npm-area")},
             description="Reverse Engineer Anything (authorized targets only)",
         )
     }
@@ -42,7 +47,7 @@ def spec_from_source(
     kind: str = "auto",
     use_rea: bool = False,
     expected: Optional[str] = None,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
 ) -> tuple[Spec, Acceptance]:

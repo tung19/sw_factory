@@ -1,3 +1,11 @@
+# ============================================================================
+# NOT USABLE ON `main`. The ENTRYPOINT below execs `area runner`, a subcommand that
+# does NOT exist on this branch (see docs/RUNNER.md and ADR 0002 — the coordinator +
+# runner live on `saas-coordinator-runner`). Building this image succeeds; running it
+# fails immediately. Kept as the packaging design for that branch.
+# Before using it for real, read docs/secure-factory-gap-assessment.md: a multi-user
+# runner needs the sandbox/network/identity boundaries `main` does not have.
+# ============================================================================
 # AREA runner — headless / cloud template (Option B in docs/RUNNER.md).
 #
 # A container has no interactive Claude Code login, so run in KEYED mode:

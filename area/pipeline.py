@@ -1,16 +1,23 @@
 """area.pipeline — Flow A (requirement) and Flow B (clone) end to end."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
 
+from area import obs
 from area._util import safe_name
 from area.build import build_app
 from area.re import spec_from_source
 from area.spec import Acceptance, Spec, extract_spec
+from area.spec.extract import append_assumptions
+from area.spec.review import review_spec
 
-WORKSPACE = Path(__file__).resolve().parent.parent / "workspace"
+from area.paths import WORKSPACE as WORKSPACE  # noqa: E402  (single source; AREA_WORKSPACE-aware; `as` = explicit re-export for the many `from area.pipeline import WORKSPACE` sites)
+
+if TYPE_CHECKING:
+    from area.engine import Backend
 
 
 @dataclass
@@ -22,10 +29,10 @@ class PipelineResult:
     app_dir: Path
     passed: bool
     clarify_needed: bool = False
-    questions: list = field(default_factory=list)
+    questions: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict]:
+def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict[str, Any]]:
     """In --clarify mode, return the MATERIAL assumptions the spec stage had to
     make (ambiguities worth asking the user about before building)."""
     if not clarify:
@@ -38,7 +45,25 @@ def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict]:
     ]
 
 
-def _clarify_result(name, spec, acc, root, questions) -> PipelineResult:
+def _spec_review_step(
+    root: Path, name: str, requirement: str, backend: Backend, model: Optional[str]
+) -> int:
+    """Independent spec-vs-intent review (recommendation #2): a SEPARATE reviewer —
+    not the spec author — folds any MATERIAL ambiguities the spec stage missed into
+    the assumptions ledger, so the clarify gate surfaces them. Advisory + fail-open
+    (it can only ADD questions, never block on its own). Returns how many were added."""
+    spec_dir = root / "specs" / name
+    extra = review_spec(requirement, spec_dir, backend=backend, model=model)
+    n = append_assumptions(spec_dir, extra)
+    if n:
+        print(f"[area] spec-review: +{n} material ambiguity(ies) an INDEPENDENT "
+              "reviewer flagged (merged into assumptions.yaml)")
+    return n
+
+
+def _clarify_result(
+    name: str, spec: Spec, acc: Acceptance, root: Path, questions: list[dict[str, Any]]
+) -> PipelineResult:
     spec_dir = root / "specs" / name
     print(f"\n[area] ⚠ CLARIFICATION NEEDED — {len(questions)} material "
           "assumption(s); NOT building. Confirm/override then re-run:")
@@ -51,8 +76,14 @@ def _clarify_result(name, spec, acc, root, questions) -> PipelineResult:
     )
 
 
-def _maybe_design(name, backend, model, design) -> None:
-    if not design:
+def _maybe_design(
+    name: str, backend: Backend, model: Optional[str], design: Optional[bool],
+    spec: Optional[Spec] = None,
+) -> None:
+    # design=None → auto (run the architect stage for a non-trivial app); explicit
+    # True/False from --design / --no-design overrides the heuristic.
+    want = design if design is not None else _should_design(spec)
+    if not want:
         return
     from area.design import design_stage
 
@@ -60,9 +91,23 @@ def _maybe_design(name, backend, model, design) -> None:
     design_stage(name, backend=backend, model=model)
 
 
+def _should_design(spec: Optional[Spec]) -> bool:
+    """Heuristic (recommendation #3): a non-trivial app earns the architect stage by
+    DEFAULT (data model, or several features) so the product is thought through — not
+    just slapped together. Trivial single-feature apps skip it. `--design`/`--no-design`
+    override."""
+    try:
+        features = len(getattr(spec, "features", []) or [])
+        entities = len(getattr(spec, "entities", []) or [])
+    except Exception:
+        return False
+    return entities >= 1 or features >= 3
+
+
 def _build(
-    name, spec, acc, root, target, backend, model, build_iters, tdd=False,
-    reference=None,
+    name: str, spec: Spec, acc: Acceptance, root: Path, target: str, backend: Backend,
+    model: Optional[str], build_iters: int, tdd: bool = False,
+    reference: Optional[str] = None, ui_dir: Optional[str] = None,
 ) -> PipelineResult:
     app_dir = root / "apps" / name
     design_path = root / "specs" / name / "design.md"
@@ -71,21 +116,23 @@ def _build(
     if tdd:
         passed = _tdd_build(
             name, spec, acc, app_dir, target, backend, model, build_iters,
-            design_text, reference=reference,
+            design_text, reference=reference, ui_dir=ui_dir,
         )
     else:
         print(f"[area] build : target={target} -> {app_dir}")
         passed = build_app(
             spec, acc, app_dir, target=target, backend=backend, model=model,
-            max_iters=build_iters, design=design_text,
+            max_iters=build_iters, design=design_text, ui_dir=ui_dir,
         )
     print(f"[area]        build {'GREEN' if passed else 'NOT green'}")
     return PipelineResult(name, spec, acc, root / "specs" / name, app_dir, passed)
 
 
 def _tdd_build(
-    name, spec, acc, app_dir, target, backend, model, build_iters, design_text,
-    *, reference=None, max_challenges: int = 1,
+    name: str, spec: Spec, acc: Acceptance, app_dir: Path, target: str,
+    backend: Backend, model: Optional[str], build_iters: int, design_text: str,
+    *, reference: Optional[str] = None, ui_dir: Optional[str] = None,
+    max_challenges: int = 1,
 ) -> bool:
     """TDD: lock the independent acceptance suite FIRST, then build-to-green
     against it. If the build fails because the builder challenges a locked test
@@ -118,6 +165,7 @@ def _tdd_build(
         if build_app(
             spec, acc, app_dir, target=target, backend=backend, model=model,
             max_iters=build_iters, design=design_text, oracle=oracle, tdd=True,
+            ui_dir=ui_dir,
         ):
             return True
         if attempt == max_challenges:
@@ -137,18 +185,25 @@ def run_pipeline(
     *,
     name: str = "app",
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = False,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
-    """Flow A: requirement -> spec -> [design] -> [lock tests] -> build."""
+    """Flow A: requirement -> spec -> [independent review] -> [clarify] -> [design] -> build.
+
+    `clarify` defaults ON (recommendation #1): a vague requirement STOPS at the spec
+    on material ambiguity instead of silently guessing + building. `spec_review` adds
+    an independent spec-vs-intent reviewer (recommendation #2) before the gate.
+    """
     name = safe_name(name)
+    obs.set_app(name)  # scope this build's agent-run cost to this app (cost gate)
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] spec   : {requirement!r}")
     spec, acc = extract_spec(
@@ -156,10 +211,20 @@ def run_pipeline(
         model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    # Deliberately NOT gated on `clarify`. It used to be `clarify and spec_review`,
+    # which meant --no-clarify silently switched OFF the independent reviewer as a
+    # side effect — and --no-clarify is exactly what you pass for an UNATTENDED run,
+    # so the review was disabled precisely when nobody was watching. Its findings are
+    # still worth having with clarify off: they land in assumptions.yaml, which
+    # `area/reality.py` prints after the build and `provenance._MATERIALS` attests.
+    # `clarify` controls whether the build STOPS; `spec_review` controls whether the
+    # reviewer RUNS. Opt out of the reviewer with --no-spec-review.
+    if spec_review:
+        _spec_review_step(root, name, requirement, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
         return _clarify_result(name, spec, acc, root, qs)
-    _maybe_design(name, backend, model, design)
+    _maybe_design(name, backend, model, design, spec)
     return _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
 
 
@@ -209,14 +274,15 @@ def iterate_pipeline(
     change_request: str,
     *,
     target: Optional[str] = None,
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = True,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
     """Flow A⁺ — the "command box": amend an EXISTING app from a natural-language
@@ -234,7 +300,7 @@ def iterate_pipeline(
     return run_pipeline(
         amended, name=name, target=target, backend=backend, model=model,
         spec_iters=spec_iters, build_iters=build_iters, design=design, tdd=tdd,
-        expected=expected, clarify=clarify, workspace=root,
+        expected=expected, clarify=clarify, spec_review=spec_review, workspace=root,
     )
 
 
@@ -243,14 +309,15 @@ def intake_pipeline(
     *,
     name: str = "intake",
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = False,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
     """Hybrid seam: ingest AI-DLC Inception artifacts -> spec -> [design] -> build.
@@ -259,23 +326,31 @@ def intake_pipeline(
     as the build oracle. Construction evidence is emitted back to the AI-DLC
     trail (aidlc_trace.jsonl) for end-to-end audit.
     """
-    from area.intake import emit_evidence, new_trace_id, spec_from_aidlc
+    from area.intake import emit_evidence, spec_from_aidlc
 
     name = safe_name(name)
+    obs.set_app(name)  # scope this build's cost to this app (cost gate)
     root = Path(workspace) if workspace else WORKSPACE
     spec_dir = root / "specs" / name
-    trace_id = new_trace_id()
+    # Continue the Inception run's trace when these artifacts came from `area
+    # inception` (its origin trace lives under specs/<name>/inception/), so the
+    # whole chain Inception → intake → gates → deploy is ONE correlated trace.
+    from area.evidence import current_trace
+
+    trace_id = current_trace(name)
     print(f"[area] intake : {artifacts!r} (AI-DLC, trace={trace_id})")
     spec, acc = spec_from_aidlc(
         artifacts, spec_dir, expected=expected, backend=backend, model=model,
         max_iters=spec_iters, trace_id=trace_id,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    if spec_review:
+        _spec_review_step(root, name, artifacts, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
         emit_evidence(spec_dir, trace_id, "clarify.needed", {"questions": len(qs)})
         return _clarify_result(name, spec, acc, root, qs)
-    _maybe_design(name, backend, model, design)
+    _maybe_design(name, backend, model, design, spec)
     res = _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
     emit_evidence(spec_dir, trace_id, "construction.done", {"passed": res.passed})
     return res
@@ -288,6 +363,17 @@ def _resolve_clone_reference(source: str, spec_dir: Path) -> str:
     return f"{source} (local copy at: {sample})" if sample.exists() else source
 
 
+def _safe_clone_source(src: str) -> bool:
+    """Reject git transport-helper syntax (`ext::`, `fd::`, `<word>::…`, which run
+    an arbitrary command when git touches the remote) and leading-dash option
+    injection, BEFORE the agent git-clones the source. Allows local paths,
+    http(s)/ssh/git URLs, and scp-like `git@host:path`."""
+    s = (src or "").strip()
+    if not s or s.startswith("-"):
+        return False
+    return re.match(r"^[A-Za-z0-9][\w.+-]*::", s) is None
+
+
 def clone_pipeline(
     source: str,
     *,
@@ -295,18 +381,27 @@ def clone_pipeline(
     kind: str = "auto",
     use_rea: bool = False,
     target: str = "cloudflare",
-    backend: str = "acp",
+    backend: Backend = "acp",
     model: Optional[str] = None,
     spec_iters: int = 3,
     build_iters: int = 3,
-    design: bool = False,
+    design: Optional[bool] = None,
     tdd: bool = False,
     expected: Optional[str] = None,
-    clarify: bool = False,
+    clarify: bool = True,
+    spec_review: bool = False,
     workspace: Optional[str | Path] = None,
 ) -> PipelineResult:
-    """Flow B: reverse-engineer a sample app -> spec -> [design] -> build."""
+    """Flow B: reverse-engineer a sample app -> spec -> [independent review] -> build."""
     name = safe_name(name)
+    obs.set_app(name)  # scope this build's cost to this app (cost gate)
+    if not _safe_clone_source(source):
+        raise RuntimeError(
+            f"refusing clone source {source!r}: it looks like a git transport "
+            "helper (ext::/fd::/<helper>::) or option injection, which executes "
+            "arbitrary commands when git touches the remote. Use a plain "
+            "http(s)/ssh/git URL or a local path."
+        )
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] re-spec: {source!r} (kind={kind}, rea={use_rea})")
     spec, acc = spec_from_source(
@@ -314,13 +409,42 @@ def clone_pipeline(
         expected=expected, backend=backend, model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    # The reference is UNTRUSTED code. Report any credential sitting in it — a token in
+    # an unrelated file is how the PocketOS incident started — but do NOT rewrite
+    # `_sample/`: it is the evidence this clone was reverse-engineered from, and the
+    # derived copies that actually reach the build agent are redacted instead
+    # (area.re.ui_capture, area.build.ui_vendor).
+    sample = root / "specs" / name / "_sample"
+    if sample.is_dir():
+        from area import screen
+
+        sample_hits = screen.scan_tree(sample)
+        print(screen.format_report(sample_hits, what=f"the reference in {sample.name}/"))
+        if sample_hits:
+            print("[area]        ^ left as-is (evidence); the copies the builder reads "
+                  "are redacted")
+
+    # Capture the reference's UI as EVIDENCE (markup/CSS/tokens/assets) so the build
+    # can vendor the real look instead of re-inventing it from prose. Best-effort.
+    from area.re.ui_capture import capture_ui_evidence
+
+    spec.ui = capture_ui_evidence(source, kind, root / "specs" / name)
+    if spec.ui.captured:
+        print(f"[area]        ui-capture: {len(spec.ui.styles)} css, "
+              f"{len(spec.ui.assets)} asset(s), {len(spec.ui.rendered)} markup"
+              + (" — SPA (partial)" if spec.ui.spa_caveat else ""))
+    else:
+        print(f"[area]        ui-capture: none ({spec.ui.notes})")
+    ui_dir = spec.ui.dir if spec.ui.captured else None
+    if spec_review:
+        _spec_review_step(root, name, source, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
         return _clarify_result(name, spec, acc, root, qs)
-    _maybe_design(name, backend, model, design)
+    _maybe_design(name, backend, model, design, spec)
     # TDD clone: author tests for behavioral PARITY with the reference app.
     reference = _resolve_clone_reference(source, root / "specs" / name) if tdd else None
     return _build(
         name, spec, acc, root, target, backend, model, build_iters, tdd=tdd,
-        reference=reference,
+        reference=reference, ui_dir=ui_dir,
     )

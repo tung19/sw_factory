@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs
 
 from starlette.applications import Starlette
@@ -30,18 +31,19 @@ def _require_token() -> bool:
     return bool((os.getenv("AREA_COORD_TOKEN") or "").strip())
 
 
-def _channel(scope) -> str:
+def _channel(scope: Any) -> str:
     """The pairing token = the channel key. Empty → the LOCAL channel."""
     qs = parse_qs(scope.get("query_string", b"").decode())
-    return (qs.get("token") or [""])[0]
+    tok: str = (qs.get("token") or [""])[0]
+    return tok
 
 
-async def index(request):
+async def index(request: Any) -> HTMLResponse:
     # The page is a static shell with no secrets; the token gates the channel.
     return HTMLResponse((STATIC / "index.html").read_text())
 
 
-async def ws_runner(ws: WebSocket):
+async def ws_runner(ws: WebSocket) -> None:
     key = _channel(ws.scope)
     if _require_token() and not key:
         await ws.close(code=1008)
@@ -64,7 +66,7 @@ async def ws_runner(ws: WebSocket):
         await HUB.from_runner(key, encode({"type": "coord", "runner": False}))
 
 
-async def ws_ui(ws: WebSocket):
+async def ws_ui(ws: WebSocket) -> None:
     key = _channel(ws.scope)
     if _require_token() and not key:
         await ws.close(code=1008)
