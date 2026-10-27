@@ -17,8 +17,16 @@ def _profile(root, kind="k", **over):
     (root / f"{kind}.yaml").write_text(yaml.safe_dump(raw))
 
 
-def _runs(digest, n, *, kind="k", iters=1, passed=True, cost=1.0, ts0=0.0):
+# The default task set every version is measured on. Two versions are only comparable
+# on tasks they BOTH ran, so a fixture that leaves `name` unset is a version that can
+# be compared with nothing — see test_disjoint_tasks_certify_nothing.
+TASKS = ("t1", "t2", "t3", "t4", "t5")
+
+
+def _runs(digest, n, *, kind="k", iters=1, passed=True, cost=1.0, ts0=0.0,
+          tasks=TASKS):
     return [{"ts": ts0 + i, "label": kind, "profile": kind,
+             "name": tasks[i % len(tasks)] if tasks else None,
              "profile_digest": digest, "outer_iters": iters, "passed": passed,
              "cost_usd": cost, "duration_s": 10.0} for i in range(n)]
 
@@ -69,12 +77,16 @@ def test_new_profile_when_there_is_only_one_measured_version(tmp_path):
 
 
 def test_insufficient_data_when_either_side_is_too_small(tmp_path):
+    """The sample that counts is the PAIRED one. The previous version has 9 runs, but
+    only 4 of them are on the 2 tasks the 2-run current version also ran — judging on
+    9 would be comparing different work."""
     _profile(tmp_path)
     cur = P.load_profile("k", root=tmp_path).digest
     runs = _runs("old", 9, ts0=0) + _runs(cur, 2, ts0=100)
     r = E.compare("k", runs=runs, root=tmp_path)
     assert r["verdict"] == "insufficient-data"
-    assert "current 2" in r["reason"] and "previous 9" in r["reason"]
+    assert r["paired_tasks"] == ["t1", "t2"]
+    assert "current 2" in r["reason"] and "previous 4" in r["reason"]
 
 
 def test_ok_when_within_tolerance(tmp_path):
@@ -167,3 +179,92 @@ def test_evals_is_not_an_app_gate():
 
     assert "evals" not in C._GATE_ORDER
     assert "evals" in C._HANDLERS          # a command of its own
+
+
+# ---- matched pairs (the Harness2 "probe" rule) ---------------------------------
+
+def test_disjoint_tasks_certify_nothing(tmp_path):
+    """Two versions that ran different work are not comparable: a prompt that looks
+    better may simply have drawn easier tasks. The old aggregate comparison would have
+    called this `ok`."""
+    _profile(tmp_path)
+    cur = P.load_profile("k", root=tmp_path).digest
+    runs = (_runs(cur, 6, tasks=("a1", "a2")) + _runs("old", 6, tasks=("b1", "b2")))
+    r = E.compare("k", runs=runs, root=tmp_path)
+    assert r["verdict"] == "unpaired"
+    assert r["comparison"] == "unpaired" and r["paired_tasks"] == []
+    assert "share no task" in r["reason"] and "CONFOUNDED" in r["reason"]
+
+
+def test_a_regression_is_still_surfaced_when_unpaired(tmp_path):
+    """Certify nothing, but do not hide it: an unpairable regression is still named,
+    because it is worth seeing even when it cannot be attributed."""
+    _profile(tmp_path)
+    cur = P.load_profile("k", root=tmp_path).digest
+    runs = (_runs(cur, 6, iters=4, tasks=("a1",)) + _runs("old", 6, iters=1, tasks=("b1",)))
+    r = E.compare("k", runs=runs, root=tmp_path)
+    assert r["verdict"] == "unpaired"
+    assert "regression" in r["reason"] and "avg_iters" in r["reason"]
+
+
+def test_only_the_shared_tasks_are_judged(tmp_path):
+    """The new version also ran an extra easy task; it must not count. On the shared
+    task it is WORSE, and that is the verdict."""
+    _profile(tmp_path)
+    cur = P.load_profile("k", root=tmp_path).digest
+    runs = (_runs(cur, 5, iters=4, tasks=("shared",))        # shared: 4 iters
+            + _runs(cur, 5, iters=1, tasks=("easy-extra",))  # must be ignored
+            + _runs("old", 5, iters=1, tasks=("shared",)))     # shared: 1 iter
+    r = E.compare("k", runs=runs, root=tmp_path)
+    assert r["comparison"] == "matched-pairs" and r["paired_tasks"] == ["shared"]
+    assert r["current"]["avg_iters"] == 4.0 and r["previous"]["avg_iters"] == 1.0
+    assert r["verdict"] == "regressed"
+
+
+def test_only_tasks_narrows_to_a_declared_fixed_set(tmp_path):
+    """`only_tasks` is how a declared eval set (evals/tasks.yaml) pins the A/B to known
+    work: the off-set task is dropped even though both versions ran it."""
+    _profile(tmp_path)
+    cur = P.load_profile("k", root=tmp_path).digest
+    runs = (_runs(cur, 5, iters=1, tasks=("declared",)) + _runs(cur, 5, iters=9, tasks=("adhoc",))
+            + _runs("old", 5, iters=1, tasks=("declared",)) + _runs("old", 5, iters=1, tasks=("adhoc",)))
+    wide = E.compare("k", runs=runs, root=tmp_path)
+    narrow = E.compare("k", runs=runs, root=tmp_path, only_tasks={"declared"})
+    assert sorted(wide["paired_tasks"]) == ["adhoc", "declared"]
+    assert narrow["paired_tasks"] == ["declared"]
+    assert wide["verdict"] == "regressed"   # dragged down by the ad-hoc task
+    assert narrow["verdict"] == "ok"        # on the declared set they match
+
+
+def test_insufficient_data_counts_the_PAIRED_runs(tmp_path):
+    """Plenty of runs each, but only one shared task — the sample that matters is the
+    paired one, and saying so beats judging on 20 unpaired runs."""
+    _profile(tmp_path)
+    cur = P.load_profile("k", root=tmp_path).digest
+    runs = (_runs(cur, 10, tasks=("s", "n1", "n2", "n3", "n4", "n5", "n6", "n7", "n8", "n9"))
+            + _runs("old", 10, tasks=("s", "o1", "o2", "o3", "o4", "o5", "o6", "o7", "o8", "o9")))
+    r = E.compare("k", runs=runs, root=tmp_path)
+    assert r["verdict"] == "insufficient-data"
+    assert "shared task(s)" in r["reason"]
+
+
+def test_the_declared_eval_set_is_real_and_names_apps_with_locked_oracles(tmp_path):
+    """`evals/tasks.yaml` is the fixed A/B set. Its names are the PAIRING KEY — the app
+    name `obs.set_app()` stamps — so a typo silently makes every comparison unpaired."""
+    declared = E.load_task_set()
+    assert declared, "the repo must declare an eval set"
+    assert declared == {"taskboard", "invoice_mgr", "fb_incept"}
+
+    # absent file -> None, i.e. "compare on any shared task", not "compare on nothing"
+    assert E.load_task_set(tmp_path) is None
+
+
+def test_check_does_not_impose_the_repo_eval_set_on_a_synthetic_root(tmp_path):
+    """Regression guard: `check()` first read evals/tasks.yaml unconditionally, so a
+    caller with its own profiles root had every run filtered out and every verdict came
+    back `unpaired`."""
+    _profile(tmp_path)
+    cur = P.load_profile("k", root=tmp_path).digest
+    runs = _runs("old", 6, iters=1, ts0=0) + _runs(cur, 6, iters=2, ts0=100)
+    ok, results = E.check(["k"], runs=runs, root=tmp_path)
+    assert results[0]["verdict"] == "regressed" and ok is False

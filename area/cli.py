@@ -786,6 +786,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--strict", action="store_true",
                     help="also fail when there is not enough data to judge")
     ev.add_argument("--json", action="store_true")
+    ev.add_argument("--tasks", action="store_true",
+                    help="show the declared eval set (evals/tasks.yaml) and exit")
+    ev.add_argument("--any-task", action="store_true",
+                    help="A/B on any task both versions ran, not just the declared "
+                         "eval set (weaker: the task mix is then uncontrolled)")
 
     tr = sub.add_parser("trace", help="Show an app's end-to-end audit trail "
                                       "(Inception → spec → gates → provenance → deploy)")
@@ -1249,17 +1254,34 @@ def _cmd_evals(args: argparse.Namespace, expected: str | None) -> int:
     `make check`), never a member of the app gate set."""
     import json as _json
 
-    from area.evals import check, report_text
+    from area.evals import TASKS_FILE, check, load_task_set, report_text
 
-    ok, results = check(args.kind or None, strict=args.strict)
+    declared = load_task_set()
+    if args.tasks:
+        if not declared:
+            print(f"[area] evals: no declared eval set ({TASKS_FILE} missing or empty) "
+                  "— comparisons fall back to any task both versions ran")
+            return 0
+        print(f"[area] evals: declared eval set ({TASKS_FILE}) — the A/B runs these:")
+        for t in sorted(declared):
+            print(f"    {t}")
+        print("\n[area] a factory change is graded by re-running these, then "
+              "`area evals`. Model spend is real, so that is a deliberate act.")
+        return 0
+
+    ok, results = check(args.kind or None, strict=args.strict,
+                        use_task_set=not args.any_task)
     if args.json:
         print(_json.dumps(results, indent=2))
     else:
         from area.profile import all_profiles
 
         profs = all_profiles()
+        scope = ("any task both versions ran" if args.any_task
+                 else (f"the {len(declared)} declared eval task(s)" if declared
+                       else "any task both versions ran (no declared set)"))
         print(f"[area] evals — {len(profs)} agent profile(s); grading the CURRENT "
-              "version of each against the previous one\n")
+              f"version of each against the previous one, on {scope}\n")
         print(report_text(results))
         unattr = sum(r.get("unattributed_runs") or 0 for r in results)
         if unattr:

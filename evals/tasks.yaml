@@ -1,0 +1,34 @@
+# The canonical eval set for a change to AREA ITSELF.
+#
+# `area evals` grades a factory change (a prompt, a skill, a knob) by comparing the
+# current version of an agent profile against the previous one. That comparison is only
+# meaningful on work BOTH versions did: a prompt that looks better may simply have drawn
+# easier tasks. This file is that fixed set — the A/B runs these, and nothing else
+# counts toward the verdict.
+#
+# `name` is the pairing key: it is the app name, which `obs.set_app()` stamps onto every
+# agent run in a pipeline (area/pipeline.py:206). It must match exactly.
+#
+# HOW TO USE IT: after changing a prompt/skill/knob, re-run these tasks, then
+# `area evals`. Before the change there must already be runs of the previous version on
+# the same tasks, or the verdict is `unpaired` and nothing is certified. Running them
+# costs real model spend, so this is a deliberate act, not part of `make check`.
+#
+# Chosen because each already has an INDEPENDENT LOCKED ORACLE, so "did it work" is not
+# a judgement call — the holdout answers it. Add a task only when it has one too.
+
+tasks:
+  - name: taskboard
+    flow: A            # requirement -> build
+    oracle: 5 locked holdout files, 18 tests, all AC covered
+    why: multi-entity CRUD with auth + isolation + durability; the broadest exercise
+
+  - name: invoice_mgr
+    flow: A
+    oracle: 6 locked holdout files
+    why: data-model heavy (declarations, MST validation, seeding, persistence)
+
+  - name: fb_incept
+    flow: A            # via `area intake` (AI-DLC inception)
+    oracle: 2 locked holdout files, dual-generation (.test.ts + .holdout.test.mjs)
+    why: the intake/inception path, and the one app that exercises two oracle generations

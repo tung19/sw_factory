@@ -298,8 +298,17 @@ def run_once(
     try:
         from area import obs
 
+        # NO `passed=` on purpose. `run_once` has no Verifier — it sends one message
+        # and runs the agent to completion. Recording `passed=True` here claimed a
+        # verdict nobody measured, and `area evals` grades `pass_rate` off this
+        # ledger, so the gate on changes to the factory's own prompts was reading a
+        # constant. `obs.log_run` defaults `passed=None` and `evals.metrics` already
+        # excludes unjudged runs ("None where it cannot be computed — never 0"), so
+        # leaving it unset is what makes the metric honest. A caller that DOES verify
+        # afterwards (e.g. holdout authoring checking the files landed) should log its
+        # own verdict; it must not be inferred from "the agent finished".
         obs.log_run(label, duration=_t.time() - t0, cost=obs.cost_of(conv),
-                    passed=True, backend=type(agent).__name__)
+                    backend=type(agent).__name__)
     except Exception:
         pass
     return conv
