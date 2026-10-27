@@ -452,6 +452,20 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
                   "recommended (logic-green ≠ live-works). Add --e2e (it is forced "
                   "before a --deploy).")
 
+    # Apply the deterministic vinext fixes BEFORE the gates, so what the gates judge
+    # — and what provenance then attests — is the app as it will actually deploy.
+    # These used to run only at deploy time, i.e. AFTER the attestation, so the shipped
+    # bytes differed from the gated ones. Running them here also clears the braces CVE
+    # chain before `audit` sees it, which is the recurring vinext failure anyway.
+    # Idempotent and a no-op on a non-Cloudflare app.
+    if (getattr(args, "target", None) or "") == "cloudflare":
+        try:
+            from area.build.cf_scaffold import harden_cf_app
+
+            harden_cf_app(res.app_dir)
+        except Exception as e:  # noqa: BLE001 — a safety net must not break a build
+            print(f"[area] cf-fix (pre-gate) skipped (warn): {e}")
+
     for g in gates:
         print(f"\n[area] === gate: {g} ===")
         ok = _run_gate(g, res.name, args)

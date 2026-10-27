@@ -24,7 +24,13 @@ Nothing (code or secrets) leaves your machine except a deploy you explicitly run
 - **Secrets never hit argv/logs.** Deploy tokens are passed via stdin/env, never on
   the command line; `safe_name()` sanitizes every name used in a filesystem path;
   `area export --repo` and `area clone` reject git transport-helper RCE vectors.
-- **Dashboard is auth-gated** (token, `127.0.0.1` by default). Disabling auth
+- **Dashboard is auth-gated** (token, `127.0.0.1` by default). A token in the URL is a
+  **one-shot handoff**: it sets an `HttpOnly; SameSite=Strict` cookie and then redirects
+  to the clean path, so it does not persist in the address bar, the history entry or a
+  `Referer`. `Secure` is added over TLS (setting it on plain `http://localhost` would
+  make the browser drop the cookie). Honest residue: `area gui` still *prints* a
+  `?token=` URL, so the token lands in your shell history — unavoidable for a local
+  handoff, and the reason the default bind is loopback. Disabling auth
   (`AREA_GUI_NO_AUTH=1`) exposes full local control — only for trusted local use.
 
 - **Credentials are screened on the way IN**, not only out. Material copied from an
