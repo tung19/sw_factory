@@ -47,7 +47,7 @@ Requirement/source
 | Intake | `area/intake/aidlc.py`, `area/re/extract.py` | normalize the input (AI-DLC artifacts, or reverse-engineer a reference app — RE Tier 1 built-in, Tier 2 = REA MCP) |
 | Spec | `area/spec/` (`extract.py`, `models.py`, `review.py`) | produce `spec.yaml` + `acceptance.yaml` + `assumptions.yaml`; an **independent reviewer** flags material ambiguities; `--clarify` (default on) stops before building if the requirement is too vague |
 | Design | `area/design.py` | architect stage (`design.md`); auto-runs for a non-trivial app (entities or ≥3 features) |
-| Lock holdout | `area/verify/holdout.py` | an **independent subagent** authors the acceptance tests under `__tests__/_holdout/` from the spec ONLY, then they are **checksum-locked** (see "Independence enforcement") |
+| Lock holdout | `area/verify/holdout.py` | **`--tdd` (the default)**: an **independent subagent** authors the acceptance tests under `__tests__/_holdout/` from the spec ONLY, in an EMPTY directory, *before any implementation exists*, then they are **checksum-locked** (see "Independence enforcement"). The non-TDD `verify` gate authors the same suite **after** the build and is a weaker oracle — see "Two oracle strengths" |
 | Build to green | `area/build/`, `area/engine/adapter.py` | the build agent writes app code until the **locked** holdout passes; it may never edit the holdout |
 | Gates | `area/verify/*` | the 9 gates below; a blocking failure stops the deploy |
 | Provenance | `area/provenance.py` | SLSA-style record {spec digest → gates passed → artifact sha256} so a later deploy can prove the build wasn't modified after gating |
@@ -65,7 +65,7 @@ Posture rule: **deterministic gates block; LLM-judgement gates are advisory unti
 
 | Gate | Module | Kind | Blocks? |
 |------|--------|------|---------|
-| holdout / `verify` | `holdout.py` | the locked oracle (independent agent authors, runner executes) | **yes** (the oracle) |
+| holdout / `verify` | `holdout.py` | the locked oracle (independent agent authors, runner executes). `--tdd` removes this gate as redundant — the pre-locked holdout already drove the build; so this gate only runs on the **non-TDD** path, where it is the weaker of the two oracles ("Two oracle strengths") | **yes** (the oracle) |
 | `audit` | `audit.py` | tier-1 deterministic (tsc + `npm audit` + secrets); tier-2 risky-pattern scan | tier-1 yes; tier-2 **injection class (XSS/eval/SQL-injection) blocks by default** (`--no-block-injection` downgrades), the rest on `--strict` |
 | `e2e` | `e2e.py` | Playwright drives the real UI (one spec per AC) | **forced before deploy** for auth/session/form apps (`--no-e2e` overrides) |
 | `chaos` | `chaos.py` | adversarial inputs + resilience; hardens the app | yes (chaos suite) |
@@ -120,6 +120,33 @@ agent** — AREA runs builders in two different contexts, so be precise about wh
    it writes `__tests__/_holdout/_CHALLENGE.md`; an **independent verifier** (never the
    builder) re-adjudicates against the spec and re-locks. This is "evolving tests under
    governance", not tampering. *Covers A and B.*
+
+### Two oracle strengths — `--tdd` vs the non-TDD `verify` gate
+
+`CLAUDE.md` enforcement **(a)** is: *author the holdout from the spec ONLY, before any
+implementation exists.* Only one of AREA's two paths can satisfy that, and the
+difference is worth stating plainly rather than calling both "the locked oracle":
+
+| | `--tdd` (default) | non-TDD `verify` gate |
+|---|---|---|
+| When the oracle is authored | **before** the build | **after** the build |
+| What the author can see | the spec only, in an EMPTY dir | the spec **and the implementation** |
+| Who defines the contract | the tests (`CONTRACT.md`) — the code must satisfy them | the code — the tests must import "its real modules as the app exposes them" |
+| Satisfies enforcement (a) | **yes** | **no, by construction** |
+
+Both paths keep independence of *reasoning* (a separate agent, fresh context, forbidden
+from touching app source). The non-TDD path loses independence of *information*: an
+author that reads the implementation can encode what the code does rather than what the
+AC requires. The gate therefore prints a warning when it authors against existing
+source, and `--tdd` is the path to prefer.
+
+**A locked oracle is never re-authored.** `author_until` refuses when
+`specs/<name>/holdout.lock` exists and matches (it reuses the suite) and raises when it
+does not match (tamper → revert, or `_CHALLENGE.md`). Without that guard, running
+`area verify` on a `--tdd`-built app replaced the strong pre-locked oracle with a
+post-build one *and* rewrote the lock to match — after which
+`tools/verify-holdout-intact.sh` reported the oracle intact. The one sanctioned way to
+replace a locked oracle is `readjudicate`, which clears the lock first.
 
 ## The outer loop (grading the factory, not the app)
 

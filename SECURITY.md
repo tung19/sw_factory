@@ -12,7 +12,11 @@ Nothing (code or secrets) leaves your machine except a deploy you explicitly run
   See `docs/ARCHITECTURE.md` (the 9 gates) and `CONTRIBUTING.md` (the rules).
 - **Independent, locked oracle.** Acceptance tests are authored by a separate agent
   from the spec and checksum-locked, and the gate confirms the locked suite actually
-  ran. A PreToolUse hook (`tools/hooks/guard_holdout.py`) *blocks* edits in a Claude
+  ran. A locked oracle is never silently re-authored: it is reused when intact and the
+  run is refused when it no longer matches its lock. Note the two strengths — only a
+  `--tdd` build authors the oracle *before* any implementation exists; the non-TDD
+  `verify` gate authors it afterwards against the app's real modules and says so (see
+  "Two oracle strengths" in `docs/ARCHITECTURE.md`). A PreToolUse hook (`tools/hooks/guard_holdout.py`) *blocks* edits in a Claude
   Code session rooted in this repo; for the autonomous build agent the lock is
   detect-and-revert, not prevent (see `docs/ARCHITECTURE.md`).
 - **Provenance before deploy.** A build is attested (spec digest → gates → artifact
