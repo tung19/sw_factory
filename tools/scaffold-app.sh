@@ -7,18 +7,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="${1:?usage: scaffold-app.sh <app-name> [workspace-dir]}"
-# Resolve the workspace AREA actually uses (AREA_WORKSPACE-aware), not the literal
-# `workspace/` inside the repo. This one WRITES, so the old default was worse than the
-# read-only cases: step 0 scaffolded the app into the repo while every later `area`
-# command read from AREA_WORKSPACE — a split brain where the spec docs and the app the
-# engine builds live in different trees.
-_resolve_ws() {
-  if [ -x .venv/bin/python ]; then
-    .venv/bin/python -c 'from area.paths import WORKSPACE; print(WORKSPACE)' 2>/dev/null && return
-  fi
-  printf 'workspace\n'
-}
-WS="${2:-$(_resolve_ws)}"
+. "$(dirname "$0")/_workspace.sh"
+# $2 wins (the Python callers always pass it); otherwise the workspace AREA resolves —
+# NOT the literal `workspace/` in the repo. Generated apps live outside it by default, so
+# the old `${2:-workspace}` made this command fail when run exactly as CLAUDE.md
+# prescribes, and fail by blaming the operator for an oracle that was right there.
+WS="${2:-$(area_workspace)}"
 ROOT="$WS/apps/$APP"
 mkdir -p "$ROOT/docs" "$ROOT/tasks" "$ROOT/changelog" \
          "$ROOT/__tests__/_holdout" "$ROOT/tests/unit" "$ROOT/tests/integration" "$ROOT/tests/end-to-end"

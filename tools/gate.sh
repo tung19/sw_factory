@@ -29,7 +29,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="${1:?usage: gate.sh <app-name> [--e2e] [--chaos] [--perf] [--strict]}"; shift || true
-AREA=".venv/bin/area"; PY=".venv/bin/python"
+. "$(dirname "$0")/_workspace.sh"
 STRICT=""; E2E=""; CHAOS=""; PERF=""
 for a in "$@"; do
   case "$a" in
@@ -42,11 +42,15 @@ for a in "$@"; do
   esac
 done
 
-# AREA_WORKSPACE-aware: generated apps normally live OUTSIDE the repo.
-APPDIR="$("$PY" -c 'import sys
-from area.paths import WORKSPACE
-print(WORKSPACE / "apps" / sys.argv[1])' "$APP")"
+# AREA_WORKSPACE-aware: generated apps normally live OUTSIDE the repo. Resolved in
+# shell, BEFORE any python is needed, so a missing app is reported as a usage error
+# rather than as whatever a missing interpreter happens to do (this used to exit 127).
+APPDIR="$(area_workspace)/apps/$APP"
 [ -d "$APPDIR" ] || { echo "gate.sh: no app at $APPDIR" >&2; exit 2; }
+
+PY="$(area_python)" || { echo "gate.sh: no python found (.venv/bin/python, python3, python)" >&2; exit 2; }
+AREA=".venv/bin/area"
+[ -x "$AREA" ] || { echo "gate.sh: $AREA not found — run \`make install\` (or uv sync) first" >&2; exit 2; }
 
 TOTAL=3
 for f in "$E2E" "$CHAOS" "$PERF"; do [ -n "$f" ] && TOTAL=$((TOTAL+1)); done

@@ -5,20 +5,12 @@
 #   tools/lock-holdout.sh <app-name> [workspace-dir]
 set -euo pipefail
 APP="${1:?usage: lock-holdout.sh <app-name> [workspace-dir]}"
-# Default the workspace to the one AREA actually resolves (AREA_WORKSPACE-aware), not
-# the literal `workspace/` next to this repo. Generated apps live OUTSIDE the repo by
-# default, so the old `${2:-workspace}` made this command fail when run exactly as
-# CLAUDE.md prescribes — and fail with "hãy viết test holdout trước", blaming the
-# operator for a missing oracle while the real one sat in the real app directory. The
-# Python callers always pass $2 explicitly, so they were unaffected; it was the
-# documented MANUAL path that was broken.
-_resolve_ws() {
-  if [ -x .venv/bin/python ]; then
-    .venv/bin/python -c 'from area.paths import WORKSPACE; print(WORKSPACE)' 2>/dev/null && return
-  fi
-  printf 'workspace\n'
-}
-WS="${2:-$(_resolve_ws)}"
+. "$(dirname "$0")/_workspace.sh"
+# $2 wins (the Python callers always pass it); otherwise the workspace AREA resolves —
+# NOT the literal `workspace/` in the repo. Generated apps live outside it by default, so
+# the old `${2:-workspace}` made this command fail when run exactly as CLAUDE.md
+# prescribes, and fail by blaming the operator for an oracle that was right there.
+WS="${2:-$(area_workspace)}"
 HOLD="$WS/apps/$APP/__tests__/_holdout"
 LOCK="$WS/specs/$APP/holdout.lock"
 

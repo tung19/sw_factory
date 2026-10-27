@@ -106,3 +106,70 @@ def test_gate_sh_resolves_the_app_through_area_paths(tmp_path, monkeypatch):
                        capture_output=True, text=True, cwd=str(REPO), env=env, timeout=120)
     assert r.returncode == 2
     assert str(tmp_path) in r.stderr, r.stderr
+
+
+# ---- the condition CI exposed and the local run could not --------------------
+
+def _tools_copy(tmp_path: Path) -> Path:
+    """A checkout of `tools/` with NO `.venv` beside it — what CI actually has, and
+    what a fresh clone has before `make install`."""
+    dst = tmp_path / "checkout"
+    dst.mkdir()
+    shutil.copytree(REPO / "tools", dst / "tools")
+    assert not (dst / ".venv").exists()
+    return dst
+
+
+def test_resolution_survives_a_checkout_with_no_venv(tmp_path):
+    """The first version of this fix asked `.venv/bin/python` for the workspace and fell
+    back to the literal `workspace/` when that was missing — so wherever there was no
+    venv it silently reverted to the bug it was fixing. The local suite could not catch
+    that, because the local checkout HAS a venv; CI did. The resolver is pure shell now."""
+    checkout = _tools_copy(tmp_path)
+    ws = tmp_path / "ws"
+    (ws / "apps" / "t" / HOLDOUT).mkdir(parents=True)
+    (ws / "specs" / "t").mkdir(parents=True)
+    (ws / "apps" / "t" / HOLDOUT / "ac1.test.ts").write_text("it('AC-1', () => {})\n")
+
+    env = dict(os.environ, AREA_WORKSPACE=str(ws))
+    for script in ("lock-holdout.sh", "verify-holdout-intact.sh"):
+        r = subprocess.run(["bash", str(checkout / "tools" / script), "t"],
+                           capture_output=True, text=True, env=env, cwd="/", timeout=120)
+        assert r.returncode == 0, f"{script}: {r.stdout}{r.stderr}"
+    assert (ws / "specs" / "t" / "holdout.lock").read_text().strip()
+
+
+def test_the_default_is_anchored_on_the_script_not_on_the_caller_cwd(tmp_path):
+    """`lock-holdout.sh` and `verify-holdout-intact.sh` do not cd to the repo root, so a
+    `$PWD`-relative default would mean a different directory depending on where the
+    operator happened to stand."""
+    checkout = _tools_copy(tmp_path)
+    env = {k: v for k, v in os.environ.items() if k != "AREA_WORKSPACE"}
+    r = subprocess.run(["bash", str(checkout / "tools" / "verify-holdout-intact.sh"), "t"],
+                       capture_output=True, text=True, env=env, cwd="/", timeout=120)
+    out = r.stdout + r.stderr
+    assert str(checkout / "workspace") in out, out
+    assert "/workspace/specs" in out
+
+
+def test_gate_sh_reports_a_missing_app_before_it_needs_a_python(tmp_path):
+    """It used to exit 127 ("`.venv/bin/python`: No such file or directory") where it
+    meant "no such app". The workspace is resolved in shell, so the usage error comes
+    first."""
+    checkout = _tools_copy(tmp_path)
+    env = dict(os.environ, AREA_WORKSPACE=str(tmp_path / "nowhere"))
+    r = subprocess.run(["bash", str(checkout / "tools" / "gate.sh"), "ghost"],
+                       capture_output=True, text=True, env=env, cwd="/", timeout=120)
+    assert r.returncode == 2, f"{r.returncode}: {r.stderr}"
+    assert "no app at" in r.stderr and "nowhere" in r.stderr
+
+
+def test_the_resolver_asks_no_interpreter(tmp_path):
+    """A guard for the regression itself: the workspace resolution must not depend on an
+    interpreter being present, or it will quietly fall back again."""
+    src = (REPO / "tools" / "_workspace.sh").read_text()
+    # The function BODY only — the file's header comment legitimately explains the bug
+    # by naming `.venv/bin/python`, and `area_python()` below is allowed to use it.
+    body = src.split("\narea_workspace() {", 1)[1].split("\n}", 1)[0]
+    for forbidden in (".venv/bin/python", "python3", "python "):
+        assert forbidden not in body, f"area_workspace() depends on {forbidden!r}"

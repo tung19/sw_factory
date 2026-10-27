@@ -366,7 +366,24 @@ is enough to inject; in Flow B the log carries output from an untrusted referenc
     AREA_WORKSPACE — a split brain where the spec docs and the app the engine builds live
     in different trees.
 
-  All three now resolve the workspace through `area.paths`. The Python callers always
+  **My first fix for this was itself broken, and CI is what caught it.** It asked
+  `.venv/bin/python` for the workspace and fell back to the literal `workspace/` when
+  that was missing — so in any checkout without a venv (CI, a fresh clone before
+  `make install`) it silently reverted to the bug it was fixing. The local suite could
+  not catch it, because the local checkout has a venv. `gate.sh` also exited **127**
+  (`.venv/bin/python: No such file or directory`) where it meant "no such app". A second
+  bug in the same fix: the default was `$PWD`-relative, while `lock-holdout.sh` and
+  `verify-holdout-intact.sh` do not cd to the repo root, so it meant a different
+  directory depending on where the operator stood.
+
+  Resolution now lives in `tools/_workspace.sh`, shared by all four scripts so they
+  cannot drift: **pure shell** (no interpreter, mirroring `area.paths.workspace()`),
+  **anchored on the script's own location** rather than `$PWD`, with tilde expanded by
+  hand rather than through `eval`. Verified under the exact CI condition — a copy of
+  `tools/` with no `.venv` beside it, invoked from `/` — for both branches, with
+  `AREA_WORKSPACE` set and unset.
+
+  All three now resolve the workspace through that resolver. The Python callers always
   passed it explicitly, so the engine was never affected; it was the documented MANUAL
   path that was broken. `tests/test_tools_find_the_real_workspace.py` pins the round-trip,
   proves the lock still detects both an edited file and an ADDED one, and fails if the
