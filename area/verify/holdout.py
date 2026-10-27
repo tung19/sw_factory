@@ -21,8 +21,11 @@ Two ways to use it:
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import shlex
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -31,7 +34,7 @@ import yaml
 from area._util import safe_name
 from area.engine import Backend, Verifier, VerifyResult, build_agent, run_once, run_until
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
-from area.verify._runners import assert_vitest_ran
+from area.verify._runners import assert_locked_files_ran, assert_vitest_ran
 
 HOLDOUT_DIR = "__tests__/_holdout"
 # The ONE file the builder may write inside the locked dir: a challenge that a
@@ -344,13 +347,28 @@ def author_until(
     return holdout, lock
 
 
-def _holdout_oracle(
-    app: Path, holdout: Path, lock: dict[str, str], *, cmd: Optional[list[str]] = None
-) -> Verifier:
-    """A Verifier that (1) rejects any change to the locked suite, then (2) runs
-    it. `cmd` defaults to just the holdout tests; TDD passes a build+test cmd."""
-    test_cmd = cmd or ["bash", "-lc", f"npx vitest run {HOLDOUT_DIR}"]
+def _vitest_shell(report: Path, build: Optional[str] = None) -> list[str]:
+    """The holdout runner command. `--reporter=json` into `report` is what lets the
+    oracle check WHICH files ran, not just how many tests passed; `--reporter=default`
+    is kept alongside it so the agent still gets readable failure output. `report`
+    lives OUTSIDE the app under a per-run random name, so the builder can neither
+    predict nor pre-write it."""
+    tests = (f"npx vitest run {HOLDOUT_DIR} --reporter=default --reporter=json "
+             f"--outputFile.json={shlex.quote(str(report))}")
+    return ["bash", "-lc", f"{build} && {tests}" if build else tests]
 
+
+def _holdout_oracle(
+    app: Path, holdout: Path, lock: dict[str, str], *,
+    cmd: Optional[list[str]] = None, build: Optional[str] = None,
+) -> Verifier:
+    """A Verifier that (1) rejects any change to the locked suite, then (2) runs it
+    and confirms the LOCKED FILES THEMSELVES executed.
+
+    `build` prefixes a production build onto the run (TDD mode). `cmd` replaces the
+    whole command and is a test seam only — it skips the executed-files check, because
+    there is no vitest report to read.
+    """
     expected = _expected_ac_count(holdout)
 
     def oracle() -> VerifyResult:
@@ -360,6 +378,17 @@ def _holdout_oracle(
                 f"FORBIDDEN: files under {HOLDOUT_DIR}/ were modified. Those are "
                 "the locked acceptance tests — revert them and fix APP CODE only.",
             )
+        # A fresh, unpredictable report path per attempt: a stale or planted file
+        # must not be able to vouch for a run that never happened.
+        report: Optional[Path] = None
+        if cmd is not None:
+            test_cmd = cmd
+        else:
+            fd, tmp = tempfile.mkstemp(prefix="area-holdout-", suffix=".json")
+            os.close(fd)
+            report = Path(tmp)
+            report.unlink(missing_ok=True)  # must be CREATED by the run, not found
+            test_cmd = _vitest_shell(report, build)
         try:
             # Capped: an unbounded oracle run can hang the whole build (same gap
             # closed in area.engine.adapter.command_verifier).
@@ -380,12 +409,22 @@ def _holdout_oracle(
         # vitest config is builder-controlled + unlocked, so passWithNoTests / a
         # non-matching include can exit 0 with zero tests collected).
         ran, why = assert_vitest_ran(out, expected)
+        if ran and report is not None:
+            # Counting passes is not enough. vitest's positional filter is a SUBSTRING
+            # match and only narrows what `include`/`exclude` globbed, so a builder-
+            # authored `exclude` for the locked dir plus a decoy directory whose name
+            # contains it (`__tests__/_holdout_decoy/`) yields exit 0 with the locked
+            # tests never collected. Confirm the locked files ran, by name.
+            # lock keys are relative to the HOLDOUT dir, not the app root.
+            ran, why = assert_locked_files_ran(report, holdout, lock.keys())
+        if report is not None:
+            report.unlink(missing_ok=True)
         if not ran:
             return VerifyResult(
                 False,
                 f"ORACLE DID NOT RUN: build/exit was green but {why}. The locked "
-                f"acceptance suite must EXECUTE (check vitest config: "
-                f"passWithNoTests / include must match {HOLDOUT_DIR}/).\n\n"
+                f"acceptance suite must EXECUTE — do not exclude, rename or shadow "
+                f"{HOLDOUT_DIR}/ in the vitest config; fix APP CODE instead.\n\n"
                 + out[-3500:],
             )
         return VerifyResult(True, out[-4000:])
@@ -431,13 +470,8 @@ def tdd_build_oracle(
     locked holdout suite passes AND the locked files are untouched."""
     app = Path(app)
     build = "npm run build:cf" if target == "cloudflare" else "npm run build"
-    cmd = [
-        "bash",
-        "-lc",
-        "[ -d node_modules ] || npm install --no-audit --no-fund; "
-        f"{build} && npx vitest run {HOLDOUT_DIR}",
-    ]
-    return _holdout_oracle(app, holdout, lock, cmd=cmd)
+    prefix = f"[ -d node_modules ] || npm install --no-audit --no-fund; {build}"
+    return _holdout_oracle(app, holdout, lock, build=prefix)
 
 
 def pending_challenge(holdout: Path) -> Optional[str]:

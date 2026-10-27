@@ -10,7 +10,10 @@ the acceptance criteria), so "green" means "the suite actually passed".
 """
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
+from typing import Iterable, Optional
 
 
 def vitest_passed(output: str) -> int | None:
@@ -53,3 +56,53 @@ def assert_playwright_ran(output: str) -> tuple[bool, str]:
     if not passed:
         return False, "could not confirm any E2E spec ran"
     return True, f"{passed} spec(s) passed"
+
+
+# --- did the LOCKED files themselves run? ------------------------------------
+
+def executed_test_files(report: Path) -> Optional[set[str]]:
+    """Absolute paths of the test files a vitest JSON report says actually ran, or
+    None if the report is missing or unreadable (treated as "cannot confirm", which
+    the caller must fail on rather than pass)."""
+    try:
+        data = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    results = data.get("testResults")
+    if not isinstance(results, list):
+        return None
+    out: set[str] = set()
+    for r in results:
+        name = r.get("name") if isinstance(r, dict) else None
+        if isinstance(name, str) and name:
+            out.add(name)
+    return out
+
+
+def assert_locked_files_ran(report: Path, app: Path,
+                            locked: Iterable[str]) -> tuple[bool, str]:
+    """(ok, why): every locked test file must appear in the runner's own report of
+    what it executed.
+
+    `locked` are the holdout lock's keys, which are relative to the HOLDOUT DIRECTORY,
+    not to the app root — pass that directory as `app`. (Passing the app root makes
+    every file look un-run, which still blocks the attack but also blocks every honest
+    build; a real end-to-end run is what caught it.) Comparison is
+    by resolved absolute path, so a decoy whose name merely contains the locked
+    directory cannot stand in for a locked file. A missing report fails: the whole
+    point is to stop trusting a green exit code.
+    """
+    wanted = {p for p in locked if p.endswith((".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"))}
+    if not wanted:
+        return True, "no runnable locked test files to confirm"
+    ran = executed_test_files(report)
+    if ran is None:
+        return False, ("the runner produced no machine-readable report, so WHICH tests "
+                       "ran cannot be confirmed")
+    ran_resolved = {str(Path(p).resolve()) for p in ran}
+    missing = sorted(p for p in wanted
+                     if str((app / p).resolve()) not in ran_resolved)
+    if missing:
+        return False, ("the runner never executed " + ", ".join(missing[:10])
+                       + f" ({len(missing)} of {len(wanted)} locked file(s) did not run)")
+    return True, f"all {len(wanted)} locked file(s) executed"
