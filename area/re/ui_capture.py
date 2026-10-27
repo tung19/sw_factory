@@ -132,6 +132,24 @@ def _http_get(url: str, *, max_bytes: int) -> Optional[bytes]:
 # "text", so spa_caveat never fired on the textbook case it exists for).
 _NON_TEXT_TAGS = {"script", "noscript", "template"}
 
+# Below this much server-rendered copy, a page that also ships script is a
+# client-rendered shell: what we captured is partial.
+_SPA_TEXT_FLOOR = 200
+
+
+def looks_like_spa(visible_text: int, scripts: int) -> bool:
+    """Does a plain fetch of this page look like a client-rendered shell?
+
+    Measured on real pages: excalidraw.com 31 chars / 6 scripts (a true SPA),
+    example.com 155 chars / 1 script (its visible content is injected by /s.js),
+    news.ycombinator.com 3609 chars (genuinely server-rendered). A `<div id=root>`
+    mount is a strong hint but NOT required — requiring it missed both real SPAs
+    above — and it must not be sufficient either, or every server-rendered Next.js
+    page (which ships `<div id="__next">` full of content) would be mislabelled.
+    So: little copy + any script.
+    """
+    return scripts > 0 and visible_text < _SPA_TEXT_FLOOR
+
 
 class _AssetCollector(HTMLParser):
     def __init__(self) -> None:
@@ -337,8 +355,7 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
         (ui_dir / "assets" / name).write_bytes(data)
         assets.append(f"assets/{name}")
 
-    # SPA heuristic: almost no server-rendered text but a JS mount point + scripts
-    spa = parser.visible_text < 200 and parser.has_root_mount and parser.scripts > 0
+    spa = looks_like_spa(parser.visible_text, parser.scripts)
     return UiEvidence(
         captured=True,
         source_kind="url",

@@ -235,6 +235,27 @@ def _have_node() -> bool:
     return shutil.which("node") is not None and shutil.which("npx") is not None
 
 
+_CRASH_NOISE = ("at ", "triggerUncaughtException", "Node.js v", "^")
+
+
+def _harness_error(output: str) -> str:
+    """Pick the USEFUL line out of a harness failure.
+
+    visual_diff.mjs's contract is to print `error:`/`hint:`/`missing dependency:`,
+    so prefer those. If it crashed instead, a Node dump's LAST line is the useless
+    `Node.js vXX.Y.Z` footer — which is exactly what a naive tail reported before.
+    """
+    lines = [ln.strip() for ln in (output or "").splitlines() if ln.strip()]
+    for ln in lines:
+        if ln.lower().startswith(("error:", "missing dependency:", "hint:")):
+            return ln[:200]
+    for ln in lines:
+        if ln.startswith(_CRASH_NOISE) or not set(ln) - set("╔╗╚╝║═^ "):
+            continue
+        return ln[:200]
+    return "unknown harness failure"
+
+
 def _pixel_layer(app: Path, out_dir: Path, reference_url: str,
                  *, timeout: float = 240.0) -> tuple[Optional[float], str, Optional[str]]:
     """Screenshot the booted clone + the live reference and diff them.
@@ -280,8 +301,7 @@ def _pixel_layer(app: Path, out_dir: Path, reference_url: str,
         except (subprocess.TimeoutExpired, OSError) as e:
             return None, f"screenshot harness failed to run: {type(e).__name__}", clone_html
         if r.returncode != 0:
-            tail = (r.stderr or r.stdout or "").strip().splitlines()
-            why = tail[-1][:160] if tail else f"exit {r.returncode}"
+            why = _harness_error(f"{r.stderr or ''}\n{r.stdout or ''}")
             return None, f"screenshot harness error: {why}", clone_html
         res_path = out_dir / "pixel.json"
         if not res_path.is_file():

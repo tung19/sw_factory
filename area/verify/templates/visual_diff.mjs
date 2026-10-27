@@ -42,7 +42,22 @@ try {
 
 mkdirSync(outDir, { recursive: true });
 
-const browser = await chromium.launch();
+// Fail with ONE clean line on stderr rather than an uncaught crash: the Python
+// side reads this to turn a failure into a graceful, well-explained skip (a raw
+// Node dump's last line is the useless `Node.js vXX` footer).
+const firstLine = (e) => String(e?.message ?? e).split('\n')[0].trim();
+
+let browser;
+try {
+  browser = await chromium.launch();
+} catch (e) {
+  console.error(`error: cannot launch chromium — ${firstLine(e)}`);
+  if (/Executable doesn't exist|playwright install/i.test(String(e?.message ?? e))) {
+    console.error('hint: npx playwright install chromium (the installed playwright '
+      + 'expects a browser build that is not in the cache)');
+  }
+  process.exit(4);
+}
 try {
   const shoot = async (url, file) => {
     const page = await browser.newPage({ viewport: VIEWPORT });
@@ -75,6 +90,9 @@ try {
     JSON.stringify({ mismatch: diffPixels / total, diffPixels, total, width, height }, null, 2),
   );
   console.log(`pixel mismatch ${(100 * diffPixels / total).toFixed(2)}% (${diffPixels}/${total})`);
+} catch (e) {
+  console.error(`error: ${firstLine(e)}`);
+  process.exitCode = 5;
 } finally {
   await browser.close();
 }

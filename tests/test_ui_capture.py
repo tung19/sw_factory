@@ -12,6 +12,7 @@ from area.re.ui_capture import (
     _AssetCollector,
     capture_ui_evidence,
     is_safe_http_url,
+    looks_like_spa,
 )
 from area.spec.models import Spec, UiEvidence
 from area.ui_tokens import extract_tokens
@@ -81,6 +82,15 @@ def test_asset_collector_links_styles_and_spa_signal():
     assert c.inline_styles and ".a{color:#abc}" in "".join(c.inline_styles)
     assert c.has_root_mount is True and c.scripts == 1
     assert c.visible_text < 200  # SPA-ish shell
+
+
+def test_looks_like_spa_on_real_measurements():
+    """Pinned to pages actually measured while dogfooding, so the heuristic can't
+    silently regress to one that missed real SPAs."""
+    assert looks_like_spa(31, 6) is True       # excalidraw.com — true SPA shell
+    assert looks_like_spa(170, 1) is True      # example.com — content injected by /s.js
+    assert looks_like_spa(3609, 1) is False    # news.ycombinator.com — real SSR page
+    assert looks_like_spa(10, 0) is False      # thin page, but no script → not an SPA
 
 
 def test_asset_collector_ignores_script_and_noscript_text():

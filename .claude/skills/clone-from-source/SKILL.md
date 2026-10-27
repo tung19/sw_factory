@@ -96,6 +96,14 @@ build to match it.
    committed floor that could NOT be measured fails loudly rather than silently passing.
    An SPA reference scores low by construction (a plain fetch sees no client-rendered
    markup) — read the caveat before tightening the threshold.
+   **Pixel-layer limit (proven, not theoretical):** it screenshots the reference's
+   RENDERED page, so any content the reference injects with its own JavaScript is in
+   the reference shot but can never be in the clone's — the clone has the markup, not
+   that origin's scripts. Dogfooding example.com showed this exactly: the served HTML
+   is a 577-byte shell plus `<script src=/s.js>`, and a byte-identical clone still
+   measured 2.4% mismatch — all of it the JS-injected translations. So read a pixel
+   score against the `spa_caveat` flag; for a client-rendered reference the honest
+   signal is `dom` + `tokens`, not pixels.
    **What a score means (calibrated on real AREA-built Next.js apps, repo mode):** an
    identical app scores **1.00** (tokens 1.00 / dom 1.00); a genuinely DIFFERENT app
    scores **0.19–0.28** (tokens 0.33–0.43 / dom 0.10–0.18). So the default 0.75 sits in
