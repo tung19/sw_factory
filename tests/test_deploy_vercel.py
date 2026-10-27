@@ -38,6 +38,10 @@ def test_gate_routes_to_vercel(monkeypatch, tmp_path):
 
 
 def test_gate_routes_to_cloudflare_and_provisions_d1(monkeypatch, tmp_path):
+    # The attestation tripwire has its own tests (test_attest_what_ships.py);
+    # stub it here so this stays a routing/provisioning test and does not copy
+    # the braces template or shell out to `npm ls`.
+    monkeypatch.setattr(D, "_settle_before_attesting", lambda a, p: True)
     (tmp_path / "cloudflare.config.ts").write_text("env: { DB: bindings.d1() }")
     order = []
     monkeypatch.setattr(C, "provision_d1", lambda a: (order.append("provision"), (True, "ok"))[1])

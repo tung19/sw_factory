@@ -71,7 +71,7 @@ Posture rule: **deterministic gates block; LLM-judgement gates are advisory unti
 | `chaos` | `chaos.py` | adversarial inputs + resilience; hardens the app | yes (chaos suite) |
 | `nfr` | `nfr.py` | deterministic static budget (bundle/deps/install size) | spec `nfr.yaml` blocks; defaults advisory unless `--strict` |
 | `perf` | `perf.py` | boots the app, fires concurrent load, measures p50/p95/p99 + throughput + error-rate | spec `perf.yaml` blocks; defaults advisory unless `--strict` |
-| `product` | `product.py` | independent reviewer judges product-fit / UX gaps | advisory unless `--strict` |
+| `product` | `product.py` | independent reviewer judges product-fit / UX gaps (*did we build the right thing?*) | advisory unless `--strict`; under `--strict` it also fails when it could NOT form a verdict — no spec, no reviewer, or an unparseable reply — same rule as nfr/visual |
 | `cost` | `cost.py` | hard cost cap: total build spend (across retries, app-scoped from `obs`) vs budget — the HARD complement to `--budget`'s soft per-run cap | spec `cost.yaml` (`max_usd:`) / `--cost-max` blocks; default advisory unless `--strict` |
 
 The gate set is a single source — `cli._GATE_ORDER` drives the `_finish` selection,

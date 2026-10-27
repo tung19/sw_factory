@@ -50,14 +50,51 @@ def test_product_passes_when_ok(tmp_path):
     assert PV.product_verify("app", root=tmp_path, strict=True, ask=ask) is True
 
 
-def test_product_fail_open(tmp_path):
+def test_product_fail_open_when_advisory(tmp_path):
+    """Without --strict the gate is advisory: it cannot measure, so it says so and
+    passes rather than wedging a build."""
     _mk(tmp_path)
 
     def boom(_p):
         raise RuntimeError("no claude on PATH")
 
-    assert PV.product_verify("app", root=tmp_path, strict=True, ask=boom) is True
-    assert PV.product_verify("missing", root=tmp_path, strict=True, ask=boom) is True
+    assert PV.product_verify("app", root=tmp_path, ask=boom) is True
+    assert PV.product_verify("missing", root=tmp_path, ask=boom) is True
+
+
+def test_product_does_not_fail_open_under_strict(tmp_path, capsys):
+    """Policy fix: an ENFORCED gate that could not measure must FAIL, not pass — the
+    rule nfr/visual already follow. Previously --strict only blocked a 'concerns'
+    verdict, so an unavailable reviewer, a missing spec, or an unparseable reply all
+    reported a pass."""
+    _mk(tmp_path)
+
+    def boom(_p):
+        raise RuntimeError("no claude on PATH")
+
+    assert PV.product_verify("app", root=tmp_path, strict=True, ask=boom) is False
+    assert PV.product_verify("missing", root=tmp_path, strict=True, ask=boom) is False
+    assert "BLOCK (--strict)" in capsys.readouterr().out
+
+
+def test_an_unparseable_reply_is_not_a_passing_verdict(tmp_path, capsys):
+    """The worst of the four: `_parse_verdict` returns verdict='ok' with parsed=False
+    on unusable output, and nothing read that flag — so the gate printed
+    "✅ verdict=ok" about a reply it never understood. A false green in a gate."""
+    _mk(tmp_path)
+    garbage = lambda _p: "I'm afraid I can't do that."  # noqa: E731
+
+    assert PV._parse_verdict("nonsense")["verdict"] == "ok"      # unchanged, pure
+    assert PV._parse_verdict("nonsense")["parsed"] is False      # the flag callers need
+
+    assert PV.product_verify("app", root=tmp_path, strict=True, ask=garbage) is False
+    out = capsys.readouterr().out
+    assert "could not be parsed" in out and "verdict=ok" not in out
+
+    # advisory mode still passes, but must not claim a verdict it does not have
+    assert PV.product_verify("app", root=tmp_path, ask=garbage) is True
+    out2 = capsys.readouterr().out
+    assert "nothing measured" in out2 and "verdict=ok" not in out2
 
 
 # ---------- reality report (#4, pure) ----------

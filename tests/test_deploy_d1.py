@@ -42,6 +42,10 @@ def test_db_names_fallback_to_app_dir(tmp_path):
 
 
 def test_gate_provisions_d1_before_deploy(monkeypatch, tmp_path):
+    # The attestation tripwire has its own tests (test_attest_what_ships.py);
+    # stub it here so this stays a routing/provisioning test and does not copy
+    # the braces template or shell out to `npm ls`.
+    monkeypatch.setattr(D, "_settle_before_attesting", lambda a, p: True)
     (tmp_path / "cloudflare.config.ts").write_text("env: { DB: bindings.d1() }")
     order = []
     monkeypatch.setattr(C, "provision_d1",
@@ -55,6 +59,10 @@ def test_gate_provisions_d1_before_deploy(monkeypatch, tmp_path):
 
 
 def test_gate_skips_provision_for_plain_app(monkeypatch, tmp_path):
+    # The attestation tripwire has its own tests (test_attest_what_ships.py);
+    # stub it here so this stays a routing/provisioning test and does not copy
+    # the braces template or shell out to `npm ls`.
+    monkeypatch.setattr(D, "_settle_before_attesting", lambda a, p: True)
     (tmp_path / "cloudflare.config.ts").write_text('worker: { name: "app" }')
     order = []
     monkeypatch.setattr(C, "provision_d1",

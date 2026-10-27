@@ -90,6 +90,42 @@ def _provision(provider: str, app_dir: str, *, allow_failure: bool) -> bool:
     return True
 
 
+def _settle_before_attesting(app_dir: str, provider: str) -> bool:
+    """Run the deterministic CF safety net, then prove the app did NOT change.
+
+    It used to run INSIDE `cloudflare.deploy()`, i.e. AFTER `verify_provenance` — so
+    `harden_cf_app` could pin the compat date, write npm overrides and vendor braces,
+    and those mutated bytes shipped while the attestation described the pre-hardened
+    source. The record said "this is what was gated" about something else.
+
+    Now it runs here, before verification, and any mutation REFUSES the deploy: if the
+    safety net had to change an already-gated app, the gates judged different bytes
+    than would ship. `_finish` hardens cloudflare builds before the gates, so in a
+    normal flow this is a no-op tripwire rather than a blocker.
+
+    The digest comparison is deliberately broader than the three things
+    `harden_cf_app` reports: it catches ANY change under the app's source tree."""
+    if provider != "cloudflare":
+        return True
+    from area.provenance import artifact_digest
+
+    before = artifact_digest(app_dir)
+    try:
+        from area.build.cf_scaffold import harden_cf_app
+
+        harden_cf_app(app_dir)
+    except Exception as e:  # noqa: BLE001 — the net is a diagnostic, not a gate
+        print(f"[area] cf-fix safety net skipped (warn): {e}")
+        return True
+    if artifact_digest(app_dir) == before:
+        return True
+    print("[area] ❌ the deterministic cf-fix had to CHANGE this app, and it was "
+          "already gated — so the gates judged different bytes than would ship.")
+    print("[area] refusing deploy. Run `area cf-fix <name>` (or rebuild), then re-run "
+          "the gates so the attestation covers what actually deploys.")
+    return False
+
+
 def deploy_with_gate(
     app_dir: str | Path,
     *,
@@ -114,6 +150,10 @@ def deploy_with_gate(
 
     app_dir = str(app_dir)
     provider = provider or detect_provider(app_dir)
+
+    # Nothing may mutate the app between attestation and deploy.
+    if not _settle_before_attesting(app_dir, provider):
+        return False, None
 
     if require_provenance is None:
         env = (os.getenv("AREA_REQUIRE_PROVENANCE") or "").strip().lower()

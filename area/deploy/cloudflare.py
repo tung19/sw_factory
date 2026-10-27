@@ -136,15 +136,10 @@ def deploy(app_dir: str | Path) -> tuple[bool, str, Optional[str]]:
     app's `npm run deploy` script, falling back to `npx @vinext/cloudflare deploy`.
     """
     app = Path(app_dir)
-    # Deterministic safety net: pin the compat date to the installed workerd +
-    # ensure the braces/fflate overrides, so a deploy-time re-build can't trip the
-    # recurring vinext gotchas even if the build agent skipped them. Idempotent.
-    try:
-        from area.build.cf_scaffold import harden_cf_app
-
-        harden_cf_app(app)
-    except Exception as e:  # noqa: BLE001  (never let the safety net block a deploy)
-        print(f"[cf] cf-fix safety net skipped (warn): {e}")
+    # The deterministic cf-fix safety net used to run HERE — after the provenance
+    # check — so its mutations shipped un-attested. It now runs in
+    # area.deploy._settle_before_attesting, before verification, where a mutation
+    # refuses the deploy instead of silently changing what ships.
     cmd = [
         "bash",
         "-lc",

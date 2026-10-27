@@ -69,8 +69,10 @@ def _product_prompt(spec_text: str, acc_text: str, app_excerpt: str) -> str:
 
 
 def _parse_verdict(raw: str) -> dict[str, Any]:
-    """Pure. Parse the reviewer's reply into {verdict, coverage, gaps}. Never raises.
-    Defaults to a passing verdict when output is unusable (advisory, fail-open)."""
+    """Pure. Parse the reviewer's reply into {verdict, coverage, gaps, parsed}. Never
+    raises. On unusable output it returns a passing verdict with **parsed=False** —
+    callers MUST check that flag, or they report a pass for a reply nobody understood
+    (`product_verify._unmeasurable` is what does)."""
     text = (raw or "").strip()
     if SENTINEL in text:
         text = text.split(SENTINEL, 1)[1].strip()
@@ -94,25 +96,48 @@ def _parse_verdict(raw: str) -> dict[str, Any]:
             "gaps": gaps, "parsed": True}
 
 
+def _unmeasurable(why: str, strict: bool) -> bool:
+    """The gate could not form a verdict. Under --strict that is a FAILURE, because an
+    enforced gate that cannot measure must not report a pass (the rule nfr/visual
+    already follow). Otherwise it stays advisory, but says plainly that nothing was
+    measured rather than printing a passing verdict."""
+    if strict:
+        print(f"[area] product: ❌ BLOCK (--strict) — {why}, so no verdict was formed")
+        return False
+    print(f"[area] product: — {why}; nothing measured (advisory, use --strict to "
+          "enforce)")
+    return True
+
+
 def product_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
                    strict: bool = False, ask: Optional[Callable[[str], str]] = None,
                    root: Optional[str | Path] = None) -> bool:
-    """Advisory product-fit review of a built app. Returns True (pass) unless
-    `strict` AND the reviewer verdict is 'concerns'. Fail-open on any error."""
+    """Product-fit review of a built app (did we build the RIGHT thing?).
+
+    Advisory by default: it prints and passes. Under `--strict` it enforces, and that
+    now includes the cases where it could NOT measure — no spec, an unavailable
+    reviewer, or a reply it could not parse. The same rule the nfr/visual gates
+    follow: a floor you asked to be enforced but that could not be measured must FAIL
+    loudly, not silently pass.
+
+    That last case mattered most: `_parse_verdict` returns a PASSING verdict with
+    `parsed=False` when the reply is unusable, and nothing read that flag — so the
+    gate could print "✅ verdict=ok" about output it never understood, which is a
+    false green in a gate."""
     base = Path(root) if root else WORKSPACE
     spec_dir, app_dir = base / "specs" / name, base / "apps" / name
     try:
         spec_text = (spec_dir / "spec.yaml").read_text()
         acc_text = (spec_dir / "acceptance.yaml").read_text()
     except Exception:
-        print("[area] product: no spec to review — skipped (advisory)")
-        return True
+        return _unmeasurable("no spec to review", strict)
     prompt = _product_prompt(spec_text, acc_text, _app_excerpt(app_dir))
     try:
         res = _parse_verdict((ask or (lambda p: ask_cli(p, model=model, label="product")))(prompt))
-    except Exception as e:  # noqa: BLE001 — advisory; never wedge the pipeline
-        print(f"[area] product: reviewer unavailable ({type(e).__name__}) — skipped (advisory)")
-        return True
+    except Exception as e:  # noqa: BLE001 — advisory unless --strict
+        return _unmeasurable(f"reviewer unavailable ({type(e).__name__})", strict)
+    if not res.get("parsed", True):
+        return _unmeasurable("the reviewer's reply could not be parsed", strict)
     icon = "✅" if res["verdict"] == "ok" else "⚠️"
     print(f"[area] product: {icon} verdict={res['verdict']} coverage={res['coverage']}")
     for g in res["gaps"]:
