@@ -1,14 +1,21 @@
 # Run an AREA runner (on your own infra)
 
-> **⚠ Not on this branch.** This describes the hosted coordinator + runner from
-> [ADR 0002](adr/0002-coordinator-runner-saas.md), which lives on
-> `saas-coordinator-runner`. On `main` there is **no `area runner` subcommand** (no
-> `area/runner.py`), and the `scripts/run-runner.sh` and hosted `runner.sh` bootstrap
-> referenced below do not exist. `main` is the internal, Claude-Code-native path where
-> AREA runs locally. Read this as the design for that branch, not as instructions you
-> can follow here — and read
-> [secure-factory-gap-assessment.md](secure-factory-gap-assessment.md) first: a
-> multi-user runner needs the boundaries `main` does not have.
+> **This branch only.** The hosted coordinator + runner from
+> [ADR 0002](adr/0002-coordinator-runner-saas.md) lives on `saas-coordinator-runner` —
+> you are reading it there, and the commands below do work here. On **`main`** there is
+> no `area runner` subcommand and no `area/runner.py`, nor the `scripts/run-runner.sh`
+> and hosted `runner.sh` bootstrap referenced below; `main` is the internal,
+> Claude-Code-native path where AREA runs locally.
+>
+> Until 2026-10-27 the commands below did **not** work on this branch either:
+> `area/runner.py` had no subparser and no `__main__`, so `scripts/run-runner.sh` and the
+> hosted bootstrap both `exec`'d a command that did not exist. That is fixed; the flags
+> here are checked against the script by a test.
+>
+> Before running this for more than one person, read
+> [secure-factory-gap-assessment.md](secure-factory-gap-assessment.md): a multi-user
+> runner needs the boundaries neither branch has yet, and pairing is still a single
+> shared token.
 
 
 The **coordinator** only relays; the **runner** does the work. You run the runner

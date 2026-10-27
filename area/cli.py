@@ -744,6 +744,18 @@ def _build_parser() -> argparse.ArgumentParser:
     g.add_argument("--port", type=int, default=8787)
     g.add_argument("--no-open", action="store_true", help="don't auto-open the browser")
 
+    # The data plane (ADR 0002). `area/runner.py` has existed on this branch since the
+    # forward-port, but had NO subparser and no `__main__`, so `scripts/run-runner.sh`
+    # and the hosted `runner.sh` bootstrap both exec'd a command that did not exist —
+    # a documented one-command path that could not run. Flags match that script exactly
+    # (`--connect`, `--token`) and honour the same env vars it reads.
+    rn = sub.add_parser("runner", help="Run a runner on YOUR infra: dial OUT to a "
+                                      "coordinator and execute its typed jobs locally")
+    rn.add_argument("--connect", default=None, metavar="URL",
+                    help="coordinator ws:// or wss:// URL (or set AREA_COORD_URL)")
+    rn.add_argument("--token", default=None, metavar="TOKEN",
+                    help="pairing token (or set AREA_PAIR_TOKEN)")
+
     sub.add_parser("doctor", help="Check the local setup (Python/Node/git/Claude/deploy creds)")
 
     dm = sub.add_parser("demo", help="Run a committed example app locally — KEYLESS "
@@ -1161,6 +1173,31 @@ def _cmd_doctor(args: argparse.Namespace, expected: str | None) -> int:
     return 0
 
 
+def _cmd_runner(args: argparse.Namespace, expected: str | None) -> int:
+    """Start the data-plane runner. It dials OUT, so nothing has to be reachable from
+    the internet; your Claude login and deploy credentials never leave this machine."""
+    import os
+
+    from area.runner import run_runner
+
+    url = (args.connect or os.getenv("AREA_COORD_URL") or "").strip()
+    token = (args.token or os.getenv("AREA_PAIR_TOKEN") or "").strip() or None
+    if not url:
+        print("[area] runner: need --connect <ws://… | wss://…> (or AREA_COORD_URL).")
+        return 2
+    if not url.startswith(("ws://", "wss://")):
+        # A http(s) URL here is the commonest paste error, and websockets would fail
+        # with an opaque error much later.
+        print(f"[area] runner: --connect must be ws:// or wss:// (got {url!r}). "
+              "The coordinator's dashboard shows the exact command.")
+        return 2
+    if url.startswith("ws://") and not url.startswith(("ws://127.0.0.1", "ws://localhost")):
+        print("[area] runner: ⚠ ws:// is UNENCRYPTED — the pairing token and every job "
+              "cross the network in clear. Use wss:// for anything but localhost.")
+    print(f"[area] runner → {url}   (Ctrl-C to stop)", flush=True)
+    return run_runner(url, token)
+
+
 def _cmd_gui(args: argparse.Namespace, expected: str | None) -> int:
     import uvicorn
 
@@ -1540,6 +1577,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "inception": _cmd_inception, "intake": _cmd_intake, "deploy": _cmd_deploy,
     "export": _cmd_export, "provenance": _cmd_provenance, "rollback": _cmd_rollback,
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
+    "runner": _cmd_runner,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
     "evals": _cmd_evals,
