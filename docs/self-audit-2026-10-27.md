@@ -476,9 +476,16 @@ first of which was already written down:
    2026-10-18 and 2026-10-21. On a Claude subscription that usage counts against plan
    limits, not a per-token invoice. The `--backend llm` path (`LLM_API_KEY`) is where the
    same number *is* real per-token billing.
-2. **The ledger is partial:** 110 of 204 rows carry a cost. `_Agent` (68) and
-   `claude-cli` (26) report none — `ask_cli`, which the spec reviewer and the product
-   reviewer use, has never reported a cost.
+2. **The ledger is partial** — *and this is the part I got wrong; see M8.* What I
+   reported was "110 of 204 rows carry a cost; `_Agent` (68) and `claude-cli` (26)
+   report none". Those 94 unpriced rows were **written by AREA's own test suite**, which
+   had been appending to the real ledger. On the 110 genuine runs, coverage is
+   **110/110** and the $176.84 covers all of them. The *claim* survives on source rather
+   than telemetry: `ask_cli` logs `cost=None` unconditionally
+   (`area/engine/adapter.py:196`) and is what runs the independent spec reviewer, the
+   product gate and web intake — so a build that reviews its spec does have rows the
+   gate cannot price. But I reached a true conclusion from contaminated evidence, which
+   is luck, not method.
 3. **And the gate did not say so.** `build_cost()` drops unpriced rows and sums the rest.
    The all-unpriced case was already handled loudly (an earlier remediation), but the
    PARTIAL case took the normal path: three priced runs out of eight printed
@@ -491,6 +498,71 @@ anything is unpriced, states that the real total is **≥** the measured one rat
 unpriced, so blocking would fail almost every build that runs a spec review, which is a
 false block rather than a finding. A measured breach still blocks regardless of coverage,
 since partial pricing can only *understate* spend.
+
+### M8 · AREA's test suite was writing to the user's real telemetry ledger — FIXED
+
+Found while answering M7: the ledger had 218 rows, and the ones carrying no cost looked
+structural. They were not. `obs.log_run` appends to `WORKSPACE/.area/runs.jsonl` — the
+real one — inside `except Exception: pass`, so a test that drives the genuine `run_until`
+or `ask_cli` pollutes production telemetry **and still passes**.
+`tests/test_scrub_covers_the_build.py`, written the same afternoon, did exactly that:
+three records per suite run, **108 accumulated**. Because `obs._current_app` is a
+process-global that no test resets, they inherited the app name of whichever test had
+last called `set_app`, so they read as real agent runs on a real app.
+
+The damage was not hypothetical. That ledger is what `area cost` prices and what
+`area evals` uses as its A/B baseline, and the fakes had already produced one wrong
+answer *inside this document* (M7 point 2) and one to Tung directly.
+
+`tests/conftest.py` now carries an autouse fixture pointing `obs.RUNS` at `tmp_path` and
+resetting `_current_app`, so it covers tests not yet written.
+`tests/test_the_suite_never_writes_the_real_ledger.py` asserts it by **observing the real
+file**, not by inspecting the fixture — with the fixture disabled, 3 of its 4 tests go red
+and the real ledger grows by 2 in that run. The 108 synthetic rows were removed, keyed on
+a synthetic backend **and** the test window so a genuine `ask_cli` run could not be caught
+by it; the original is kept at `runs.jsonl.bak-2026-10-28`.
+
+### M9 · `area evals` is priced out of ever returning a verdict — OPEN, Tung's call
+
+Found by trying to run the A/B Tung asked for. The mechanism is sound; the **version
+granularity** makes it unaffordable, and the two facts together mean the gate can
+essentially never be decisive.
+
+Measured, not reasoned:
+
+- Between `543c1448` (pre-#40) and `HEAD`, the **only** hashed input that changed is
+  `skills/vinext-cf-build/SKILL.md`. `area/build/nextjs.py` and `profiles/builder.yaml`
+  are untouched.
+- That one edit re-versioned **7 of 16 kinds**: `auditor`, `builder`, `chaos-author`,
+  `e2e-author`, `holdout-author`, `holdout-fixer`, `holdout-readjudicator`. That set is
+  **identical** to the set declaring `skills: all` or `inherited` — so a *Cloudflare*
+  skill moved the versions of the e2e author, the chaos author and the auditor.
+- A new version has no baseline, and `MIN_RUNS = 5` is per side **per kind**. The three
+  declared tasks give 3 runs per kind per pass, so a verdict needs 2 repeats: **12
+  builds**. From the cleaned ledger, a build-session is median **$5.94** / 15 min, mean
+  $9.82, max $37.23 — so **~$71 of token value and ~3h serially, after any skill edit.**
+- And the change in that window is invisible to the task set anyway: all three declared
+  tasks are `--target plain`, where a Cloudflare skill does nothing. Nor can the set be
+  extended to see it — **no Cloudflare app has a locked holdout**, and the eval set
+  requires one.
+
+The coarseness is deliberate; `area/profile.py:96-107` argues for erring toward "this
+changed, re-measure". The flaw is not the conservatism, it is that nothing weighed the
+**price** of re-measuring, so the honest posture and the affordable posture never met.
+
+Not fixed here, on purpose. The digest *is* the oracle for a factory change, and
+"is the oracle itself correct?" is a spec question — CLAUDE.md puts that with Tung, not
+with the thing being graded. The options, cheapest first:
+
+1. **Scope the skills term to the skills a kind can actually use** (per-skill hashes
+   rather than one pack digest), so a CF skill edit re-versions only the kinds a CF
+   build uses. Keeps the conservatism where it is load-bearing.
+2. **Let `MIN_RUNS` fall for a matched-pairs design** — defensible statistically, since
+   pairing removes the between-task variance the threshold is guarding against, but it
+   is also the option that fits the measurement to the budget, so it needs saying out
+   loud rather than quietly.
+3. **Leave it, and accept that `evals` is a tripwire for "something changed", not a
+   grader.** It would then be honest to say so in its own output.
 
 ## Scores
 
