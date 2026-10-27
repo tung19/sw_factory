@@ -16,7 +16,7 @@ strict clean (71 files), ruff clean.
 
 ---
 
-> **Status:** S1, S2, S3 are **fixed** — S1+S2 in this branch
+> **Status:** S1, S2, S3, S4 are **fixed** — S1+S2 in this branch
 > (`fix/gate-grades-what-it-prints`), S3 on `feat/saas-forward-port` where the code
 > lives. H1–H6 and M1–M5 are open. Each fix section below records what changed.
 
@@ -86,6 +86,56 @@ the request (`confirm: true`) and its absence refuses the job — `runner._exec_
 turns the `ValueError` into a failed job the UI shows. The local dashboard was already
 sending `confirm:true` behind a real `confirm()`; the coordinator UI was not, and now takes
 the same approval before it sends.
+
+### S4 · the locked oracle can report green with zero locked tests executed — FIXED
+
+Promoted from the unverified list and **reproduced end to end against real vitest
+5.0.5**, because it defeats the spine rather than a gate.
+
+vitest's positional argument is a case-insensitive **substring** match on the path
+relative to the project root, and `filterFiles` only narrows what `include`/`exclude`
+already globbed. So one line in the builder-owned `vitest.config.ts`:
+
+```ts
+exclude: ['**/node_modules/**', '**/__tests__/_holdout/**']
+```
+
+evicts the locked suite *before* filtering, while a decoy directory whose name merely
+**contains** the locked path (`__tests__/_holdout_decoy/`) is still collected by the
+oracle's own `npx vitest run __tests__/_holdout` (`holdout.py:352`).
+
+Measured, not argued — a throwaway app with one **failing** locked test, a 3-test decoy
+and that one config line:
+
+| | |
+|---|---|
+| the real locked test (failing) | **never ran** |
+| 3 decoy tests | ran, passed |
+| exit code | **0** |
+| `no test files found` banner | absent |
+
+Every other guard was satisfied, which is what makes this the worst finding in the
+audit: nothing was tampered with, so the checksum lock matched, the PreToolUse hook had
+nothing to block, and `assert_vitest_ran` saw 3 ≥ 1 passes with a valid summary. The
+`_runners.py` docstring already named this threat class ("the app's vitest config is
+authored by the builder and is NOT locked") and guarded the **count** but never **which
+files ran**.
+
+**Fix:** the oracle now runs `--reporter=default --reporter=json
+--outputFile.json=<random path outside the app>` and asserts, via
+`assert_locked_files_ran`, that every file in the lock appears in the runner's own report
+of what it executed. It is deliberately an assertion about **outcome**, not about
+configuration, because configuration is what the builder controls. A missing or
+unreadable report FAILS — the whole point is to stop trusting a green exit code. CLI
+`--exclude` was checked as an alternative and rejected: vitest documents it as
+*"additional* file globs", so it cannot neutralise a malicious config exclude (verified
+by running it).
+
+Verified on three cases through the real oracle: **attack blocked · honest-green still
+green · honest-red red for the right reason** (not via "ORACLE DID NOT RUN"). That third
+case earned its place — a first version of the fix passed the locked lock keys against
+the app root instead of the holdout directory, which blocked the attack *and* every
+honest build. Only the end-to-end run caught it.
 
 ---
 
@@ -167,8 +217,6 @@ is enough to inject; in Flow B the log carries output from an untrusted referenc
 Listed so they are not lost; each still needs a first-hand check before it is treated as
 real.
 
-- A decoy `__tests__/_holdout_x/` directory may satisfy the locked-oracle check (substring
-  filter + builder-owned `vitest.config.ts`).
 - Nothing re-verifies the locked oracle after `--tdd`: the `verify` gate is removed while
   `audit --fix` / `chaos` / `e2e` then run agents in the app directory.
 - `readjudicate` may re-lock tampering.
@@ -217,7 +265,7 @@ that do not hold, and S3 ships a closed hole back open.
 
 ## Remaining order
 
-1. ~~S3, S1, S2~~ — done.
+1. ~~S3, S1, S2, S4~~ — done.
 2. **H1, H2, H3, H4** — one commit each, all small.
 3. **H5, M1–M5** — a docs-truth pass, same shape as the one in PR #34.
 4. The unverified list above — first-hand check before any is treated as real.
