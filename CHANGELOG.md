@@ -16,6 +16,12 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   "probe" step (arXiv:2610.14224) — and only that: its premise, refinement without
   ground-truth verifiers, is the opposite of AREA's spine.
 
+- **The build agent was shipped a stale skills pack.** `vinext-cf-build` was rewritten in
+  `.claude/skills/` when `area cf-fix`/`cf-clone` shipped, but `area.skills` installs from
+  `skills/`, which still held the older text with zero mentions of either — so the
+  automation never reached the builder and the attestation digested the stale copy. The
+  maintained text now ships, and a test enforces that any skill in both trees is identical.
+
 ### Added
 - `evals/tasks.yaml` — the declared fixed A/B set for a factory change, plus
   `area evals --tasks` to print it and `--any-task` to compare on any shared task.

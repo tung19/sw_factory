@@ -27,6 +27,10 @@ dates (`1.YYYYMMDD.N`), so the correct compat date is deterministic:
 `cloudflare.config.ts` to the workerd date (e.g. observed `2026-10-22` today →
 pinned to `2026-10-19`). Keep `compatibilityFlags: ["nodejs_compat"]`.
 
+By hand, if the `area` CLI is not on your PATH (it is not guaranteed to be inside a
+generated app): run `npm ls workerd`, read the date out of its `1.YYYYMMDD.N` version,
+and set `compatibilityDate` in `cloudflare.config.ts` to that date or earlier.
+
 ## 2. Fastest green build: clone a known-good sibling (don't run `vinext init`)
 `area cf-clone <app> --from <sibling>` copies a sibling that already builds green:
 `package.json`, `package-lock.json`, `node_modules`, `vendor/`, `tsconfig.json`,
