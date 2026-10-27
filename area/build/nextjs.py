@@ -10,11 +10,13 @@ run_until loops until both pass. Two targets:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
-from area.engine import Backend, Verifier, build_agent, command_verifier, run_until
+from area.build.ui_vendor import VENDOR_DIR
+from area.engine import (Backend, Verifier, VerifyResult, build_agent,
+                         command_verifier, run_until)
 from area.spec.models import Acceptance, Spec
 
 # TDD preamble: an independent, locked acceptance suite already exists and IS
@@ -131,6 +133,80 @@ verifier calls build:cf and test):
 {_COMMON_RULES}"""
 
 
+def _with_ui_parity(base: "Verifier", app: Path) -> "Verifier":  # noqa: D401
+    """Add a UI term to what the build loop CONVERGES on.
+
+    This is the gap that made a clone's look "always missing". Part A gave the builder
+    the reference's real CSS/tokens/markup in `.area-ui/`, and part C could measure the
+    result — but the oracle was still `npm install && build && test`, so the loop
+    converged on BEHAVIOUR and the builder never received one signal about the look.
+    Per AREA's own spine, quality is bounded by what the oracle contains, and the UI
+    was not in it.
+
+    Behaviour stays the hard requirement: a failing test is returned unchanged and the
+    UI is not even measured. Only once the tests are green does the look get a say, and
+    only against `visual.UI_ORACLE_FLOOR` — the "did you use the vendored reference at
+    all" floor, not a fidelity demand. An UNMEASURABLE score never blocks: a thin SPA
+    capture must not wedge a build.
+
+    The shortfall comes back as actionable text (which colors/fonts are missing, where
+    to read them), because a score alone is not something an agent can act on."""
+
+    def _run() -> "VerifyResult":
+        res = base()
+        if not res.ok:
+            return res  # behaviour first; it is the hard gate
+        if app.parent.name != "apps":  # non-standard layout → measure() can't resolve
+            return res
+        try:
+            from area.verify import visual
+
+            m = visual.measure(app.name, root=app.parent.parent, pixel=False)
+        except Exception as e:  # noqa: BLE001 — the look must not crash a green build
+            print(f"[area] ui-parity: not measured ({type(e).__name__}: {e})")
+            return res
+        combined = m.get("combined")
+        scores = m.get("scores") or {}
+        if combined is None:
+            why = "; ".join(f"{k}: {v}" for k, v in (m.get("skips") or {}).items())
+            print(f"[area] ui-parity: not measurable — {why or 'no layer scored'} "
+                  "(not blocking)")
+            return res
+        if combined >= visual.UI_ORACLE_FLOOR:
+            print(f"[area] ui-parity: {combined:.2f} ≥ {visual.UI_ORACLE_FLOOR} "
+                  f"(tokens {scores.get('tokens')}, dom {scores.get('dom')}) — the "
+                  "vendored reference UI was used")
+            return res
+        return VerifyResult(ok=False, feedback=_ui_feedback(m))
+
+    return _run
+
+
+def _ui_feedback(m: dict[str, Any]) -> str:
+    """What the builder must DO about a low parity score — not just the number."""
+    from area.verify import visual
+
+    scores = m.get("scores") or {}
+    lines = [
+        f"The app's acceptance tests pass, but it does NOT look like the reference it "
+        f"is a clone of: visual parity {m.get('combined'):.2f} < "
+        f"{visual.UI_ORACLE_FLOOR} (tokens {scores.get('tokens')}, "
+        f"dom {scores.get('dom')}).",
+        "",
+        f"The reference's REAL UI is vendored at {VENDOR_DIR}/ — use it, do not "
+        "re-invent a design:",
+        f"  · {VENDOR_DIR}/tokens.json  — the reference's colors and fonts",
+        f"  · {VENDOR_DIR}/styles/      — its actual stylesheets",
+        f"  · {VENDOR_DIR}/rendered/    — its markup, to mirror the structure of",
+    ]
+    for key, vals in (m.get("missing_tokens") or {}).items():
+        lines += ["", f"Reference {key} missing from your CSS: {', '.join(vals)}"]
+    lines += ["",
+              "Apply the reference's palette, fonts and layout structure to the pages "
+              "you already built. Do NOT weaken or edit the acceptance tests."]
+    return "\n".join(lines)
+
+
 def build_app(
     spec: Spec,
     acc: Acceptance,
@@ -204,6 +280,8 @@ def build_app(
             print(f"[area] ui    : vendored reference UI ({', '.join(vendored)})")
 
     oracle = oracle or command_verifier(oracle_cmd, cwd=app)
+    if ui_dir:
+        oracle = _with_ui_parity(oracle, app)
     label = f"build:{target}" + (":tdd" if tdd else "")
     agent = build_agent(backend, model=model)
     try:

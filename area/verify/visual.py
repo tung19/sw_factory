@@ -114,6 +114,44 @@ def token_coverage(ref: dict[str, list[str]], clone: dict[str, list[str]]) -> Op
     return hits / len(wanted)
 
 
+def missing_tokens(ref: dict[str, list[str]], clone: dict[str, list[str]],
+                   *, cap: int = 12) -> dict[str, list[str]]:
+    """Reference colors/fonts absent from the clone — the actionable half of
+    `token_coverage`, so feedback can name what to add instead of only a score."""
+    out: dict[str, list[str]] = {}
+    for key in ("colors", "fonts"):
+        have = {t.strip().lower() for t in clone.get(key, [])}
+        gone = [t for t in ref.get(key, [])
+                if t.strip() and t.strip().lower() not in have]
+        if gone:
+            out[key] = gone[:cap]
+    return out
+
+
+def has_reference_ui(name: str, *, root: Optional[Path] = None) -> bool:
+    """Did this app's build have a captured reference UI to reproduce? True only for a
+    Flow-B clone whose capture succeeded — the one case where "does it look like the
+    original" is a question with a ground truth."""
+    base = Path(root) if root else WORKSPACE
+    ev = _read_manifest(base / "specs" / name / "_ui")
+    return bool(ev and ev.get("captured"))
+
+
+# TWO DIFFERENT FLOORS, two different jobs — do not conflate them:
+#
+#   DEFAULT_MIN_SIMILARITY (0.75) is the GATE's fidelity floor: "is this clone close
+#   enough to ship?" It sits in the wide empty gap measured between an identical app
+#   (1.00) and an unrelated one (0.19-0.28), and it is advisory until a visual.yaml is
+#   committed.
+#
+#   UI_ORACLE_FLOOR (0.45) is what the BUILD LOOP converges on, and it answers a much
+#   weaker question: "did the builder use the vendored reference UI at all?" It is set
+#   from the same measurements — comfortably above the 0.19-0.28 band an app that
+#   ignored the reference scores, and deliberately well below a fidelity demand,
+#   because no real clone attempt has been measured yet. Raise it once one has.
+UI_ORACLE_FLOOR = 0.45
+
+
 def combine(scores: dict[str, Optional[float]]) -> Optional[float]:
     """Weighted mean over the layers that actually produced a score."""
     num = 0.0
@@ -350,11 +388,15 @@ def measure(name: str, *, root: Optional[Path] = None,
     # --- tokens ---
     ref_tokens = _as_token_map(ev.get("tokens"))
     clone_css = _read_all(_globs(app, _CLONE_CSS_GLOBS))
+    gone: dict[str, list[str]] = {}
     if not clone_css.strip():
         skips["tokens"] = "no stylesheet found in the clone"
+        gone = missing_tokens(ref_tokens, {})
     else:
-        cov = token_coverage(ref_tokens, extract_tokens(clone_css))
+        clone_tokens = extract_tokens(clone_css)
+        cov = token_coverage(ref_tokens, clone_tokens)
         scores["tokens"] = cov
+        gone = missing_tokens(ref_tokens, clone_tokens)
         if cov is None:
             skips["tokens"] = "reference captured no color/font tokens"
 
@@ -371,6 +413,9 @@ def measure(name: str, *, root: Optional[Path] = None,
                         if not ref_skel or not clone_skel else "")
 
     return {"scores": scores, "skips": skips, "combined": combine(scores),
+            # the actionable half: WHICH reference tokens the clone is missing, so a
+            # caller can tell a builder what to add instead of only showing a score
+            "missing_tokens": gone,
             "source_kind": str(ev.get("source_kind") or ""), "reference_url": ref_url,
             "spa_caveat": bool(ev.get("spa_caveat")), "artifacts": str(out_dir)}
 
