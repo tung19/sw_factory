@@ -53,7 +53,7 @@ class Profile:
     description: str = ""
     labels: tuple[str, ...] = ()
     prompt_sources: tuple[str, ...] = ()
-    skills: str = "none"              # "all" | "none"
+    skills: str = "none"              # "all" | "inherited" | "none" — see SKILLS_VALUES
     notes: str = ""
     agent_iters: Optional[int] = None
     budget_usd: Optional[float] = None
@@ -94,6 +94,25 @@ def missing_prompt_sources(p: Profile) -> list[str]:
     return [d for d in p.prompt_sources if _source_hash(d).endswith("=<missing>")]
 
 
+# What `skills:` may say, and what each value means for the digest.
+#   all        — this kind INSTALLS the pack (`area.skills.install_skills`); the pack's
+#                digest is part of its version.
+#   inherited  — this kind installs nothing, but runs with the app directory as its cwd
+#                AFTER the builder installed the pack there, and the files STAY. A Claude
+#                Code session in that directory discovers them as project skills, so a
+#                skill edit can change this kind's behaviour and must therefore change
+#                its version. (Conditional in one case: on a first `--tdd` build the
+#                holdout author runs before `build_app` installs anything. Recorded as
+#                inherited anyway — erring toward "this changed, re-measure" rather than
+#                "nothing changed, trust the old baseline" is the whole point of the
+#                digest.)
+#   none       — never runs where the pack is; `ask_cli` kinds run in a temp dir, and the
+#                spec/inception/research kinds run in a spec or scratch directory.
+SKILLS_VALUES = ("all", "inherited", "none")
+# The values whose version must move when a skill moves.
+_SKILLS_IN_DIGEST = ("all", "inherited")
+
+
 def _skills_hash() -> str:
     try:
         from area.provenance import skills_digest
@@ -111,9 +130,20 @@ def profile_digest(p: Profile) -> str:
     for dotted in sorted(p.prompt_sources):
         h.update(_source_hash(dotted).encode())
         h.update(b"\0")
-    if p.skills == "all":
+    if p.skills in _SKILLS_IN_DIGEST:
         h.update(_skills_hash().encode())
     return "sha256:" + h.hexdigest()[:32]
+
+
+def _checked_skills(kind: str, value: Any) -> str:
+    """Reject an unknown `skills:` value rather than defaulting it to "none". Silently
+    reading a typo as "none" would drop this kind out of the skills digest, which is the
+    quiet failure this field exists to prevent."""
+    v = str(value or "none").strip()
+    if v not in SKILLS_VALUES:
+        raise ProfileError(
+            f"profiles/{kind}.yaml: skills: {v!r} is not one of {SKILLS_VALUES}")
+    return v
 
 
 def _from_raw(kind: str, raw: dict[str, Any]) -> Profile:
@@ -123,7 +153,7 @@ def _from_raw(kind: str, raw: dict[str, Any]) -> Profile:
         description=str(raw.get("description") or "").strip(),
         labels=tuple(raw.get("labels") or ()),
         prompt_sources=tuple(raw.get("prompt_sources") or ()),
-        skills=str(raw.get("skills") or "none"),
+        skills=_checked_skills(kind, raw.get("skills")),
         notes=str(raw.get("notes") or "").strip(),
         agent_iters=d.get("agent_iters"),
         budget_usd=d.get("budget_usd"),
@@ -156,7 +186,15 @@ def load_profile(kind: str, *, root: Optional[Path] = None,
         if strict:
             raise ProfileError(f"{p}: top level must be a mapping")
         return None
-    return _from_raw(raw.get("kind") or kind, raw)
+    try:
+        return _from_raw(raw.get("kind") or kind, raw)
+    except ProfileError:
+        # Non-strict must keep returning None for a broken profile, like every other
+        # failure above it: `evals.compare` branches on `prof is None`, and raising
+        # here would crash the gate instead of reporting the profile as broken.
+        if strict:
+            raise
+        return None
 
 
 def broken_profiles(*, root: Optional[Path] = None) -> dict[str, str]:

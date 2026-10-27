@@ -5,7 +5,12 @@
 #   tools/lock-holdout.sh <app-name> [workspace-dir]
 set -euo pipefail
 APP="${1:?usage: lock-holdout.sh <app-name> [workspace-dir]}"
-WS="${2:-workspace}"
+. "$(dirname "$0")/_workspace.sh"
+# $2 wins (the Python callers always pass it); otherwise the workspace AREA resolves —
+# NOT the literal `workspace/` in the repo. Generated apps live outside it by default, so
+# the old `${2:-workspace}` made this command fail when run exactly as CLAUDE.md
+# prescribes, and fail by blaming the operator for an oracle that was right there.
+WS="${2:-$(area_workspace)}"
 HOLD="$WS/apps/$APP/__tests__/_holdout"
 LOCK="$WS/specs/$APP/holdout.lock"
 

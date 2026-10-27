@@ -42,6 +42,33 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   checksum lock plus the oracle's executed-files check. Installing the hook into generated
   apps was considered and rejected: it would always fail open, so the claim would have
   become true on paper only.
+- **`tools/gate.sh` was skipping the gate CLAUDE.md calls mandatory.** Its e2e step looked
+  in `workspace/apps/<app>`, a repo-relative path, while generated apps live in
+  AREA_WORKSPACE — so it printed "you haven't written Playwright specs" while 12 of them
+  sat in the real app directory. `--chaos` was never parsed at all, `--perf` never ran, an
+  unknown flag is now a hard error, and the script states that it covers 5 of the 9 gates.
+- **Three shell tools CLAUDE.md prescribes looked in the wrong place.** They defaulted to
+  a repo-relative `workspace/` while generated apps live in AREA_WORKSPACE, so running
+  them exactly as the rules say failed — and failed by blaming the operator:
+  `lock-holdout.sh` (the checksum enforcement the method rests on) said "hãy viết test
+  holdout trước" with the locked oracle sitting right there, `verify-holdout-intact.sh`
+  said the same, and `scaffold-app.sh` **wrote** the project into the repo while every
+  later `area` command read from AREA_WORKSPACE. All three now resolve through
+  `area.paths`; a test fails if that default ever returns.
+- **`perf` never measured an app whose `.next` came from `next dev`.** It treated the
+  directory's existence as "a build exists", chose the production `start` script, and
+  reported `next start`'s "Could not find a production build" as "booted but never became
+  ready" — then skipped, advisory, green. It now requires `.next/BUILD_ID` and quotes the
+  server's own error instead of swallowing it (`visual` boots through the same helper and
+  got the same fix).
+- **The showcase's gate evidence contradicted itself.** `docs/CASE-STUDY.md` tabled `nfr`
+  as within budget when the bundle is 16.4 MB against a 5 MB default, and tabled perf
+  numbers that could not be reproduced from the committed state. Every row is now dated
+  and carries the command that produces it; `examples/taskboard/README.md` no longer
+  attributes "18/18" to `npm test`, which prints 73 (18 holdout + 55 chaos).
+- **Stale counts removed at the source.** The precise test count is gone from the living
+  docs — `make test` prints the real one — the missing `visual` row was added to the
+  ARCHITECTURE gate table, and a test now fails if any registry gate lacks a row there.
 
 ### Added
 - `evals/tasks.yaml` — the declared fixed A/B set for a factory change, plus

@@ -9,7 +9,7 @@ codebase the diagnosis sharpens:
 > seeing it work at all needs a Claude key + ~$ + ~10 min. The gap to 10/10 is
 > **packaging + visible evidence**, not "more AI".
 
-What the review missed (already in the repo): CI + **569 tests**, an
+What the review missed (already in the repo): CI + **the full agent-free suite**, an
 independently-audited + hardened security/gate layer (holdout-must-run, provenance
 blocks deploy, clone-RCE guard, …), `docs/ARCHITECTURE.md` + `CONTRIBUTING.md`, 2
 ADRs, `scripts/install.sh` + `area doctor`.
@@ -44,7 +44,7 @@ example with its spec + locked oracle + gate evidence, plus a keyless `area demo
 
 ### Wave 3 — case study + maturity (some needs the owner)
 9. **`docs/CASE-STUDY.md`** — the full story of one build (requirement → spec →
-   locked oracle → 8 gates → trace → evidence) with screenshots.
+   locked oracle → the 9 gates → trace → evidence) with screenshots.
 10. **A live-deployed demo** (needs a deploy token) — a public URL is the strongest
     evidence.
 11. Release strategy + `CHANGELOG.md` + versioning + deprecation policy.
@@ -62,7 +62,7 @@ example with its spec + locked oracle + gate evidence, plus a keyless `area demo
 - [x] W2.5 bootstrap (`Makefile`: setup/demo/test/lint/check)
 - [x] W2.6 product-first README (see-it-work-in-3-min → golden path → advanced)
 - [x] W2.7 one golden path (README: single pipeline; clone/intake/inception labeled advanced)
-- [x] W2.8 CLI UX — `cli.main` split (640→~19 lines: `_build_parser` + `_dispatch`), agent-opts dedup (`_add_agent_opts`), + mypy (phased subset) in CI/`make check`. mypy caught a real latent bug (demo.py missing `import urllib.request`).
+- [x] W2.8 CLI UX — `cli.main` split (640→~19 lines: `_build_parser` + `_dispatch`), agent-opts dedup (`_add_agent_opts`), + mypy in CI/`make check` (phased at the time; the whole package is `strict` now). mypy caught a real latent bug (demo.py missing `import urllib.request`).
 - [x] W3.9 case study (`docs/CASE-STUDY.md` — taskboard, real artifacts + the clarify/STOP sidebar)
 - [ ] W3.10 live demo — **needs a deploy token** (owner)
 - [x] W3.11 releases (`CHANGELOG.md` + a Releases section in CONTRIBUTING: SemVer + tag flow)

@@ -17,7 +17,10 @@ labels:
 prompt_sources:
   - area.verify.chaos.chaos_verify
 
-skills: none
+# Runs with the app directory as its cwd, where the builder's skill pack was installed
+# and left behind, so a Claude Code session there discovers it. This kind installs
+# nothing itself, but a skill edit can change what it does — so it changes its version.
+skills: inherited
 
 # applied when the caller passes nothing; null = today's global behaviour
 defaults:

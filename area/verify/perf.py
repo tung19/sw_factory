@@ -127,6 +127,18 @@ def load_budget(name: str, *, strict: bool = False,
 
 # ---- booting the app + firing load ----------------------------------------------
 
+# Per-directory proof that a build actually completed. `.next` needs BUILD_ID (next
+# writes it last); for the others the directory is only created by a build.
+_BUILD_MARKER = {".next": "BUILD_ID"}
+
+
+def _has_build(d: Path) -> bool:
+    if not d.is_dir():
+        return False
+    marker = _BUILD_MARKER.get(d.name)
+    return (d / marker).exists() if marker else True
+
+
 def _pick_start_cmd(app: Path) -> tuple[Optional[str], Optional[str]]:
     """Choose a server script. Prefer a production server when a build exists
     (start/preview), else fall back to dev."""
@@ -134,8 +146,13 @@ def _pick_start_cmd(app: Path) -> tuple[Optional[str], Optional[str]]:
         scripts = (json.loads((app / "package.json").read_text()).get("scripts") or {})
     except Exception:  # noqa: BLE001
         return None, None
-    built = any((app / d).is_dir()
-                for d in (".next", ".open-next", "dist", "build", ".vercel/output"))
+    # A DIRECTORY is not a build. `.next` is created by `next dev` too, so testing for
+    # its existence picked the production `start` script for an app that had never been
+    # built — and `next start` then exits with "Could not find a production build in
+    # the '.next' directory", which read as "server booted but never became ready" and
+    # skipped the perf gate. Require the marker that means "a build finished".
+    built = any(_has_build(app / d) for d in (".next", ".open-next", "dist", "build",
+                                              ".vercel/output"))
     order = ["start", "preview", "dev"] if built else ["dev", "preview", "start"]
     for s in order:
         if s in scripts:
@@ -143,14 +160,16 @@ def _pick_start_cmd(app: Path) -> tuple[Optional[str], Optional[str]]:
     return None, None
 
 
-def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.Popen[str], int, str]]:
+def _start_server(app: Path, start_timeout: float
+                  ) -> Optional[tuple[subprocess.Popen[str], int, str, list[str]]]:
     """Launch the app on a FORCED free port (via PORT env) so it never collides
     with whatever holds the framework default (:3000). Detect the actual port from
     the boot banner, falling back to the forced port if the server is up but quiet.
     Returns (proc, port, script) or None. Runs in its own session so the whole
     npm→node tree can be torn down by process-group signal."""
     cmd, script = _pick_start_cmd(app)
-    if not cmd:
+    if not cmd or script is None:
+        # `_pick_start_cmd` returns both or neither; saying so beats a `type: ignore`.
         return None
     port_hint = _free_port()
     env = _env()
@@ -190,7 +209,11 @@ def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.
             _stop(proc)  # the server process actually exited (e.g. a real crash)
             return None
         port = port_hint  # up but quiet → trust the forced PORT (validated by _wait_ready)
-    return proc, port, script  # type: ignore[return-value]
+    # `buf` travels with the handle: when the server never becomes ready it has
+    # usually PRINTED the reason, and the gate used to throw that away and report
+    # only "never became ready" — true, and useless. (Measured case: a leftover
+    # `.next` with no BUILD_ID, where next start says exactly what to do.)
+    return proc, port, script, buf
 
 
 def _stop(proc: subprocess.Popen[str]) -> None:
@@ -262,11 +285,13 @@ def measure(app_dir: str | Path, *, path: str = "/", total: int = 200,
     srv = _start_server(app, start_timeout)
     if not srv:
         return {}, "no runnable server script / app did not announce a port"
-    proc, port, script = srv
+    proc, port, script, srv_out = srv
     base = f"http://127.0.0.1:{port}{path if path.startswith('/') else '/' + path}"
     try:
         if not _wait_ready(base, start_timeout):
-            return {}, f"server ({script}) booted on :{port} but never became ready"
+            tail = "".join(srv_out)[-500:].strip().replace("\n", " | ")
+            why = f"server ({script}) booted on :{port} but never became ready"
+            return {}, (f"{why} — it said: {tail}" if tail else why)
         for _ in range(max(0, warmup)):  # absorb first-request compile (dev)
             try:
                 with urllib.request.urlopen(base, timeout=req_timeout) as r:

@@ -314,11 +314,15 @@ def _pixel_layer(app: Path, out_dir: Path, reference_url: str,
     started = _start_server(app, 120.0)
     if not started:
         return None, "clone would not boot (no start/dev script, or it crashed)", None
-    proc, port, _script = started
+    proc, port, _script, srv_out = started
     clone_url = f"http://127.0.0.1:{port}/"
     try:
         if not _wait_ready(clone_url, 120.0):
-            return None, "clone booted but never answered HTTP", None
+            # Quote what the clone's own server printed: "never answered HTTP" is true
+            # and useless, and the server usually says exactly what is wrong.
+            tail = "".join(srv_out)[-500:].strip().replace("\n", " | ")
+            why = "clone booted but never answered HTTP"
+            return None, (f"{why} — it said: {tail}" if tail else why), None
         clone_html: Optional[str] = None
         try:
             import urllib.request

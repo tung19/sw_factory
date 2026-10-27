@@ -171,7 +171,7 @@ Only **1 of 16** profile digests changes as a result, which is correct: `builder
 only profile declaring `skills: all`, and `install_skills` is called from exactly one
 place (`area/build/nextjs.py:267`, the builder's path).
 
-### M6 · 15 profiles declare `skills: none` but their agents can still read the pack
+### M6 · 15 profiles declared `skills: none` but their agents can still read the pack — FIXED (Tung chose (b))
 
 Found while fixing H1; recorded rather than silently changed, because the fix is a design
 choice. `install_skills` copies the pack into `<app>/.claude/skills/` during the build and
@@ -184,6 +184,33 @@ are judged as unchanged across a factory change that can in fact alter their beh
 Either the profiles should record the inherited pack (which makes a skill edit invalidate
 them too — arguably right, possibly over-broad, since the chaos author has no use for the
 CF skill), or the nuance belongs in each profile's notes. Deciding that is Tung's call.
+
+**Tung chose (b): record it.** The reasoning that settled it is that (b) errs toward
+*"this changed, re-measure"* rather than *"nothing changed, trust the old baseline"*,
+which is the posture everything else in this audit moved toward — and the cost is
+currently **zero**, because no run carries a profile digest yet, so there is no baseline
+to invalidate. Option (c), declaring per-kind which skills are relevant, was rejected:
+nothing measures that, so it would be another unverified claim of exactly the kind this
+audit spent the day deleting.
+
+`skills:` now takes a third value, `inherited`, and `profile_digest` folds the skills
+hash for `all` **and** `inherited`. Which kinds get it was **measured from the call
+sites**, not guessed: the six that pass the APP directory to the engine (`auditor`,
+`chaos-author`, `e2e-author`, `holdout-author`, `holdout-fixer`,
+`holdout-readjudicator`). The `ask_cli` kinds (`product-reviewer`, `spec-reviewer`) run
+in a temp dir and the spec/inception/research kinds run in a spec or scratch directory,
+so they stay `none`. One honest caveat is recorded in the code: on a **first** `--tdd`
+build the holdout author runs before `build_app` installs anything, so its inheritance is
+conditional — it is marked `inherited` anyway, for the same err-toward-re-measuring
+reason.
+
+Measured effect: a skill edit now moves **7 of 16** profile digests, up from 1.
+
+Two things this surfaced, both fixed here: an unknown `skills:` value used to be read
+silently as `none` — which would quietly drop that kind out of the skills digest, the
+exact failure the field exists to prevent — and making it raise initially broke
+`load_profile`'s non-strict contract, where `evals.compare` branches on `prof is None`
+and would have crashed instead of reporting the profile broken.
 
 ### H2 · `npm install` / build / test run with cloud tokens present — FIXED
 `area/engine/adapter.py`: the scrub is inside `_send_and_run`, but `run_until` calls
@@ -305,23 +332,98 @@ is enough to inject; in Flow B the log carries output from an untrusted referenc
 
 ## Severity M
 
-- **M1 · `SECURITY.md:43` says "*every* agent/build/provider subprocess has a wall clock"** —
+- **M1 (partly closed by H2) · `SECURITY.md:43` says "*every* agent/build/provider subprocess has a wall clock"** —
   four do not: `area/verify/nfr.py:106` (the full `--nfr-build`) and
   `area/build/cf_scaffold.py:100,109,296` (incl. `npm run build:cf`, the fallback build).
   The deploy CLIs genuinely are capped; the sentence overstates to "every".
-- **M2 · `tools/gate.sh` silently ignores `--chaos`** — `tools/gate.sh:11` parses only
+- **M2 · FIXED — `tools/gate.sh` silently ignored `--chaos`** — `tools/gate.sh:11` parses only
   `--strict|--e2e`, and the script runs no chaos gate at all, while `CLAUDE.md` step 3
   instructs the builder to pass `--e2e --chaos`. The factory's master rule set names a
   flag its own tool drops.
-- **M3 · The showcase "gate evidence" is a pre-fix artifact** —
+
+  **Fixed, and it was worse than a dropped flag.** The same script's e2e gate looked in
+  `workspace/apps/$APP` — a repo-relative path — while generated apps live in
+  AREA_WORKSPACE. So it never found them and printed *"chưa có e2e/ — hãy tự viết
+  Playwright specs"*: **blaming the operator for missing specs while 12 of them sat in the
+  real app directory.** `--e2e` is MANDATORY for any app with auth/sessions/forms
+  (CLAUDE.md step 3), so the one gate the rules call non-optional was the one being
+  skipped. The app directory is now resolved through `area.paths` (the visual gate in the
+  same file already did it right), `--chaos` runs, `--perf` was added — it had never run
+  here at all, though CASE-STUDY tabled a perf result — an unknown flag is now a **hard
+  error** rather than a silent no-op, and the script states that it covers 5 of the
+  registry's 9 gates. Proven live: `--e2e` 15 passed, `--chaos` 55 passed.
+
+  **And the same bug was in two more scripts, both named by CLAUDE.md** — found by asking
+  where else a repo-relative workspace default survived, after Tung asked whether the e2e
+  message needed anything more:
+  - `tools/lock-holdout.sh <name>` (step 1b, the CHECKSUM enforcement the whole method
+    rests on) → *"không thấy holdout — hãy viết test holdout (từ spec) trước"*, while the
+    locked oracle sat in the real app directory.
+  - `tools/verify-holdout-intact.sh <name>` (step 2, "before and after each build
+    attempt") → the same.
+  - `tools/scaffold-app.sh <name>` (step 0) was worse still, because it **writes**: it
+    scaffolded the project into the repo while every later `area` command read from
+    AREA_WORKSPACE — a split brain where the spec docs and the app the engine builds live
+    in different trees.
+
+  **My first fix for this was itself broken, and CI is what caught it.** It asked
+  `.venv/bin/python` for the workspace and fell back to the literal `workspace/` when
+  that was missing — so in any checkout without a venv (CI, a fresh clone before
+  `make install`) it silently reverted to the bug it was fixing. The local suite could
+  not catch it, because the local checkout has a venv. `gate.sh` also exited **127**
+  (`.venv/bin/python: No such file or directory`) where it meant "no such app". A second
+  bug in the same fix: the default was `$PWD`-relative, while `lock-holdout.sh` and
+  `verify-holdout-intact.sh` do not cd to the repo root, so it meant a different
+  directory depending on where the operator stood.
+
+  Resolution now lives in `tools/_workspace.sh`, shared by all four scripts so they
+  cannot drift: **pure shell** (no interpreter, mirroring `area.paths.workspace()`),
+  **anchored on the script's own location** rather than `$PWD`, with tilde expanded by
+  hand rather than through `eval`. Verified under the exact CI condition — a copy of
+  `tools/` with no `.venv` beside it, invoked from `/` — for both branches, with
+  `AREA_WORKSPACE` set and unset.
+
+  All three now resolve the workspace through that resolver. The Python callers always
+  passed it explicitly, so the engine was never affected; it was the documented MANUAL
+  path that was broken. `tests/test_tools_find_the_real_workspace.py` pins the round-trip,
+  proves the lock still detects both an edited file and an ADDED one, and fails if the
+  literal `${2:-workspace}` default ever comes back — that guard is what found the third
+  script.
+- **M3 · FIXED — the showcase "gate evidence" was a pre-fix artifact** —
   `examples/taskboard/SPEC/provenance.json` is `area.slsa-like/v1`, `builder:
   "area/openhands-acp"` (the hardcoded literal the changelog says was fixed), and
   `gates: {holdout_tdd: true}` — one gate, no `{ran,blocking,blocked}`, no `policy`.
   `docs/CASE-STUDY.md:72-79` tables audit/nfr/perf/e2e/chaos as ✅ and `README.md:24-26`
   calls the directory "the gate evidence".
-- **M4 · Stale counts** — `569 tests` in `CONTRIBUTING.md:26` and `docs/UPGRADE-PLAN.md:12`
+
+  **Fixed by re-measuring, which found two more things wrong.** Every row of the
+  CASE-STUDY table is now dated and carries the command that produces it. `nfr` was tabled
+  "✅ within budget" and is **over** it (bundle 16403 KiB / 5120; advisory only because no
+  `nfr.yaml` is committed). And `perf` could not be reproduced **at all**: `_pick_start_cmd`
+  treated the existence of `.next` as "a build exists", so it chose the production `start`
+  script for a tree whose `.next` came from `next dev`; `next start` exited with "Could not
+  find a production build", which the gate reported as "booted but never became ready" and
+  **skipped** — advisory, so green. It now requires `.next/BUILD_ID` and **quotes the
+  server's own error** instead of swallowing it (`visual` boots through the same helper and
+  got the same treatment). With a real build the original numbers reproduce almost exactly
+  (p50 18.5 ms, 513 req/s vs the tabled ~19 ms / ~505), so they were honest — just
+  unverifiable from the committed state. The committed `provenance.json` is now described
+  for what it is (v1, one gate, 2026-10-20) and deliberately **not** regenerated by hand:
+  an attestation that did not come out of the gated build path is worth less than an honest
+  older one. Also confirmed from the audit's SUSPECTED list: `npm test` prints **73**
+  (18 holdout + 55 chaos), never 18, because `vitest.config.mts` includes all of
+  `__tests__/**`.
+- **M4 · FIXED — stale counts** — `569 tests` in `CONTRIBUTING.md:26` and `docs/UPGRADE-PLAN.md:12`
   vs **657**; `docs/ARCHITECTURE.md:52` "the 9 gates below" over an 8-row table (`visual`
   has no row); `UPGRADE-PLAN.md:47` "8 gates"; `PLAN.md:101,201` "59/56 modules" vs 71.
+
+  **Fixed at the source rather than refreshed.** A count nobody re-measures goes stale
+  again next week, so the precise figures are simply gone from the living docs (`make test`
+  prints the real one); only CHANGELOG entries keep numbers, where they are a historical
+  record. The missing `visual` row was added, and
+  `tests/test_gate_registry.py` now fails if any gate in `_GATE_ORDER` has no row in that
+  table — verified to fail by removing the row and watching it go red, so it is not a test
+  that passes vacuously.
 - **M5 · `scripts/run-runner.sh:38` execs `area runner`, which does not exist** — zero
   `add_parser("runner")`, zero `_HANDLERS` entry. A documented `curl … | bash` path that
   cannot run. **Branch-scoped:** `area/runner.py`, `area/net/*`, `coordinator-cf/` and
@@ -385,8 +487,8 @@ that do not hold, and S3 ships a closed hole back open.
 
 1. ~~S3, S1, S2, S4~~ — done. ~~H1~~, ~~H2~~, ~~H3~~, ~~H4~~ (+ H4b) — done.
 2. ~~H5~~, ~~H6~~ — done. Neither was the one-liner it looked like: H5's "stronger" fix would have installed a hook that always fails open, and H6's `esc()` does not escape quotes.
-3. **M1–M6** — M1's timeout gap narrowed when H2 swept the same subprocesses; M3's
-   showcase provenance needs a re-gated taskboard run; M6 is a design call for Tung.
+3. ~~M2~~, ~~M3~~, ~~M4~~ — done. **M1** (two `cf_scaffold` npm-ls calls still
+   uncapped), and **M5** (the branch-scoped `area runner` entry point) remain; ~~M6~~ done.
 4. The unverified list above — first-hand check before any is treated as real. It is
    shorter than it was: `ask_cli` and the decoy-holdout item were both promoted to
    confirmed, fixed, and struck from it.
@@ -398,3 +500,38 @@ the **measurement**. That is a repeatable mistake, not a one-off, so every other
 "remediated" claim deserves the same question asked of it: after the fix, what actually
 re-measures the thing being claimed — and is that measurement in the oracle the loop
 converges on, or beside it?
+
+S1, S4, H4 and H1 were all that same shape: the *claim* existed, the *measurement* did
+not. So was M2 — a gate script that printed a reassuring warning instead of running the
+gate.
+
+**And it applies to the fixes in this document, not only to the code they fix.** Four of
+them were only confirmed by an end-to-end run, not by reading: the audit gate's false
+green needed the real control flow traced, the decoy holdout needed a real app with real
+vitest, `screen.py` needed a real 517 KB minified bundle, and `perf`'s unreproducible
+numbers needed the server actually started. Reading found none of those.
+
+Worse, three fixes written *here* were themselves defective, and each was caught by a
+measurement rather than a review:
+
+- the first S4 fix resolved the lock keys against the app root instead of the holdout
+  directory — it blocked the attack **and** every honest build, while printing a
+  plausible reason. Only the honest-green case caught it.
+- `evals.check()` imposed the repo's declared task set on any caller with its own root,
+  so every verdict came back `unpaired`. An existing test caught it.
+- the M2 workspace fix asked `.venv/bin/python` for the answer and fell back to the
+  literal `workspace/` — so wherever there was no venv it **silently reverted to the bug
+  it was fixing**. 705 local tests passed; **CI** caught it, because the local checkout
+  has a venv and CI does not.
+
+So the rule this audit actually leaves behind is narrower and more useful than "test
+end-to-end":
+
+> **Every guard must be proven to go red, and the proof must assert that it changed the
+> thing it meant to change.**
+
+Twice in one afternoon a "proof" here was hollow: a `str.replace` with the wrong
+indentation silently did nothing, and a worktree built to simulate "no venv" held the
+*committed* scripts and still reached the real venv. A `$?` read after a pipe did the
+same thing earlier. Each produced a green result that looked like evidence and was not —
+which is precisely the defect class above, turned on the person fixing it.

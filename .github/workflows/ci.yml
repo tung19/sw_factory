@@ -67,7 +67,7 @@ jobs:
           pip install ruff==0.17.1
           ruff check area tests
 
-      - name: Type-check (mypy — phased subset from pyproject)
+      - name: Type-check (mypy — strict over the whole `area` package)
         run: |
           pip install mypy==2.4.0
           mypy
