@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import shutil
 import socket
 import urllib.error
 import urllib.parse
@@ -33,6 +32,7 @@ from typing import IO, Optional
 import yaml
 
 from area.spec.models import UiEvidence
+from area import screen
 from area.ui_tokens import extract_tokens, merge_tokens
 
 _UA = "area-ui-capture"
@@ -243,13 +243,29 @@ def _iter_files(root: Path) -> Iterator[Path]:
             yield p
 
 
-def _copy_rel(src: Path, root: Path, dest_root: Path, subdir: str) -> str:
+def _report(hits: list[tuple[str, screen.Finding]], what: str) -> None:
+    """Print the credential screen result. Loud on purpose: a false positive silently
+    corrupting a clone is worse than a visible one, so every redaction is named."""
+    if hits:
+        print(screen.format_report(hits, what=what))
+
+
+def _copy_rel(src: Path, root: Path, dest_root: Path, subdir: str,
+              hits: list[tuple[str, screen.Finding]]) -> str:
+    """Copy one reference file into the evidence dir, REDACTING credentials on the way.
+
+    The reference is untrusted (`clone-from-source` safety rule), and a token in an
+    unrelated file is exactly how the PocketOS incident started. `_sample/` itself is
+    never touched — it is the evidence the clone was reverse-engineered from — only
+    this derived copy, which is what reaches the build agent."""
     rel = src.relative_to(root)
     flat = "__".join(rel.parts)
     dest = dest_root / subdir / flat
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
-    return f"{subdir}/{flat}"
+    out = f"{subdir}/{flat}"
+    for f in screen.redact_file(src, dest):
+        hits.append((rel.as_posix(), f))
+    return out
 
 
 def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
@@ -257,13 +273,14 @@ def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
     assets: list[str] = []
     rendered: list[str] = []
     tokens: dict[str, list[str]] = {}
+    hits: list[tuple[str, screen.Finding]] = []
     files = list(_iter_files(sample))
 
     for p in files:
         if len(styles) >= _MAX_FILES:
             break
         if p.suffix.lower() == ".css" or p.name in _CONFIG_NAMES:
-            styles.append(_copy_rel(p, sample, ui_dir, "styles"))
+            styles.append(_copy_rel(p, sample, ui_dir, "styles", hits))
             if p.suffix.lower() == ".css":
                 try:
                     merge_tokens(tokens, extract_tokens(p.read_text(errors="ignore")))
@@ -274,7 +291,7 @@ def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
         if len(assets) >= _MAX_FILES:
             break
         if p.suffix.lower() in _ASSET_SUFFIXES:
-            assets.append(_copy_rel(p, sample, ui_dir, "assets"))
+            assets.append(_copy_rel(p, sample, ui_dir, "assets", hits))
 
     seen_markup: set[Path] = set()
     for pat in _MARKUP_GLOBS:
@@ -283,13 +300,16 @@ def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
                     and not any(part in _SKIP_DIRS for part in p.parts)):
                 seen_markup.add(p)
                 if len(rendered) < _MAX_FILES:
-                    rendered.append(_copy_rel(p, sample, ui_dir, "rendered"))
+                    rendered.append(_copy_rel(p, sample, ui_dir, "rendered", hits))
 
     captured = bool(styles or rendered or assets)
+    _report(hits, "the reference UI copied into _ui/")
     return UiEvidence(
         captured=captured,
         source_kind=_repo_or_path(source),
         rendered=rendered, styles=styles, assets=assets, tokens=tokens,
+        redactions=len(hits),
+        redacted_files=sorted({path for path, _ in hits})[:20],
         notes="" if captured else "no stylesheets/markup/assets found in _sample",
     )
 
@@ -309,8 +329,14 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
     if raw is None:
         return _empty(f"could not fetch {source} (unsafe host or network error)")
     html = raw.decode("utf-8", errors="replace")
+    hits: list[tuple[str, screen.Finding]] = []
+    # The served page is untrusted input: an inline script can carry a real key.
+    # Parse the ORIGINAL html (redaction must not perturb token/asset extraction) but
+    # persist only the screened copy, since that is what the builder reads.
+    safe_html, found = screen.redact_text(html)
+    hits += [("rendered/index.html", f) for f in found]
     (ui_dir / "rendered").mkdir(parents=True, exist_ok=True)
-    (ui_dir / "rendered" / "index.html").write_text(html, encoding="utf-8")
+    (ui_dir / "rendered" / "index.html").write_text(safe_html, encoding="utf-8")
     rendered = ["rendered/index.html"]
 
     parser = _AssetCollector()
@@ -335,7 +361,9 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
             continue
         name = f"sheet{i}.css"
         (ui_dir / "styles").mkdir(parents=True, exist_ok=True)
-        (ui_dir / "styles" / name).write_bytes(data)
+        safe, found = screen.redact_bytes(data)
+        hits += [(f"styles/{name}", f) for f in found]
+        (ui_dir / "styles" / name).write_bytes(safe)
         styles.append(f"styles/{name}")
         merge_tokens(tokens, extract_tokens(data.decode("utf-8", errors="replace")))
 
@@ -352,15 +380,20 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
             continue
         name = f"asset{i}{suffix}"
         (ui_dir / "assets").mkdir(parents=True, exist_ok=True)
-        (ui_dir / "assets" / name).write_bytes(data)
+        safe, found = screen.redact_bytes(data)
+        hits += [(f"assets/{name}", f) for f in found]
+        (ui_dir / "assets" / name).write_bytes(safe)
         assets.append(f"assets/{name}")
 
     spa = looks_like_spa(parser.visible_text, parser.scripts)
+    _report(hits, f"the UI fetched from {source}")
     return UiEvidence(
         captured=True,
         source_kind="url",
         reference_url=source,
         rendered=rendered, styles=styles, assets=assets, tokens=tokens,
+        redactions=len(hits),
+        redacted_files=sorted({path for path, _ in hits})[:20],
         spa_caveat=spa,
         notes=("plain fetch saw little server-rendered content — this looks like a "
                "client-rendered SPA, so captured markup/tokens are partial"

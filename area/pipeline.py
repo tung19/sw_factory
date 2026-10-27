@@ -401,6 +401,21 @@ def clone_pipeline(
         expected=expected, backend=backend, model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    # The reference is UNTRUSTED code. Report any credential sitting in it — a token in
+    # an unrelated file is how the PocketOS incident started — but do NOT rewrite
+    # `_sample/`: it is the evidence this clone was reverse-engineered from, and the
+    # derived copies that actually reach the build agent are redacted instead
+    # (area.re.ui_capture, area.build.ui_vendor).
+    sample = root / "specs" / name / "_sample"
+    if sample.is_dir():
+        from area import screen
+
+        sample_hits = screen.scan_tree(sample)
+        print(screen.format_report(sample_hits, what=f"the reference in {sample.name}/"))
+        if sample_hits:
+            print("[area]        ^ left as-is (evidence); the copies the builder reads "
+                  "are redacted")
+
     # Capture the reference's UI as EVIDENCE (markup/CSS/tokens/assets) so the build
     # can vendor the real look instead of re-inventing it from prose. Best-effort.
     from area.re.ui_capture import capture_ui_evidence

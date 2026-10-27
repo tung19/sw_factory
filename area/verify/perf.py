@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import signal
 import socket
 import subprocess
 import time
@@ -42,7 +41,7 @@ from pathlib import Path
 from threading import Thread
 from typing import Any, Optional
 
-from area._util import safe_name
+from area._util import kill_process_group, safe_name
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 from area.verify.nfr import parse_budget_yaml  # shared flat-budget parser
 
@@ -190,20 +189,9 @@ def _start_server(app: Path, start_timeout: float) -> Optional[tuple[subprocess.
 
 
 def _stop(proc: subprocess.Popen[str]) -> None:
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
-        try:
-            proc.terminate()
-        except Exception:  # noqa: BLE001
-            pass
-    try:
-        proc.wait(timeout=8)
-    except Exception:  # noqa: BLE001
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except Exception:  # noqa: BLE001
-            pass
+    """Thin alias — the implementation moved to area._util so the agent verifier and
+    the dashboard kill switch share exactly this teardown."""
+    kill_process_group(proc)
 
 
 def _wait_ready(url: str, timeout: float) -> bool:

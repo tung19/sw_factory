@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import IO, Any
 
-from area._util import safe_name
+from area._util import kill_process_group, safe_name
 
 from area.paths import REPO as ROOT, WORKSPACE as WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware; `as` = explicit re-export for `from area.web.jobs import WORKSPACE`)
 
@@ -155,7 +155,11 @@ class JobManager:
         log = LOG_DIR / f"{jid}.log"
         f = open(log, "wb")
         proc = subprocess.Popen(
-            cmd, cwd=str(ROOT), stdout=f, stderr=subprocess.STDOUT, env=_env()
+            cmd, cwd=str(ROOT), stdout=f, stderr=subprocess.STDOUT, env=_env(),
+            # Own process group, so cancel() can stop the whole tree. Without it a
+            # cancelled job's children (node/npm/playwright) keep running — and
+            # killpg would target the dashboard's own group.
+            start_new_session=True,
         )
         self._procs[jid] = (proc, f)
         self._jobs[jid] = {
@@ -166,6 +170,30 @@ class JobManager:
         }
         self._save()
         return jid
+
+    def cancel(self, jid: str) -> bool:
+        """Stop a running job and everything it spawned. False if there is nothing to
+        stop (unknown id, or already finished).
+
+        This is the kill switch the factory had no way to pull: a build that thrashes
+        costs real money, and the cost gate only measures AFTER the fact."""
+        entry = self._jobs.get(jid)
+        pf = self._procs.get(jid)
+        if not entry or entry.get("status") != "running" or not pf:
+            return False
+        proc, f = pf
+        kill_process_group(proc)
+        try:
+            f.flush()
+            f.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self._procs.pop(jid, None)
+        entry["status"] = "cancelled"
+        entry["ended"] = time.time()
+        entry["exit"] = proc.poll()
+        self._save()
+        return True
 
     def _finalize_if_done(self, jid: str) -> None:
         entry = self._jobs.get(jid)

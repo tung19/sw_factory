@@ -4,8 +4,8 @@
   Factory: A Reference Architecture"*, Agent Baseline v1, 13 Oct 2026 (Docker, Keycard,
   Barclays, Socket, Secure Theory). Prose and figures CC BY 4.0.
 - **Scope of the assessment:** AREA `main` as of `5be44d2e` (~9.9k LOC in `area/`).
-- **Status:** assessment accepted; backlog groups 1–2 implemented in the same change,
-  groups 3–4 open.
+- **Status:** assessment accepted. Backlog groups **1–2 and 3 implemented**; group 4
+  (profile + evals) open.
 
 ## What the reference architecture says
 
@@ -113,26 +113,38 @@ number, not a gate on factory changes. This is the real outer loop and it is mis
    the confirmation prompt names the provider and says a production database will be
    created/migrated.
 
-### Group 3 — keep credentials out, and protect the factory · open
-8. **Screen inputs, not just outputs.** `_SECRET_RE` (`area/verify/audit.py:28`) scans the
-   built app. Nothing scans what comes *in*: Flow B copies an untrusted repo into
-   `_sample/` → `_ui/` → the app, where the agent reads it, unscanned. This is the
-   PocketOS shape (p.26) and the reference asks for input screening explicitly (p.7).
-9. **`tools/verify-factory-intact.sh`.** The reference puts the factory's own code and
-   configuration in the TRUSTED row: *"They change only through review, never during a
-   run"* (p.6). AREA already invented the mechanism for this — `verify-holdout-intact.sh`
-   checksums what must not change. Apply it to `area/`, `tools/`, `skills/`, and move the
-   default workspace out of the repo.
-10. **Timeouts and a kill switch.** No wall-clock cap on a build; `JobManager` has no
-    cancel; teardown terminates the ACP process but not its process group, so
-    agent-spawned trees can survive. `area/verify/perf.py:194` already has the
-    `setsid`+`killpg` pattern to reuse. The cost gate is post-hoc and blocks a deploy; it
-    cannot interrupt a thrashing run, which is a real money risk.
-11. Wrap the agent env scrub around the whole conversation lifecycle, not only `run()`
-    (`area/engine/adapter.py:255,291`). For the default ACP backend the scrub does hold —
-    `_should_initialize_agent_on_send_message()` returns False for `ACPAgent`, so the
-    spawn is deferred into `run()` — but for `--backend llm` agent init happens during
-    `send_message`, outside the scrub. Two lines remove the question.
+### Group 3 — keep credentials out, and protect the factory · **done**
+8. **Screen inputs, not just outputs.** `area/screen.py` (stdlib leaf) redacts
+   credentials in every copy that reaches the agent — `_sample/` → `_ui/` → `.area-ui/`,
+   uploads, and AI-DLC artifacts — while `_sample/` itself stays byte-exact and is
+   scanned-and-reported instead, because it is the evidence the clone was
+   reverse-engineered from. Counts land in `UiEvidence` and the manifest; every
+   redaction is printed, since a false positive quietly corrupting a clone is worse
+   than a visible one. *Do not reuse `area/verify/audit.py:28` for this:* that pattern
+   is written for grep and its `[[:space:]]` is a POSIX class Python's `re` accepts
+   silently and misreads, so a screener built on it would protect nothing.
+   `tests/test_screen.py` pins that trap and asserts both engines against one corpus.
+9. **`tools/verify-factory-intact.sh`** — modeled on `verify-holdout-intact.sh`:
+   `snapshot` before a build, `verify` after, covering `area/`, `tools/`, `skills/` and
+   `.claude/settings.json` (bytecode excluded). A change mid-run **fails the build**
+   before anything is attested, and the lock lives in the OS temp dir, not the
+   workspace the agent can write. The default workspace was deliberately left alone —
+   relocating it would strand existing apps — so `area doctor` now warns when it sits
+   inside the repo, and the checksum is the real protection.
+10. **Timeouts and a kill switch.** `command_verifier` (the `npm install && build &&
+    test` call), the holdout runner, and every wrangler/vercel/psql invocation are now
+    capped; a timeout is reported as an ordinary failure so the loop can feed it back
+    rather than crash. `run_until` has a whole-loop wall clock (1h default ≈ 4× the
+    worst build measured). `area._util.kill_process_group` — promoted from
+    `perf._stop`, now the single implementation — kills the process GROUP, and
+    dashboard jobs start their own session so `DELETE /api/jobs/{id}` (plus a stop
+    button) can actually stop one. Verified on real forked trees: no orphans.
+11. The agent env scrub now wraps the whole exchange via `_send_and_run`, with a drift
+    guard asserting `send_message` is called from exactly one place. For the default
+    ACP backend the old scrub did hold — `_should_initialize_agent_on_send_message()`
+    returns False for `ACPAgent`, so the spawn was already deferred into `run()` — but
+    for `--backend llm` init happens during `send_message`, and the posture should not
+    depend on which backend is in use.
 
 ### Group 4 — a real outer loop · open
 12. **A profile artifact.** An agent run's configuration is assembled from seven places

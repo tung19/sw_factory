@@ -630,9 +630,21 @@ function renderJobs(jobs){
     d.innerHTML=`<span class="dot ${j.status}"></span>
       <span class="grow"><b>${j.kind}</b> · ${esc(j.name||'')}<span class="meta">${flags} ${fmtTime(j.started)}</span></span>
       ${j.url?`<a href="${j.url}" target="_blank" onclick="event.stopPropagation()">open ↗</a>`:''}
+      ${j.status==='running'?`<button class="mini" title="dừng job + mọi process con"
+        onclick="event.stopPropagation();cancelJob('${j.id}')">stop</button>`:''}
       <span class="badge">${j.status}</span>`;
     box.appendChild(d);
   });
+}
+
+// The kill switch. A build that thrashes costs real money and the cost gate only
+// measures AFTER the fact, so stopping one has to be possible from here.
+async function cancelJob(jid){
+  if(!confirm('Dừng job này? Toàn bộ process con (npm/node/playwright) sẽ bị kill.'))return;
+  const r=await fetch('/api/jobs/'+jid,{method:'DELETE'});
+  const j=await r.json();
+  if(!r.ok) alert('Không dừng được: '+(j.error||r.status));
+  refreshJobs();
 }
 async function refreshJobs(){const r=await fetch('/api/jobs');renderJobs(await r.json());}
 

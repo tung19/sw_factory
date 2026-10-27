@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -313,6 +315,63 @@ def _gate_blocking(gate: str, name: str, args: argparse.Namespace) -> Optional[b
     return True  # verify/audit/e2e/chaos: a tier-1/oracle failure always blocks
 
 
+# Commands that run an agent on the host and therefore need the factory pinned.
+_FACTORY_GUARDED = ("run", "clone", "intake", "iterate")
+
+
+def _factory_script() -> Path:
+    return Path(__file__).resolve().parent.parent / "tools" / "verify-factory-intact.sh"
+
+
+def _factory_snapshot(args: argparse.Namespace) -> None:
+    """Checksum AREA's OWN code before a build.
+
+    The build agent runs unsandboxed on the host, and with the default workspace
+    (REPO/workspace) it writes INSIDE this repo — so nothing stopped it from editing a
+    gate's checker, a skill, or `area/` mid-run. The lock lives in the OS temp dir, not
+    the workspace, because the workspace is exactly what the agent can write.
+
+    Best-effort: a missing script must not block a build. But the absence is recorded
+    (`_factory_lock = None` → `factoryIntact: null`) so the attestation never implies a
+    check that did not run."""
+    args._factory_lock = None
+    script = _factory_script()
+    if not script.exists():
+        return
+    lock = Path(tempfile.gettempdir()) / f"area-factory-{os.getpid()}.lock"
+    try:
+        r = subprocess.run(["bash", str(script), "snapshot", str(lock)],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:  # noqa: BLE001
+        print(f"[area] factory snapshot skipped (warn): {e}")
+        return
+    if r.returncode == 0:
+        args._factory_lock = str(lock)
+    else:
+        print(f"[area] factory snapshot skipped (warn): {r.stderr.strip()}")
+
+
+def _factory_verify(args: argparse.Namespace) -> Optional[bool]:
+    """True = intact · False = CHANGED during the run · None = not checked."""
+    lock = getattr(args, "_factory_lock", None)
+    if not lock:
+        return None
+    try:
+        r = subprocess.run(["bash", str(_factory_script()), "verify", str(lock)],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:  # noqa: BLE001
+        print(f"[area] factory verify skipped (warn): {e}")
+        return None
+    finally:
+        try:
+            Path(lock).unlink(missing_ok=True)
+        except OSError:
+            pass
+    out = (r.stdout.strip() or "") + ("\n" + r.stderr.strip() if r.stderr.strip() else "")
+    print(out.strip())
+    return True if r.returncode == 0 else (False if r.returncode == 1 else None)
+
+
 def _builder_id(args: argparse.Namespace) -> str:
     """What ACTUALLY built this. Used to be a hardcoded "area/openhands-acp", which
     was simply false for `--backend llm`."""
@@ -387,6 +446,16 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
             print(f"[area] ❌ gate '{g}' failed — skipping deploy")
             return 1
 
+    # The factory itself is in the TRUSTED row of the threat model: it "changes only
+    # through review, never during a run". Check that before attesting anything — a
+    # gate that graded with modified code proves nothing.
+    factory_intact = _factory_verify(args)
+    if factory_intact is False:
+        print("[area] ❌ refusing to attest or deploy — AREA's own code changed while "
+              "this build was running. Revert it and rebuild.")
+        _ev("factory.tampered")
+        return 1
+
     # SLSA-style provenance: attest what was built, which gates ACTUALLY enforced it
     # (vs merely ran advisory, vs never ran), and the policy it ran under — so deploy
     # can verify the artifact, and a human can reconstruct the build months later.
@@ -403,7 +472,8 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
                          gates=gate_results,
                          gates_not_run=[g for g in _GATE_ORDER if g not in gates],
                          builder=_builder_id(args),
-                         policy=_run_policy(args),
+                         policy={**_run_policy(args),
+                                 "factoryIntact": factory_intact},
                          spec_dir=res.spec_dir)
         enforced = sum(1 for v in gate_results.values() if v["blocking"] is True)
         print(f"[area] provenance recorded ({enforced} enforced / {len(gates)} ran "
@@ -798,6 +868,10 @@ def main(argv: list[str] | None = None) -> int:
     # Stamp the invocation start so the post-build `cost` gate can sum only THIS
     # build's agent runs (obs.runs.jsonl is global + per-run; see area/verify/cost).
     args._build_start = time.time()
+    # Pin AREA's own code for the commands that let an agent loose on this host, so
+    # `_finish` can prove the factory did not change while it was running.
+    if getattr(args, "cmd", None) in _FACTORY_GUARDED:
+        _factory_snapshot(args)
 
     # P2 cost/budget cap -> env read by area/engine at call time
     if getattr(args, "budget", None) is not None:

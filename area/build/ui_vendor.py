@@ -9,8 +9,9 @@ no-op when there is no evidence.
 """
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
+
+from area import screen
 
 VENDOR_DIR = ".area-ui"
 _SUBDIRS = ("styles", "assets", "rendered")
@@ -25,17 +26,28 @@ def install_ui_evidence(app_dir: str | Path, ui_dir: str | Path) -> list[str]:
         return []
     dest = Path(app_dir) / VENDOR_DIR
     copied: list[str] = []
+    hits: list[tuple[str, screen.Finding]] = []
+    # Defence in depth: the capture step already screened `_ui/`, but this is the last
+    # copy before the reference material sits inside the app the agent works in, so
+    # screen again rather than assume the upstream step ran (it is best-effort).
     for sub in _SUBDIRS:
         s = ui / sub
         if s.is_dir() and any(s.iterdir()):
-            shutil.copytree(s, dest / sub, dirs_exist_ok=True)
+            for src in sorted(s.rglob("*")):
+                if src.is_file():
+                    rel = src.relative_to(s)
+                    for hit in screen.redact_file(src, dest / sub / rel):
+                        hits.append((f"{sub}/{rel.as_posix()}", hit))
             copied.append(sub)
-    for f in _FILES:
-        p = ui / f
-        if p.is_file():
+    for fname in _FILES:
+        src_file = ui / fname
+        if src_file.is_file():
             dest.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(p, dest / f)
-            copied.append(f)
+            for hit in screen.redact_file(src_file, dest / fname):
+                hits.append((fname, hit))
+            copied.append(fname)
+    if hits:
+        print(screen.format_report(hits, what=f"the reference UI vendored into {VENDOR_DIR}/"))
     return copied
 
 

@@ -54,6 +54,37 @@ see [docs/secure-factory-gap-assessment.md](docs/secure-factory-gap-assessment.m
   PreToolUse hook guards a Claude Code session rooted in the repo, not the autonomous
   ACP build agent, for which layer 1 is detect-and-revert.
 
+### Boundaries: input screening, factory integrity, timeouts, a kill switch
+Group 3 of the same assessment — the controls that make spending money on real builds
+safe, and the last ones that need no deploy token.
+- **Credentials are screened on the way IN** (`area/screen.py`, stdlib leaf). Every
+  copy that reaches the agent is redacted — an untrusted reference (`_sample/` →
+  `_ui/` → `.area-ui/`), uploads, AI-DLC artifacts — while `_sample/` stays byte-exact
+  and is scanned-and-reported, because it is the evidence the clone was built from.
+  Redactions are counted in `UiEvidence`/the manifest and **printed**, so a false
+  positive is visible instead of quietly corrupting a clone. It carries its own
+  Python-native patterns on purpose: the audit gate's regex is written for grep, and
+  its `[[:space:]]` is a POSIX class that Python's `re` accepts and misreads.
+- **The factory is pinned during a run** (`tools/verify-factory-intact.sh`). Checksums
+  `area/`/`tools/`/`skills/`/`.claude/settings.json` before a build and fails it if they
+  changed — a gate that graded with modified code proves nothing. The lock lives in the
+  OS temp dir, not the workspace the agent can write, and the result is attested as
+  `policy.factoryIntact`. `area doctor` warns when the workspace sits inside the repo.
+- **Nothing runs unbounded any more.** `command_verifier` (the `npm install && build &&
+  test` call), the holdout runner and every wrangler/vercel/psql invocation are capped;
+  a timeout reports as an ordinary failure so the loop feeds it back instead of
+  crashing. `run_until` gained a whole-loop wall clock (`AREA_MAX_WALL_S`, 1h default).
+- **There is a kill switch.** `area._util.kill_process_group` (promoted from
+  `perf._stop`, now the only implementation) kills the process GROUP; dashboard jobs
+  start their own session, and `DELETE /api/jobs/{id}` plus a stop button can cancel
+  one. The cost gate only measures after the fact, so a thrashing build needed this.
+- The agent env scrub wraps the whole exchange, not only `run()`, with a drift guard
+  so a new `send_message` call site cannot fall outside it again.
+- `SECURITY.md` now states the gaps that remain (no sandbox, no egress boundary, no
+  per-agent identity, unsigned attestation) instead of being silent about them, and
+  `docs/RUNNER.md` + `Dockerfile.runner` carry a banner saying the `area runner` they
+  describe does not exist on `main`.
+
 ### Flow B+ — `area adapt` (research-augmented clone & adapt)
 - `area adapt <reference> "<requirement>"`: **research** comparable projects
   (`area/research.py` — discover → rank → top-5 → analyse the data dimension →

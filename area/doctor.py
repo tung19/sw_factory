@@ -75,5 +75,24 @@ def check_deploy() -> Check:
             "" if have else "login khi cần: cf auth login / export VERCEL_TOKEN=…")
 
 
+def check_workspace() -> Check:
+    """Where generated apps land. The default puts them INSIDE this repo, and the
+    build agent runs unsandboxed on the host — so by default an agent can reach
+    AREA's own code. `tools/verify-factory-intact.sh` detects a change mid-run;
+    pointing AREA_WORKSPACE outside the repo prevents one."""
+    from area.paths import REPO, workspace
+
+    ws = workspace()
+    inside = ws == REPO or REPO in ws.parents
+    if not inside:
+        return ("workspace", "ok", f"{ws} (outside the factory repo)", "")
+    return ("workspace", "warn",
+            f"{ws} is INSIDE the factory repo — a build agent writing there can reach "
+            "AREA's own code",
+            "export AREA_WORKSPACE=~/area-generated  (the factory-intact check still "
+            "detects a mid-run change either way)")
+
+
 def report() -> list[Check]:
-    return [check_python(), check_node(), check_git(), check_gh(), check_llm(), check_deploy()]
+    return [check_python(), check_node(), check_git(), check_gh(), check_llm(),
+            check_deploy(), check_workspace()]

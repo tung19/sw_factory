@@ -60,6 +60,10 @@ def _expected_ac_count(holdout: Path) -> int:
     return len(ids)
 
 
+# Wall clock for one holdout test run.
+_TEST_TIMEOUT_S = 1800.0
+
+
 def _lock_file(app: Path) -> Optional[Path]:
     """The on-disk lock path for a standard workspace/apps/<name> layout, else None."""
     if app.parent.name != "apps":
@@ -298,7 +302,16 @@ def _holdout_oracle(
                 "the locked acceptance tests — revert them and fix APP CODE only.",
             )
         try:
-            proc = subprocess.run(test_cmd, cwd=str(app), capture_output=True, text=True)
+            # Capped: an unbounded oracle run can hang the whole build (same gap
+            # closed in area.engine.adapter.command_verifier).
+            proc = subprocess.run(test_cmd, cwd=str(app), capture_output=True,
+                                  text=True, timeout=_TEST_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            # TimeoutExpired is a SubprocessError, NOT an OSError — without this it
+            # would escape the oracle and crash the build loop.
+            return VerifyResult(False, (
+                f"holdout runner TIMED OUT after {_TEST_TIMEOUT_S:.0f}s — the locked "
+                "suite did not finish (a hung test or watch mode?)"))
         except OSError as e:
             return VerifyResult(False, f"holdout runner failed: {e}")
         out = (proc.stdout + "\n" + proc.stderr).strip()

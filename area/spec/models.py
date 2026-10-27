@@ -57,6 +57,11 @@ class UiEvidence(BaseModel):
     assets: List[str] = Field(default_factory=list)    # static asset files
     screenshot: str = ""               # reference.png baseline (url kind, if any)
     tokens: Dict[str, List[str]] = Field(default_factory=dict)  # colors/fonts/vars
+    # Credential screening of the captured copy (area.screen). The reference is
+    # UNTRUSTED, so a token sitting in an unrelated file must not ride into the
+    # builder's context; `_sample/` stays byte-exact, these counts describe the COPY.
+    redactions: int = 0
+    redacted_files: List[str] = Field(default_factory=list)
     spa_caveat: bool = False           # plain fetch saw no client-rendered content
     description: str = ""              # optional, agent-emitted (prose)
     palette: List[str] = Field(default_factory=list)   # optional, agent-emitted
