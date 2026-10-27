@@ -1,0 +1,231 @@
+# Self-audit — 2026-10-27
+
+Independent audit of this repo, run the way AREA's own spine demands: **I wrote most of
+the code audited here, so I am not the only grader.** Four read-only subagents audited
+in parallel (correctness/false-greens · security · architecture & test quality ·
+docs-vs-code truthfulness), each briefed to distrust the prose, because this repo's
+proven failure mode is records overstating the code.
+
+Every finding below I then **re-verified myself** against source or by running it — one
+subagent had earlier reported a "critical" hole that did not exist. Findings a subagent
+reported but I have not personally confirmed are kept in a separate section and are
+labelled as such.
+
+Tree: `feat/saas-forward-port` @ `c1d9774b`. Suite at audit time: **657 passed**, mypy
+strict clean (71 files), ruff clean.
+
+---
+
+> **Status:** S1, S2, S3 are **fixed** — S1+S2 in this branch
+> (`fix/gate-grades-what-it-prints`), S3 on `feat/saas-forward-port` where the code
+> lives. H1–H6 and M1–M5 are open. Each fix section below records what changed.
+
+## Severity S — a gate says PASS when it should say FAIL
+
+### S1 · `audit` prints `❌ BLOCK` and then returns PASS (default posture) — FIXED
+`area/verify/audit.py:186-235`. Control flow: a tier-2 injection finding sets
+`tier2_block=True`, which skips the early-PASS branch and enters the fix loop — but the
+loop's `oracle` is **tier-1 only** (`_check()`). Tier-1 is already green, so `passed=True`
+on attempt 1, and the only tier-2 re-check is guarded `if passed and strict and …`.
+With the default `strict=False` tier-2 is never re-measured.
+
+Observable: an app with `dangerouslySetInnerHTML` / `eval(` / interpolated SQL prints
+`❌ BLOCK <file>:<line>` for each sink, then prints `audit: ✅ PASS`. Provenance then
+records `audit` as `{blocking: true, blocked: false}` — i.e. "enforced, nothing found".
+
+This was **remediated finding #17** ("audit injection-class blocks-by-default"). The
+remediation added the decision (`_blocking_findings`) but never moved the measurement
+into the oracle, so the claim has been false since it was made.
+
+### S2 · `area/screen.py` misses the commonest real credential shapes — FIXED
+Reproduced by me, 4 for 4, against the shipped module:
+
+| input | findings | secret still in the output |
+|---|---|---|
+| minified JS with `process.env` elsewhere on the line | 0 | `ghp_…`, `xoxb-…` |
+| attacker plants the literal `AREA-REDACTED` in the file | 0 | `ghp_…` |
+| two secrets on one line | 2 | the 2nd one (reported, not redacted) |
+| `process.env.X \|\| "postgres://admin:<pw>@host/db"` | 0 | the password |
+| control: plain one-line assignment | 1 | none |
+
+The first and last rows are the normal shapes in a bundled reference app — i.e. exactly
+the Flow B input this module was written to screen. The `AREA-REDACTED` row is worse than
+a miss: the marker is attacker-controllable, so planting it disables screening for the file.
+
+**Fix:** both root causes were scope errors. Line-scope exclusion became **statement**
+scope (`_statement_at`, bounded by the nearest separator, ≤120 chars) and now applies only
+to `_ASSIGNMENT`, where "it came from the environment" is a real alternative reading — a
+vendor pattern matches a literal credential, which no env lookup can produce, so nothing
+nearby excuses it. The `AREA-REDACTED` marker is off the exclusion list entirely;
+idempotence comes from `_EXCLUDE_VALUE` matching the value *we* wrote, not text an input
+can choose, which also fixes the "first redaction excuses the second" case.
+
+Smoked on a **real** 516KB minified bundle (`next/dist/compiled/terser/bundle.min.js`,
+one line, containing `process.env` — the old code returned zero findings on it): the
+planted token is now found and removed.
+
+**Also calibrated against real input, which changed the fix.** Screening 100 real files
+from a built app produced **15 findings, every one a false positive** of the same shape —
+an unquoted JS expression (`token = creditTokenParam`, `privateKey: r.ECPrivateKey.decode`).
+Redaction rewrites the copy the agent reads, so each would have silently corrupted
+third-party source — the harm this module's own docstring says to avoid. `_CODE_VALUE` now
+excludes unquoted member expressions and camelCase identifiers, taking the same 100 files
+to **1** (a PascalCase schema name, in `node_modules`, which `scan_tree` skips anyway). The
+rule is deliberately not extended to PascalCase: that would also exclude a real password
+like `Pr0dPassw0rd`. Both the four shapes and this calibration are now the corpus in
+`tests/test_screen_corpus.py`.
+
+### S3 · `job_argv` deploys with no human gate — and a test pins it — FIXED
+`area/net/protocol.py:87` (`["--deploy", "--yes"]`) and `:96` (`["deploy", name, "--yes"]`).
+This re-opens the exact fail-open closed in `area/web/jobs.py` (`_deploy_approval()`
+requires `confirm: true`), and `tests/test_net.py` asserts `"--yes" in d`, so the suite
+defends the hole. Shipped by **PR #36** (the SaaS forward-port), opened today.
+
+**Fix** (on `feat/saas-forward-port`, where the code lives): the approval has to travel in
+the request (`confirm: true`) and its absence refuses the job — `runner._exec_job` already
+turns the `ValueError` into a failed job the UI shows. The local dashboard was already
+sending `confirm:true` behind a real `confirm()`; the coordinator UI was not, and now takes
+the same approval before it sends.
+
+---
+
+## Severity H
+
+### H1 · The autonomous builder is shipped a stale skills pack
+`area/skills.py:15` → `SKILLS_DIR = <repo>/skills`, and `area/provenance.py` `skills_digest()`
+hashes the same directory. `skills/vinext-cf-build/SKILL.md` is **70 lines (2026-10-19)**
+with **zero** mentions of `cf-fix`; `.claude/skills/vinext-cf-build/SKILL.md` is
+**105 lines (2026-10-22)** with 7, carrying the whole "`area cf-fix`/`cf-clone` automates
+§1–§4" rewrite. Only the interactive agent reads `.claude/skills/`. So the CF automation
+the changelog records as shipped never reaches the build agent, and the attestation
+digests the stale copy. (`area-oracle-loop` is byte-identical in both trees — the drift
+is specific to the CF skill.)
+
+### H2 · `npm install` / build / test run with cloud tokens present
+`area/engine/adapter.py`: the scrub is inside `_send_and_run`, but `run_until` calls
+`verify()` at top level (`run_until+39`, `+60`). `verify()` is what runs the generated
+app's `npm install && build && test` — arbitrary postinstall scripts from an
+agent-authored `package.json`, with the parent environment intact.
+
+### H3 · `perf` fails open on a committed budget
+`area/verify/perf.py`: `if not metrics: … return True` executes **before** `blocking` is
+consulted. `area/verify/nfr.py:173-176` does the same situation correctly (committed +
+unmeasured → `return False`, "not silently passing"). The repo's own rule is nfr's.
+
+### H4 · `run_once` records every run as a pass
+`area/engine/adapter.py:302` — `passed=True` is a literal. `area evals`, the group-4 gate
+on changes to the factory's own prompts and thresholds, grades on `pass_rate` from this
+ledger. The gate is reading a constant.
+
+### H5 · "The builder can never edit the oracle (hook-enforced)" — three unqualified claims
+`README.md:44`, `SECURITY.md:72`, `docs/CASE-STUDY.md:60`. `area/skills.py` installs
+skills only — **no `.claude/settings.json`**, so no PreToolUse hook exists in a generated
+app. `docs/ARCHITECTURE.md:113-118` already states this correctly ("Covers **A only**"),
+and `SECURITY.md:19-21` contradicts `SECURITY.md:72` in the same file. The CASE-STUDY run
+making the claim is `--target plain --tdd` — precisely the autonomous agent the hook never
+reaches. Real enforcement there is detect-and-revert + the checksum, which is weaker and
+post-hoc.
+
+### H6 · Stored-XSS sink on the deploy-capable dashboard
+`area/web/jobs.py:27` matches `…\.(?:workers|pages)\.dev\S*` — the `\S*` tail is unbounded.
+`area/web/static/index.html:632` and `:665` interpolate that value into `href="${j.url}"`
+inside `innerHTML` **without `esc()`**, while escaping the adjacent name. A build-log line
+is enough to inject; in Flow B the log carries output from an untrusted reference.
+
+---
+
+## Severity M
+
+- **M1 · `SECURITY.md:43` says "*every* agent/build/provider subprocess has a wall clock"** —
+  four do not: `area/verify/nfr.py:106` (the full `--nfr-build`) and
+  `area/build/cf_scaffold.py:100,109,296` (incl. `npm run build:cf`, the fallback build).
+  The deploy CLIs genuinely are capped; the sentence overstates to "every".
+- **M2 · `tools/gate.sh` silently ignores `--chaos`** — `tools/gate.sh:11` parses only
+  `--strict|--e2e`, and the script runs no chaos gate at all, while `CLAUDE.md` step 3
+  instructs the builder to pass `--e2e --chaos`. The factory's master rule set names a
+  flag its own tool drops.
+- **M3 · The showcase "gate evidence" is a pre-fix artifact** —
+  `examples/taskboard/SPEC/provenance.json` is `area.slsa-like/v1`, `builder:
+  "area/openhands-acp"` (the hardcoded literal the changelog says was fixed), and
+  `gates: {holdout_tdd: true}` — one gate, no `{ran,blocking,blocked}`, no `policy`.
+  `docs/CASE-STUDY.md:72-79` tables audit/nfr/perf/e2e/chaos as ✅ and `README.md:24-26`
+  calls the directory "the gate evidence".
+- **M4 · Stale counts** — `569 tests` in `CONTRIBUTING.md:26` and `docs/UPGRADE-PLAN.md:12`
+  vs **657**; `docs/ARCHITECTURE.md:52` "the 9 gates below" over an 8-row table (`visual`
+  has no row); `UPGRADE-PLAN.md:47` "8 gates"; `PLAN.md:101,201` "59/56 modules" vs 71.
+- **M5 · `scripts/run-runner.sh:38` execs `area runner`, which does not exist** — zero
+  `add_parser("runner")`, zero `_HANDLERS` entry. A documented `curl … | bash` path that
+  cannot run. **Branch-scoped:** `area/runner.py`, `area/net/*`, `coordinator-cf/` and
+  these scripts are absent from `main` — the "not on this branch" banners are accurate
+  for `main`, and it is commit `c1d9774b` (today's forward-port) that shipped the data
+  plane here without updating them.
+
+---
+
+## Reported by a subagent, NOT yet verified by me
+
+Listed so they are not lost; each still needs a first-hand check before it is treated as
+real.
+
+- A decoy `__tests__/_holdout_x/` directory may satisfy the locked-oracle check (substring
+  filter + builder-owned `vitest.config.ts`).
+- Nothing re-verifies the locked oracle after `--tdd`: the `verify` gate is removed while
+  `audit --fix` / `chaos` / `e2e` then run agents in the app directory.
+- `readjudicate` may re-lock tampering.
+- `ask_cli` is outside the env scrub.
+- `tools/verify-factory-intact.sh` lives in the tree it protects, with its lock in
+  `TMPDIR`, writable by the agent.
+- `.area/provenance.json` is forgeable (already documented honestly in the module docstring).
+- `build_app` is at 0% test coverage, guarded only by a source-text proximity assertion.
+
+## Verified sound (independently re-checked, trustworthy)
+
+- The 9-gate registry is real and pinned (`cli.py:33` + `tests/test_gate_registry.py`).
+- `profiles/*.yaml`: 16 files, all load, **zero** missing prompt sources, every label the
+  code emits — including the f-string families — resolves to exactly one profile.
+- Obs ledger: 110 runs, and exactly the 5 kinds named in the handoff have never run.
+- A locked oracle is not re-authored (`holdout.py:283-298`: reuse on intact, raise on
+  tampered); `spec-reviewer` survives `--no-clarify` (`pipeline.py:214-223`).
+- `e2e` is forced before deploy for auth apps; the `visual` gate is auto-added when `_ui/`
+  was captured — the "built but never ran" defect is genuinely fixed.
+- Provenance v2 reports a real builder, per-gate `{ran,blocking,blocked}`, `gatesNotRun`
+  and `policy`, with `None` where undeterminable.
+- Deploy fails closed (tri-state `require_provenance`, `tools/deploy.sh` no longer forces
+  `--yes`) — which is what makes S3 a regression rather than a known gap.
+- `examples/taskboard`'s holdout checksums match its committed `holdout.lock` byte-for-byte.
+
+---
+
+## Scores
+
+| Dimension | Score | Why |
+|---|---:|---|
+| Oracle independence (the spine) | 7/10 | Design is strong and layer 1+3 are real; but the `audit` gate's oracle does not measure what the gate prints, and layer 2 does not exist for the autonomous agent three docs say it covers. |
+| Gate honesty ("green" means green) | **5/10** | Three confirmed false-greens: S1, H3, H4. |
+| Attestation / provenance | 7/10 | v2 genuinely tells the truth; loses points for digesting the stale skills tree and for being forgeable-by-design. |
+| Boundaries (sandbox · network · supply chain · identity) | 3/10 | Deliberately out of scope until `saas-coordinator-runner` — but H2 and S2 are in-scope regressions inside that gap. |
+| Engineering hygiene | 8/10 | 657 agent-free tests, mypy strict over 71 files, ruff clean, deterministic tooling. |
+| Docs truthfulness | **4/10** | The known failure mode recurred, in code shipped in the last 48 hours. |
+| **Overall** | **~6/10** | |
+
+## The one-line verdict
+
+**AREA's design is ahead of its enforcement, and the gap widened in the last 48 hours** —
+not because the method is wrong, but because the person writing the code graded it.
+Three of the four worst findings (S1, S2, H1) are claims the repo makes about controls
+that do not hold, and S3 ships a closed hole back open.
+
+## Remaining order
+
+1. ~~S3, S1, S2~~ — done.
+2. **H1, H2, H3, H4** — one commit each, all small.
+3. **H5, M1–M5** — a docs-truth pass, same shape as the one in PR #34.
+4. The unverified list above — first-hand check before any is treated as real.
+
+## The question this audit leaves behind
+
+S1 was a *previously remediated* finding whose remediation moved the **decision** but not
+the **measurement**. That is a repeatable mistake, not a one-off, so every other
+"remediated" claim deserves the same question asked of it: after the fix, what actually
+re-measures the thing being claimed — and is that measurement in the oracle the loop
+converges on, or beside it?
