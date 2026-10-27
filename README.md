@@ -41,8 +41,13 @@ area trace todo                               # the end-to-end audit trail
 
 `--tdd` authors the acceptance tests **first** (by a separate agent, from the spec
 only), **checksum-locks** them, then builds app code until that frozen suite
-passes. The builder can never edit the oracle — so "green" means the independent
-tests actually passed. See **[ADR-0003](docs/adr/0003-oracle-loop-independence.md)**.
+passes. The builder cannot change the oracle **undetected**, and "green" now means the
+locked files were the ones that actually ran: the oracle checks the runner's own report
+of which tests it executed, not just the exit code. In an interactive Claude Code session
+rooted in this repo a PreToolUse hook also *blocks* the edit outright; the autonomous
+build agent gets detect-and-revert plus that executed-files check, which is weaker at the
+moment of the edit and stronger about the result. See
+**[ADR-0003](docs/adr/0003-oracle-loop-independence.md)**.
 
 ## Setup & requirements
 

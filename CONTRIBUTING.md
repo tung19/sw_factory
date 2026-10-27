@@ -45,9 +45,13 @@ once lost (see the deep-audit history in PLAN.md).
 
 1. **Never weaken oracle independence.** The holdout under `__tests__/_holdout/` is
    authored by an *independent* agent from the spec only and checksum-locked. The build
-   agent may not edit it — the `guard_holdout.py` hook enforces this. If a locked test
-   is genuinely wrong, the path is `_CHALLENGE.md` → independent re-adjudication → re-lock,
-   never a silent edit.
+   agent may not edit it. Know which layer actually enforces that for which agent: the
+   `guard_holdout.py` PreToolUse hook *prevents* the edit in an interactive Claude Code
+   session rooted in this repo; the autonomous build agent is covered by the checksum
+   lock (detect-and-revert, re-checked on every oracle run) and by the oracle requiring
+   the locked files to appear in the test runner's own report of what it executed. If a
+   locked test is genuinely wrong, the path is `_CHALLENGE.md` → independent
+   re-adjudication → re-lock, never a silent edit.
 2. **Deterministic gates block; LLM-judgement gates are advisory until `--strict`.** Don't
    promote an LLM/heuristic check to a hard block without measuring its false-positive rate
    first (the research posture in PLAN §SecOps).

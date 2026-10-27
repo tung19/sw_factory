@@ -17,7 +17,12 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-_URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.vercel\.app\S*")
+# The trailing path is bounded to URL-safe characters, NOT `\S*`: this value is
+# interpolated into an `href` on the dashboard, and `\S*` happily swallowed
+# `"><img src=x onerror=...>` out of a build-log line (which in Flow B carries
+# output from an untrusted reference app). The dashboard escapes and re-validates
+# it too — this is the first of the three layers, not the only one.
+_URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.vercel\.app(?:/[A-Za-z0-9\-._~/%?&=+#:@]*)?")
 
 # Source signals that an app needs durable Postgres (Vercel Postgres is now Neon
 # via the Marketplace; @vercel/postgres is a thin wrapper over @neondatabase/serverless).

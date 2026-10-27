@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Optional
 
 # matches *.workers.dev and *.pages.dev deploy URLs
-_URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev\S*")
+# The trailing path is bounded to URL-safe characters, NOT `\S*`: this value is
+# interpolated into an `href` on the dashboard, and `\S*` happily swallowed
+# `"><img src=x onerror=...>` out of a build-log line (which in Flow B carries
+# output from an untrusted reference app). The dashboard escapes and re-validates
+# it too — this is the first of the three layers, not the only one.
+_URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev(?:/[A-Za-z0-9\-._~/%?&=+#:@]*)?")
 
 
 # Wall clock for one provider-CLI invocation.

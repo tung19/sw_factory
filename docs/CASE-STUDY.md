@@ -57,8 +57,12 @@ describe('AC-11 user-isolation', () => { /* user A can never see user B's boards
 
 Then the suite was **checksum-locked** →
 [`SPEC/holdout.lock`](../examples/taskboard/SPEC/holdout.lock). From that point the
-build agent **could not edit it** (a PreToolUse hook blocks it; a verify step
-re-checks the checksums). *The same reasoning never both wrote AND graded the code.*
+build agent **could not change it undetected** — every oracle run re-checks the
+checksums, and refuses to proceed if they moved. (This run is `--target plain --tdd`,
+i.e. the autonomous build agent, which the repo's PreToolUse hook does not reach; that
+hook guards an interactive session in this repo. An earlier version of this page claimed
+the hook as the mechanism here, which was wrong.) *The same reasoning never both wrote
+AND graded the code.*
 
 ## 4 · Build to green
 

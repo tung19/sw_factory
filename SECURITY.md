@@ -69,7 +69,13 @@ shared service without them.**
 ## What the agent can and can't do
 
 The build agent runs with your Claude session and edits files under the app's
-workspace. It cannot edit a locked holdout (hook-enforced), and deploys require an
+workspace. It cannot change a locked holdout undetected — the checksum lock is verified
+on every oracle run, and the oracle additionally requires the locked files to appear in
+the test runner's own report of what it executed, so excluding or shadowing them is a
+failure rather than a green. The PreToolUse hook that *prevents* the edit applies to an
+interactive session rooted in this repo, **not** to the autonomous build agent (nothing
+installs a `.claude/settings.json` into a generated app, and the guard script is not
+there either, so a hook installed naively would simply fail open). Deploys require an
 explicit human gate. REA (Tier-2 reverse-engineering) is opt-in (`--rea`), pinned
 to an exact version, and must only be pointed at software you are authorized to
 analyze.

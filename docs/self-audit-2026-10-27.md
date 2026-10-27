@@ -268,7 +268,7 @@ comparable. `evals/tasks.yaml` declares the fixed A/B set (the three apps that a
 have independent locked oracles, so "did it work" is not a judgement call), and
 `area evals --tasks` prints it; `--any-task` opts out.
 
-### H5 · "The builder can never edit the oracle (hook-enforced)" — three unqualified claims
+### H5 · "The builder can never edit the oracle (hook-enforced)" — three unqualified claims — FIXED
 `README.md:44`, `SECURITY.md:72`, `docs/CASE-STUDY.md:60`. `area/skills.py` installs
 skills only — **no `.claude/settings.json`**, so no PreToolUse hook exists in a generated
 app. `docs/ARCHITECTURE.md:113-118` already states this correctly ("Covers **A only**"),
@@ -276,6 +276,24 @@ and `SECURITY.md:19-21` contradicts `SECURITY.md:72` in the same file. The CASE-
 making the claim is `--target plain --tdd` — precisely the autonomous agent the hook never
 reaches. Real enforcement there is detect-and-revert + the checksum, which is weaker and
 post-hoc.
+
+**Fix — the docs, deliberately, and not the code.** The obvious "stronger" fix is to
+install a `.claude/settings.json` into each generated app so the claim becomes true. That
+would have produced FAKE enforcement, and the repo's own comment in `.claude/settings.json`
+says why: a project hook runs only once the user **approves** it in Claude Code, and the
+command **fails open** when the guard script cannot be located. `tools/hooks/guard_holdout.py`
+lives in this repo, not in a generated app (verified: no generated app has either file),
+so `CLAUDE_PROJECT_DIR` pointing at the app would find nothing and allow every edit —
+while the docs would now be entitled to claim a hook. That is the exact failure mode this
+audit exists to catch, so the claim was corrected instead.
+
+Five sites corrected (`README.md`, `SECURITY.md`, `CONTRIBUTING.md`, `docs/CASE-STUDY.md`,
+`docs/adr/0003`), each now naming **which layer covers which agent**. The honest sentence
+is stronger than it was when this audit was written, because S4 landed in between: the
+enforcement for the autonomous agent is the checksum lock **plus** the oracle requiring
+the locked files to appear in the runner's own report of what it executed.
+
+### H6 · Stored-XSS sink on the deploy-capable dashboard — FIXED
 
 ### H6 · Stored-XSS sink on the deploy-capable dashboard
 `area/web/jobs.py:27` matches `…\.(?:workers|pages)\.dev\S*` — the `\S*` tail is unbounded.
@@ -366,7 +384,7 @@ that do not hold, and S3 ships a closed hole back open.
 ## Remaining order
 
 1. ~~S3, S1, S2, S4~~ — done. ~~H1~~, ~~H2~~, ~~H3~~, ~~H4~~ (+ H4b) — done.
-2. **H5, H6** — a docs-truth line and an `esc()` call.
+2. ~~H5~~, ~~H6~~ — done. Neither was the one-liner it looked like: H5's "stronger" fix would have installed a hook that always fails open, and H6's `esc()` does not escape quotes.
 3. **H5, M1–M5** — a docs-truth pass, same shape as the one in PR #34.
 4. The unverified list above — first-hand check before any is treated as real.
 

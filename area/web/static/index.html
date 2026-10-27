@@ -374,6 +374,15 @@ async function sendChat(){
 }
 function fmtTime(s){if(!s)return'';return new Date(s*1000).toLocaleTimeString();}
 function esc(t){return (t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+// esc() does NOT escape quotes, so it is not enough inside an attribute: a value
+// containing `"` would close the attribute and start a new one. escAttr() is for
+// `href="..."` and friends.
+function escAttr(t){return (t||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// A URL is only used as a link target if it is https with no characters that could
+// break out of an attribute or carry a different scheme. Anything else renders as no
+// link at all, which is the safe failure: these URLs come out of BUILD LOGS, and in
+// Flow B a build log carries output from an untrusted reference app.
+function safeUrl(u){return /^https:\/\/[A-Za-z0-9.\-]+(?:\/[A-Za-z0-9\-._~\/%?&=+#:@]*)?$/.test(u||'')?u:'';}
 
 // ---- file pickers (click + drag/drop) ----
 function wireDrop(dropId,inputId,pane){
@@ -594,7 +603,7 @@ function openLog(jid){
   es=sse('/api/jobs/'+jid+'/stream');
   es.onmessage=e=>{logBuf+=e.data+'\n';const el=$('log');el.textContent=logBuf;el.scrollTop=el.scrollHeight;
     const tm=logBuf.match(/\[area\] trace : (\S+)/);
-    if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}
+    if(tm){const u=safeUrl(tm[1]);if(u){const a=$('traceLink');a.href=u;a.style.display='';}}
     renderPipe();};
   es.addEventListener('done',e=>{es.close();refreshJobs();refreshApps();refreshMetrics();
     try{const j=JSON.parse(e.data);
@@ -605,7 +614,8 @@ function openLog(jid){
   es.onerror=()=>{es.close();};
 }
 function showPreview(url){
-  $('previewCard').style.display='';$('preview').src=url;$('previewOpen').href=url;
+  const su=safeUrl(url); if(!su) return;
+  $('previewCard').style.display='';$('preview').src=su;$('previewOpen').href=su;
 }
 // one-shot render of a job (no live SSE) — used by ?job=X&snapshot=1
 function openSnapshot(jid){
@@ -613,7 +623,7 @@ function openSnapshot(jid){
   $('logTitle').textContent='job '+jid+' (snapshot)'; renderJobs(lastJobs);
   fetch('/api/jobs/'+jid+'/log').then(r=>r.text()).then(t=>{
     logBuf=t; const el=$('log'); el.textContent=t; el.scrollTop=el.scrollHeight;
-    const tm=t.match(/\[area\] trace : (\S+)/); if(tm){const a=$('traceLink');a.href=tm[1];a.style.display='';}
+    const tm=t.match(/\[area\] trace : (\S+)/); if(tm){const u=safeUrl(tm[1]);if(u){const a=$('traceLink');a.href=u;a.style.display='';}}
     renderPipe();
   }).catch(()=>{});
 }
@@ -629,7 +639,7 @@ function renderJobs(jobs){
     const flags=(j.params&&(j.params.tdd?' ·tdd':'')||'')+(j.params&&j.params.all?' ·gates':'');
     d.innerHTML=`<span class="dot ${j.status}"></span>
       <span class="grow"><b>${j.kind}</b> · ${esc(j.name||'')}<span class="meta">${flags} ${fmtTime(j.started)}</span></span>
-      ${j.url?`<a href="${j.url}" target="_blank" onclick="event.stopPropagation()">open ↗</a>`:''}
+      ${safeUrl(j.url)?`<a href="${escAttr(safeUrl(j.url))}" target="_blank" onclick="event.stopPropagation()">open ↗</a>`:''}
       ${j.status==='running'?`<button class="mini" title="dừng job + mọi process con"
         onclick="event.stopPropagation();cancelJob('${j.id}')">stop</button>`:''}
       <span class="badge">${j.status}</span>`;
@@ -662,7 +672,7 @@ async function refreshApps(){
     box.innerHTML='';
     apps.forEach(a=>{
       const d=document.createElement('div');d.className='approw';
-      d.innerHTML=`<span class="grow"><b>${esc(a.name)}</b>${a.url?` <a href="${a.url}" target="_blank" onclick="event.stopPropagation()">↗</a>`:''}</span>`;
+      d.innerHTML=`<span class="grow"><b>${esc(a.name)}</b>${safeUrl(a.url)?` <a href="${escAttr(safeUrl(a.url))}" target="_blank" onclick="event.stopPropagation()">↗</a>`:''}</span>`;
       const mk=(txt,fn,cls)=>{const b=document.createElement('button');b.className='mini'+(cls?' '+cls:'');b.textContent=txt;b.onclick=fn;return b;};
       d.appendChild(mk('spec',()=>viewSpec(a.name)));
       d.appendChild(mk('trace',()=>viewTrace(a.name)));

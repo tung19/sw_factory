@@ -31,6 +31,21 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   consulted, so a server that never started passed a committed `perf.yaml`. Fixed in the
   same change, because scrubbing perf's environment makes that failure more likely.
 
+- **Stored-XSS sink on the dashboard.** The deploy URL was scraped from a build log with
+  an unbounded `\S*` tail and interpolated into an `href` inside `innerHTML` unescaped, on
+  a page that can trigger deploys. Bounded the regex in all three copies, added `escAttr()`
+  (the existing `esc()` does not escape quotes, so it was never enough in an attribute) and
+  `safeUrl()` (https-only, which also covers the `a.href =` assignments and the preview
+  iframe).
+
+### Changed
+- **Docs now say which layer enforces the locked oracle for which agent.** Five places
+  claimed the builder "can never edit the oracle (hook-enforced)". The PreToolUse hook
+  covers an interactive session in this repo; the autonomous build agent is covered by the
+  checksum lock plus the oracle's executed-files check. Installing the hook into generated
+  apps was considered and rejected: it would always fail open, so the claim would have
+  become true on paper only.
+
 ### Added
 - `evals/tasks.yaml` — the declared fixed A/B set for a factory change, plus
   `area evals --tasks` to print it and `--any-task` to compare on any shared task.

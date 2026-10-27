@@ -24,7 +24,12 @@ JOBS_JSON = STATE_DIR / "jobs.json"
 LOG_DIR = STATE_DIR / "logs"
 AREA_BIN = ROOT / ".venv" / "bin" / "area"
 
-_URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev\S*")
+# The trailing path is bounded to URL-safe characters, NOT `\S*`: this value is
+# interpolated into an `href` on the dashboard, and `\S*` happily swallowed
+# `"><img src=x onerror=...>` out of a build-log line (which in Flow B carries
+# output from an untrusted reference app). The dashboard escapes and re-validates
+# it too — this is the first of the three layers, not the only one.
+_URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev(?:/[A-Za-z0-9\-._~/%?&=+#:@]*)?")
 _SKIP_DIRS = {
     "node_modules", ".next", ".vinext", ".open-next", ".cloudflare",
     ".openhands", ".wrangler", ".git",
