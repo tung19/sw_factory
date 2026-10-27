@@ -70,7 +70,23 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   docs — `make test` prints the real one — the missing `visual` row was added to the
   ARCHITECTURE gate table, and a test now fails if any registry gate lacks a row there.
 
+- **Editing a profile's prose invalidated its measured baseline.** `profile_digest`
+  hashed the whole raw mapping, so fixing a typo in a `description` changed the version
+  and orphaned every run attributed to it — which also made an evidence log impossible to
+  keep in that file. The digest now covers only the behavioural fields (`labels`,
+  `prompt_sources`, `skills`, `defaults`).
+- **`area evals` said "unpaired" when a version simply had no runs.** True, and unhelpful;
+  it now names the empty side.
+
 ### Added
+- **An evidence-gated experience log on each agent profile.** `area evals <kind> --record
+  "<lesson>"` appends the lesson *with its evidence* — digest, verdict, the tasks it was
+  measured on, sample sizes, deltas — and **refuses** unless `area evals` reached a
+  decisive verdict, so `unpaired` / `insufficient-data` / `no-data` / `new-profile` all
+  write nothing. `area evals --notes` is the index. Taken from Harness2's improvement
+  library (arXiv:2610.14224), which adds no entry when the evidence is insufficient; the
+  difference is that here the evidence is a matched-task comparison rather than model
+  judgement over behavioural contrast.
 - `evals/tasks.yaml` — the declared fixed A/B set for a factory change, plus
   `area evals --tasks` to print it and `--any-task` to compare on any shared task.
 

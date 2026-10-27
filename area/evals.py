@@ -33,8 +33,11 @@ can tell you about cost and duration; they cannot tell you about outcomes.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Optional
+
+import yaml
 
 # Per side. Below this, say "insufficient-data" instead of reading noise as a trend:
 # the measured baseline is first-try 0.91 over 68 convergence runs, so a 2-run sample
@@ -234,6 +237,17 @@ def compare(kind: str, *, runs: Optional[list[dict[str, Any]]] = None,
             regressions.append(m)
         elif (d > 0) is (m not in _LOWER_IS_BETTER) and d != 0:
             improvements.append(m)
+    # An EMPTY side comes first: "they share no task" is technically true when one
+    # version has no runs at all, but it hides the useful fact, which is that the version
+    # has not been exercised yet. Naming the empty side tells the operator what to do.
+    if not cur_runs or not prev_runs:
+        empty = "current" if not cur_runs else "previous"
+        out.update(verdict="insufficient-data", reason=(
+            f"the {empty} version has no measured runs"
+            + (" on the declared eval set" if only_tasks else "")
+            + f" (current {len(cur_runs)}, previous {len(prev_runs)})"))
+        return out
+
     # ORDER MATTERS. "They did different work" is a STRUCTURAL failure to compare and
     # outranks "the sample is small": reporting `insufficient-data` for disjoint tasks
     # would invite someone to fix it by collecting more unpaired runs, which can never
@@ -318,4 +332,101 @@ def report_text(results: list[dict[str, Any]]) -> str:
                 shown = round(d * 100, 1) if m in _RELATIVE else d
                 lines.append(f"        {m:16s} {prev.get(m)} -> {cur.get(m)} "
                              f"({shown:+}{unit})")
+    return "\n".join(lines)
+
+
+# ---- the evidence-gated experience log (Harness2's one habit worth taking) ----
+
+# Verdicts that mean something was actually measured. Anything else — no data, a new
+# profile, too small a sample, or two versions that ran different work — is not evidence.
+DECISIVE = ("improved", "regressed", "ok")
+
+
+def record_experience(kind: str, note: str, *,
+                      runs: Optional[list[dict[str, Any]]] = None,
+                      root: Optional[Path] = None,
+                      when: Optional[str] = None) -> tuple[bool, str]:
+    """Append an evidence-stamped entry to `profiles/<kind>.yaml`, or REFUSE and say why.
+
+    This is the one idea taken from Harness2's improvement library (arXiv:2610.14224):
+    an entry is written only when the evidence supports one — "if the evidence is
+    insufficient, reflection adds no entry". The difference is what counts as evidence:
+    Harness2 has no ground-truth verifier and leans on model judgement over behavioural
+    contrast, while here it is `compare()`'s own verdict over matched tasks. So the gate
+    is `verdict in DECISIVE`, and `unpaired` / `insufficient-data` / `no-data` /
+    `new-profile` all refuse.
+
+    The entry carries the evidence beside the claim — digest, verdict, the tasks it was
+    measured on, the sample sizes and the deltas — so a later reader can tell a measured
+    lesson from an asserted one. That is the whole point: a notes field nothing verifies
+    is how `description` and `notes` came to be prose nobody reads.
+
+    Appends as TEXT rather than re-dumping the YAML, because these files are mostly
+    comments and `safe_dump` would delete every one of them.
+    """
+    import datetime
+
+    res = compare(kind, runs=runs, root=root)
+    verdict = res.get("verdict")
+    if verdict not in DECISIVE:
+        return False, (f"refused: `area evals` says {verdict} for '{kind}' "
+                       f"({res.get('reason')}) — there is nothing measured to record")
+    note = " ".join(note.split()).strip()
+    if not note:
+        return False, "refused: the note is empty"
+
+    from area.profile import PROFILES_DIR
+
+    f = (Path(root) if root else PROFILES_DIR) / f"{kind}.yaml"
+    if not f.is_file():
+        return False, f"refused: no {f}"
+
+    entry = {
+        "when": when or datetime.date.today().isoformat(),
+        "digest": res.get("current_digest"),
+        "verdict": verdict,
+        "tasks": list(res.get("paired_tasks") or []),
+        "runs": {"current": res["current"].get("n"), "previous": res["previous"].get("n")},
+        "deltas": {k: v for k, v in (res.get("deltas") or {}).items() if v is not None},
+        "note": note,
+    }
+    block = yaml.safe_dump([entry], sort_keys=True, allow_unicode=True,
+                           default_flow_style=False).rstrip("\n")
+    text = f.read_text()
+    if re.search(r"^experience:\s*$", text, re.M):
+        text = text.rstrip("\n") + "\n" + block + "\n"
+    else:
+        text = (text.rstrip("\n")
+                + "\n\n# Evidence-stamped lessons, appended ONLY by `area evals --record`,\n"
+                  "# which refuses unless `area evals` reached a decisive verdict.\n"
+                  "experience:\n" + block + "\n")
+    f.write_text(text)
+    return True, f"recorded against {entry['digest']} ({verdict} on {entry['tasks']})"
+
+
+def experience_index(root: Optional[Path] = None) -> list[dict[str, Any]]:
+    """Every recorded lesson across all kinds, newest first — the lookup half of the
+    library. Harness2 keeps an index so a later session can find the relevant entry;
+    without one a log is just an append-only file nobody reads."""
+    from area.profile import all_profiles
+
+    out: list[dict[str, Any]] = []
+    for kind, prof in sorted(all_profiles(root=root).items()):
+        for e in prof.experience:
+            out.append({"kind": kind, **e})
+    return sorted(out, key=lambda e: str(e.get("when") or ""), reverse=True)
+
+
+def experience_text(entries: list[dict[str, Any]]) -> str:
+    if not entries:
+        return ("[area] evals: no recorded experience yet. `area evals <kind> --record "
+                "\"<lesson>\"` writes one, and refuses unless there is a measured verdict "
+                "to attach it to.")
+    lines = [f"[area] evals: {len(entries)} recorded lesson(s), newest first"]
+    for e in entries:
+        tasks = ", ".join(e.get("tasks") or []) or "—"
+        lines.append(f"  {e.get('when')}  {e.get('kind')}  [{e.get('verdict')}] on {tasks}")
+        lines.append(f"      {e.get('note')}")
+        if e.get("deltas"):
+            lines.append(f"      evidence: {e['deltas']}  runs={e.get('runs')}")
     return "\n".join(lines)

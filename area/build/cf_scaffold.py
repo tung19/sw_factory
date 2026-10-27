@@ -34,6 +34,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from area.engine import scrubbed_env
+from area._util import cmd_timeout_or_none
 from typing import Any, Optional
 
 # the two overrides that clear `npm audit --audit-level=high` for a vinext app
@@ -100,24 +101,36 @@ def _find_workerd(node: dict[str, Any]) -> Optional[str]:
     return None
 
 
+# `npm ls` reads the installed tree; it is not a build, so it should answer in seconds.
+# Capped anyway: SECURITY.md claims every build/provider subprocess has a wall clock, and
+# these two were the last that did not. A hung npm here would wedge `area cf-fix` with no
+# output, and the compat-date pin is exactly the step a stuck build is waiting on.
+_LS_TIMEOUT_S = 120.0
+
+
 def workerd_version(app: Path) -> Optional[str]:
     """The installed workerd version in `app` (via `npm ls workerd`), or None."""
     try:
         p = subprocess.run(["npm", "ls", "workerd", "--json"], cwd=str(app),
-                           capture_output=True, text=True, env=_env())
+                           capture_output=True, text=True, env=_env(),
+                           timeout=_LS_TIMEOUT_S)
         if p.stdout.strip():
             found = _find_workerd(json.loads(p.stdout))
             if found:
                 return found
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        # TimeoutExpired is a SubprocessError, not an OSError: without naming it the
+        # timeout would escape this helper and crash the caller instead of degrading to
+        # "version unknown", which is the whole point of the try/except here.
         pass
     try:
         p = subprocess.run(["npm", "ls", "workerd"], cwd=str(app),
-                           capture_output=True, text=True, env=_env())
+                           capture_output=True, text=True, env=_env(),
+                           timeout=_LS_TIMEOUT_S)
         m = re.search(r"workerd@(\d+\.\d+\.\d+)", p.stdout)
         if m:
             return m.group(1)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         pass
     return None
 
@@ -299,8 +312,11 @@ def clone_sibling_toolchain(app: str | Path, sibling: str | Path) -> list[str]:
 
 
 def _npm_run(app: Path, script: str) -> tuple[bool, str]:
+    # Capped: this is the fallback BUILD (`npm run build:cf`), the longest command in
+    # the CF path, and it had no wall clock at all.
     p = subprocess.run(["npm", "run", script], cwd=str(app),
-                       capture_output=True, text=True, env=_env())
+                       capture_output=True, text=True, env=_env(),
+                       timeout=cmd_timeout_or_none())
     return p.returncode == 0, (p.stdout + "\n" + p.stderr)[-4000:]
 
 

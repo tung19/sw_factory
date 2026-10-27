@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name
+from area._util import cmd_timeout_or_none
 from area.pipeline import WORKSPACE
 
 # Dirs that are build output / deps / tooling — never copied or committed.
@@ -54,7 +55,10 @@ playwright-report/
 
 
 def _run(cmd: str, cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["bash", "-lc", cmd], cwd=str(cwd), capture_output=True, text=True)
+    # git/gh only, all finite — but `gh repo create` and a push touch the network, so a
+    # wall clock keeps a stalled remote from hanging `area export` forever.
+    return subprocess.run(["bash", "-lc", cmd], cwd=str(cwd), capture_output=True,
+                          text=True, timeout=cmd_timeout_or_none())
 
 
 # A push remote must be an ordinary fetch/push URL. git's transport-HELPER syntax

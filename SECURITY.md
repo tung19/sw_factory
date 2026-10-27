@@ -42,7 +42,13 @@ Nothing (code or secrets) leaves your machine except a deploy you explicitly run
   a gate cannot have graded with modified code.
 - **Runs are bounded and stoppable.** Every agent/build/provider subprocess has a wall
   clock and is killed as a process group; a dashboard job can be cancelled
-  (`DELETE /api/jobs/{id}`).
+  (`DELETE /api/jobs/{id}`). One dial sets the clock (`AREA_CMD_TIMEOUT`, in
+  `area/_util.cmd_timeout`), and the two deliberate exceptions — the operator's `$EDITOR`,
+  and a dashboard job, which runs as long as the build takes and has that stop button
+  instead — are allow-listed with reasons in
+  `tests/test_every_build_command_has_a_clock.py`. That test fails on any new uncapped
+  call, which is what keeps this bullet true: it was false when written (six uncapped
+  sites, including the two longest builds in the factory).
 
 ## Known gaps (deliberate, not oversights)
 
