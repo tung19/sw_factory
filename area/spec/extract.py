@@ -35,6 +35,11 @@ Write these YAML files in the current working directory, nothing else:
      - id: <kebab-case-id>
        title: <short>
        description: <what the user can do>
+   ui:                    # OPTIONAL — the app's intended/observed LOOK (helps parity)
+     description: <one line on the visual style / layout, if evident>
+     palette: [<notable colors you saw/intend, e.g. "#1e293b", "indigo-600">]
+     # For a CLONE, the factory ALSO captures the reference's real stylesheets,
+     # assets and markup automatically — this block is just extra context.
 
 2) acceptance.yaml
    criteria:              # at least one; EVERY feature id must be covered

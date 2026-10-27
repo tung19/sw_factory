@@ -107,7 +107,7 @@ def _should_design(spec: Optional[Spec]) -> bool:
 def _build(
     name: str, spec: Spec, acc: Acceptance, root: Path, target: str, backend: Backend,
     model: Optional[str], build_iters: int, tdd: bool = False,
-    reference: Optional[str] = None,
+    reference: Optional[str] = None, ui_dir: Optional[str] = None,
 ) -> PipelineResult:
     app_dir = root / "apps" / name
     design_path = root / "specs" / name / "design.md"
@@ -116,13 +116,13 @@ def _build(
     if tdd:
         passed = _tdd_build(
             name, spec, acc, app_dir, target, backend, model, build_iters,
-            design_text, reference=reference,
+            design_text, reference=reference, ui_dir=ui_dir,
         )
     else:
         print(f"[area] build : target={target} -> {app_dir}")
         passed = build_app(
             spec, acc, app_dir, target=target, backend=backend, model=model,
-            max_iters=build_iters, design=design_text,
+            max_iters=build_iters, design=design_text, ui_dir=ui_dir,
         )
     print(f"[area]        build {'GREEN' if passed else 'NOT green'}")
     return PipelineResult(name, spec, acc, root / "specs" / name, app_dir, passed)
@@ -131,7 +131,8 @@ def _build(
 def _tdd_build(
     name: str, spec: Spec, acc: Acceptance, app_dir: Path, target: str,
     backend: Backend, model: Optional[str], build_iters: int, design_text: str,
-    *, reference: Optional[str] = None, max_challenges: int = 1,
+    *, reference: Optional[str] = None, ui_dir: Optional[str] = None,
+    max_challenges: int = 1,
 ) -> bool:
     """TDD: lock the independent acceptance suite FIRST, then build-to-green
     against it. If the build fails because the builder challenges a locked test
@@ -164,6 +165,7 @@ def _tdd_build(
         if build_app(
             spec, acc, app_dir, target=target, backend=backend, model=model,
             max_iters=build_iters, design=design_text, oracle=oracle, tdd=True,
+            ui_dir=ui_dir,
         ):
             return True
         if attempt == max_challenges:
@@ -399,6 +401,18 @@ def clone_pipeline(
         expected=expected, backend=backend, model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
+    # Capture the reference's UI as EVIDENCE (markup/CSS/tokens/assets) so the build
+    # can vendor the real look instead of re-inventing it from prose. Best-effort.
+    from area.re.ui_capture import capture_ui_evidence
+
+    spec.ui = capture_ui_evidence(source, kind, root / "specs" / name)
+    if spec.ui.captured:
+        print(f"[area]        ui-capture: {len(spec.ui.styles)} css, "
+              f"{len(spec.ui.assets)} asset(s), {len(spec.ui.rendered)} markup"
+              + (" — SPA (partial)" if spec.ui.spa_caveat else ""))
+    else:
+        print(f"[area]        ui-capture: none ({spec.ui.notes})")
+    ui_dir = spec.ui.dir if spec.ui.captured else None
     if clarify and spec_review:
         _spec_review_step(root, name, source, backend, model)
     qs = _clarify_gate(root, name, clarify)
@@ -409,5 +423,5 @@ def clone_pipeline(
     reference = _resolve_clone_reference(source, root / "specs" / name) if tdd else None
     return _build(
         name, spec, acc, root, target, backend, model, build_iters, tdd=tdd,
-        reference=reference,
+        reference=reference, ui_dir=ui_dir,
     )
