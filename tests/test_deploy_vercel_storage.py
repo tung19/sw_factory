@@ -186,7 +186,8 @@ def test_gate_vercel_provisions_postgres_before_deploy(monkeypatch, tmp_path):
                         lambda a: (order.append("provision-pg"), (True, "ok"))[1])
     monkeypatch.setattr(V, "deploy",
                         lambda a: (order.append("deploy"), (True, "", "https://x.vercel.app"))[1])
-    ok, url = D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    ok, url = D.deploy_with_gate(tmp_path, confirm=lambda p: True,
+                                 require_provenance=False)  # provisioning, not the gate
     assert ok and order == ["provision-pg", "deploy"] and url == "https://x.vercel.app"
 
 
@@ -228,7 +229,7 @@ def test_gate_vercel_skips_provision_for_stateless(monkeypatch, tmp_path):
                         lambda a: (order.append("provision-kv"), (True, ""))[1])
     monkeypatch.setattr(V, "deploy",
                         lambda a: (order.append("deploy"), (True, "", None))[1])
-    D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    D.deploy_with_gate(tmp_path, confirm=lambda p: True, require_provenance=False)
     assert order == ["deploy"]  # stateless -> no provisioning
 
 

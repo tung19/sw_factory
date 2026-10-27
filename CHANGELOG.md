@@ -18,15 +18,41 @@ The factory's capabilities to date (grouped; see the git history for detail).
 - **Clarify-by-default** + an independent spec-vs-intent reviewer (stop on material
   ambiguity instead of guessing).
 
-### Gates (8)
+### Gates (9)
 - `holdout` (the locked oracle), `audit` (two-tier: tsc + npm-audit + secrets, +
   a risky-pattern scan whose **injection class — XSS/eval/SQL-injection — blocks by
   default**), `e2e` (Playwright, forced before deploying an auth/session/form app),
   `chaos`, `nfr` (static budget, enforces a committed budget it can't measure),
-  `perf` (live load), `product` (independent product-fit reviewer), and **`cost`**
+  `perf` (live load), `visual` (3-layer visual-parity for a clone; advisory until a committed `visual.yaml`), `product` (independent product-fit reviewer), and **`cost`**
   (hard total-spend cap, app-scoped from obs — the HARD complement to `--budget`).
   The gate set is a single source (`_GATE_ORDER`) driving selection, dispatch, and
   `--all`. `--all` runs them after a build and blocks the deploy on a failure.
+
+### Attestation & the deploy gate (secure-factory assessment)
+Measured against *The Secure Software Factory* (Agent Baseline v1) —
+see [docs/secure-factory-gap-assessment.md](docs/secure-factory-gap-assessment.md).
+- **Provenance tells the truth** (`area.slsa-like/v2`). `builder` names the real
+  backend (it was a hardcoded literal, wrong for every `--backend llm` run). Per-gate
+  records are `{ran, blocking, blocked}` plus `gatesNotRun`, so an **advisory** gate
+  below its threshold is no longer attested identically to an enforced pass; posture
+  comes from each gate's own budget loader, and is recorded as `null` rather than
+  guessed when it can't be determined. A new `policy` block records model, backend,
+  strictness, caps, the **factory's own git revision** and a digest of the skills
+  pack — without which a past build could not be reconstructed.
+- **The deploy gate fails closed.** A provenance check that *cannot run* now refuses
+  instead of warning and deploying. An artifact AREA never gated does not ship unless
+  asked (`--no-require-provenance` / `AREA_REQUIRE_PROVENANCE=0`); that env var was
+  previously dead code, because `--require-provenance` is a `store_true` whose `False`
+  was passed through explicitly.
+- **High-impact actions are named and approved.** `tools/deploy.sh` no longer forces
+  `--yes` (it silently bypassed the only human gate), the dashboard must carry an
+  explicit `confirm: true`, and the prompt now names the real provider and says when a
+  PRODUCTION database will be created/migrated. A failed datastore provision blocks the
+  deploy (`--allow-provision-failure` to override) instead of shipping an app whose DB
+  isn't there.
+- `docs/ARCHITECTURE.md` states **which agent** each independence layer covers: the
+  PreToolUse hook guards a Claude Code session rooted in the repo, not the autonomous
+  ACP build agent, for which layer 1 is detect-and-revert.
 
 ### Flow B+ — `area adapt` (research-augmented clone & adapt)
 - `area adapt <reference> "<requirement>"`: **research** comparable projects

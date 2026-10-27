@@ -6,7 +6,7 @@ acceptance oracle, not a vague "looks done". Runs **local-first**: on your machi
 with your Claude and your Cloudflare/Vercel. Nothing leaves your box.
 
 ```
-requirement → spec → LOCKED independent oracle → build-to-green → 8 gates → provenance → deploy
+requirement → spec → LOCKED independent oracle → build-to-green → 9 gates → provenance → deploy
 ```
 
 ---
@@ -79,16 +79,17 @@ gate. See [ADR-0001](docs/adr/0001-local-first-byo-everything.md) and
 
 ## Docs
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the system map (spine, pipeline, the 8 gates, modules). *Start here to understand the code.*
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — the system map (spine, pipeline, the 9 gates, modules). *Start here to understand the code.*
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — setup, tests, how to add a gate/backend.
 - **[docs/CASE-STUDY.md](docs/CASE-STUDY.md)** — building `taskboard` from one sentence, with the real artifacts. *Proof it works.*
 - **[CLAUDE.md](CLAUDE.md)** — the rules the build agent follows. **[SECURITY.md](SECURITY.md)** · **[CHANGELOG.md](CHANGELOG.md)**.
+- **[docs/secure-factory-gap-assessment.md](docs/secure-factory-gap-assessment.md)** — AREA measured against the *Secure Software Factory* reference architecture: what it enforces, what it does not, and the prioritized backlog. *Read before adding autonomy.*
 - **[docs/UPGRADE-PLAN.md](docs/UPGRADE-PLAN.md)** · **[PLAN.md](PLAN.md)** — roadmap & status.
 
 ## Layout
 
 ```
-area/        the factory: intake · re · research/adapt/seed (Flow B+) · spec · engine (seam to the SDK) · verify (8 gates) · deploy · inception · web (dashboard)
+area/        the factory: intake · re · research/adapt/seed (Flow B+) · spec · engine (seam to the SDK) · verify (9 gates) · deploy · inception · web (dashboard)
 examples/    REAL apps the factory built (committed: source + spec + locked oracle + evidence)
 tools/       deterministic shell gates (lock/verify-holdout, gate, provenance)
 docs/        ARCHITECTURE, ADRs, UPGRADE-PLAN

@@ -118,7 +118,7 @@ SW_Factory/
 │   ├── pipeline.py / cli.py (_GATE_ORDER registry) / _util.py  ✅
 │   ├── web/       ✅ GUI (Starlette + SSE)
 │   ├── intake/ + inception/  ✅ AI-DLC artifact→spec + governed Inception
-│   ├── verify/    ✅ 8 gates (holdout, audit, e2e, chaos, nfr, perf, product, cost)
+│   ├── verify/    ✅ 9 gates (holdout, audit, e2e, chaos, nfr, perf, visual, product, cost)
 │   ├── obs.py / trace.py / evidence.py / provenance.py  ✅ observability + SLSA-style attestation
 │   └── memory/    ✅ experience store (pitfalls → lessons re-injected)
 ├── workspace/     (gitignored) apps + specs sinh ra
@@ -177,6 +177,16 @@ SW_Factory/
 
 **Trạng thái:** POC đã validated end-to-end trên app NHỎ tự-chứa. **Chưa production** cho phần mềm thật.
 
+> **Đối chiếu kiến trúc an toàn (2026-10-27):** AREA đã được đo với *The Secure Software
+> Factory* (Agent Baseline v1, `docs/software-factory.pdf`) — xem
+> **[docs/secure-factory-gap-assessment.md](docs/secure-factory-gap-assessment.md)**.
+> Kết luận: nửa **"loops"** (oracle-loop + gates) mạnh hơn mức tài liệu đòi; nửa
+> **"boundaries"** (sandbox / network / supply-chain / identity) gần như chưa có.
+> Nhóm 1–2 của backlog (bản ghi nói đúng + bỏ fail-open) **đã làm**; nhóm 3 (screen
+> input, `verify-factory-intact`, timeout/kill-switch) và nhóm 4 (profile + evals cho
+> chính factory) còn mở. Backlog đó là **điều kiện tiên quyết** của nhánh
+> `saas-coordinator-runner` (ADR 0002): nó đẩy AREA từ Level 1 lên Level 2.
+
 ### Blocker (theo mức nghiêm trọng)
 | # | Blocker | Kế hoạch |
 |---|---|---|
@@ -191,6 +201,6 @@ SW_Factory/
 
 ### "Production-ready" = done khi
 - [ ] Build được app **persistence thật + auth + multi-user**, validated live trên 2–3 app.
-- [x] Gate **perf/load + NFR + security sâu** + **CI/CD** cho AREA. ✅ (8 gate: verify/audit/e2e/chaos/nfr/perf/product/cost; CI xanh)
+- [x] Gate **perf/load + NFR + security sâu** + **CI/CD** cho AREA. ✅ (9 gate: verify/audit/e2e/chaos/nfr/perf/visual/product/cost; CI xanh)
 - [x] Phụ thuộc beta có fallback (OpenHands **vendored in-tree** ✅; vinext fallback **✅ ĐẦY ĐỦ** = `area cf-fix` pin compat-date/overrides + `area cf-clone` clone-sibling-toolchain + vendored patched braces, validated live 7→0 vulns + build:cf xanh); **chi phí/độ tất định ĐO ĐƯỢC ✅** (PR3 — `area obs` + `/api/metrics`: first-try-rate, retry-rate, avg attempts, $/run per-stage. Số thực hiện tại: first-try 91% · avg 1.12 attempts · $1.65/run). Kiểm soát = soft `--budget` cap **+ HARD cost-cap gate** ✅ (`area cost`/`--cost`: tổng chi build vs budget, chặn deploy nếu vượt).
 - [ ] Dashboard có auth; deploy/rollback/monitor validated nhiều lần.

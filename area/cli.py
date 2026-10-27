@@ -15,7 +15,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from area._util import safe_name
 
@@ -106,11 +106,15 @@ def _looks_auth(spec_dir: Path) -> bool:
 
 
 def _confirm_fn(assume_yes: bool) -> Callable[[str], bool]:
-    def confirm(path: str) -> bool:
+    """The deploy human gate. The argument is a DESCRIPTION of what is about to
+    happen (built by area.deploy._gate_description) — the old prompt hardcoded
+    "Cloudflare PRODUCTION" for every provider and never said that a production
+    database would be created and migrated."""
+    def confirm(what: str) -> bool:
         if assume_yes:
             return True
         try:
-            ans = input(f"Deploy {path} to Cloudflare PRODUCTION? [y/N] ").strip().lower()
+            ans = input(f"Deploy {what}? [y/N] ").strip().lower()
         except EOFError:
             return False
         return ans == "y"
@@ -266,11 +270,70 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--all", action="store_true", help=_ALL_GATES_HELP)
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
+    sp.add_argument("--allow-provision-failure", action="store_true",
+                    help="deploy even if creating/migrating the PRODUCTION datastore "
+                         "failed (ships an app whose DB may be missing)")
     sp.add_argument("--open", dest="open", action="store_true", default=True,
                     help="(DEFAULT) after a green build, start the app + open it in "
                          "your browser so you can self-verify")
     sp.add_argument("--no-open", dest="open", action="store_false",
                     help="do not auto-open the app after a green build")
+
+
+def _gate_blocking(gate: str, name: str, args: argparse.Namespace) -> Optional[bool]:
+    """Was this gate in BLOCKING posture for this run? True/False, or None if unknown.
+
+    Asks each gate's OWN budget loader instead of re-deriving the "committed yaml or
+    --strict" rule, so the attestation can't drift from what the gate actually did.
+    Returns None rather than guessing when a loader errors — provenance must not
+    claim a posture it couldn't determine."""
+    strict = bool(getattr(args, "strict", False))
+    try:
+        if gate == "nfr":
+            from area.verify.nfr import load_budget as _nfr_budget
+
+            return _nfr_budget(name, strict=strict)[1]
+        if gate == "perf":
+            from area.verify.perf import load_budget as _perf_budget
+
+            return _perf_budget(name, strict=strict)[1]
+        if gate == "visual":
+            from area.verify.visual import load_threshold
+
+            return load_threshold(name, strict=strict)[1]
+        if gate == "cost":
+            from area.verify.cost import load_cap
+
+            return load_cap(name, strict=strict,
+                            override=getattr(args, "cost_max", None))[1]
+    except Exception:  # noqa: BLE001 — posture is metadata; record "unknown", not a guess
+        return None
+    if gate == "product":
+        return strict  # the LLM reviewer only blocks under --strict
+    return True  # verify/audit/e2e/chaos: a tier-1/oracle failure always blocks
+
+
+def _builder_id(args: argparse.Namespace) -> str:
+    """What ACTUALLY built this. Used to be a hardcoded "area/openhands-acp", which
+    was simply false for `--backend llm`."""
+    return f"area/{getattr(args, 'backend', None) or 'acp'}"
+
+
+def _run_policy(args: argparse.Namespace) -> dict[str, Any]:
+    """The run's own configuration, for the attestation. Without this a past build
+    can't be reconstructed: the model, strictness and caps that shaped it are gone."""
+    return {
+        "backend": getattr(args, "backend", None) or "acp",
+        "model": getattr(args, "model", None),
+        "strict": bool(getattr(args, "strict", False)),
+        "tdd": bool(getattr(args, "tdd", False)),
+        "auditLevel": getattr(args, "audit_level", None),
+        "blockInjection": not bool(getattr(args, "no_block_injection", False)),
+        "budgetUsd": getattr(args, "budget", None),
+        "agentIters": getattr(args, "agent_iters", None),
+        "specIters": getattr(args, "spec_iters", None),
+        "buildIters": getattr(args, "build_iters", None),
+    }
 
 
 def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
@@ -324,19 +387,28 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
             print(f"[area] ❌ gate '{g}' failed — skipping deploy")
             return 1
 
-    # SLSA-style provenance: attest what was built + which gates passed, so deploy
-    # can later verify the artifact wasn't modified after gating.
+    # SLSA-style provenance: attest what was built, which gates ACTUALLY enforced it
+    # (vs merely ran advisory, vs never ran), and the policy it ran under — so deploy
+    # can verify the artifact, and a human can reconstruct the build months later.
     try:
         from area.provenance import write_provenance
 
-        gate_results = {g: True for g in gates}
-        gate_results["holdout_tdd"] = bool(getattr(args, "tdd", False))
+        gate_results: dict[str, Any] = {
+            g: {"ran": True, "blocking": _gate_blocking(g, res.name, args),
+                "blocked": False}  # a blocking breach returned above, so: not blocked
+            for g in gates
+        }
         write_provenance(res.app_dir, name=res.name,
                          target=getattr(args, "target", None) or "?",
-                         gates=gate_results, spec_dir=res.spec_dir)
-        print(f"[area] provenance recorded ({sum(gate_results.values())} checks) "
-              "→ .area/provenance.json")
-        _ev("provenance.recorded", {"checks": sum(gate_results.values())})
+                         gates=gate_results,
+                         gates_not_run=[g for g in _GATE_ORDER if g not in gates],
+                         builder=_builder_id(args),
+                         policy=_run_policy(args),
+                         spec_dir=res.spec_dir)
+        enforced = sum(1 for v in gate_results.values() if v["blocking"] is True)
+        print(f"[area] provenance recorded ({enforced} enforced / {len(gates)} ran "
+              f"/ {len(_GATE_ORDER) - len(gates)} not run) → .area/provenance.json")
+        _ev("provenance.recorded", {"enforced": enforced, "ran": len(gates)})
     except Exception as e:  # noqa: BLE001
         print(f"[area] provenance write skipped (warn): {e}")
 
@@ -362,7 +434,11 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
     if args.deploy:
         from area.deploy import deploy_with_gate
 
-        ok, url = deploy_with_gate(res.app_dir, confirm=_confirm_fn(args.yes))
+        ok, url = deploy_with_gate(
+            res.app_dir, confirm=_confirm_fn(args.yes),
+            allow_provision_failure=bool(
+                getattr(args, "allow_provision_failure", False)),
+        )
         _ev("deploy.done" if ok else "deploy.failed",
             {"url": url} if isinstance(url, str) else None)
         return 0 if ok else 1
@@ -498,17 +574,29 @@ def _build_parser() -> argparse.ArgumentParser:
     it.add_argument("--all", action="store_true", help=_ALL_GATES_HELP + " (after rebuild)")
     it.add_argument("--deploy", action="store_true")
     it.add_argument("--yes", action="store_true", help="skip the deploy human gate")
+    it.add_argument("--allow-provision-failure", action="store_true",
+                    help="deploy even if PRODUCTION datastore provisioning failed")
     it.add_argument("--open", dest="open", action="store_true", default=True,
                     help="(DEFAULT) open the rebuilt app in your browser to verify")
     it.add_argument("--no-open", dest="open", action="store_false",
                     help="do not auto-open after rebuild")
 
-    d = sub.add_parser("deploy", help="Deploy a built app to Cloudflare (human gate)")
+    d = sub.add_parser("deploy", help="Deploy a built app to your infra (human gate)")
     d.add_argument("name")
     d.add_argument("--yes", action="store_true", help="skip the human gate")
-    d.add_argument("--require-provenance", action="store_true",
-                   help="refuse to deploy unless build provenance verifies "
-                        "(hard block on a modified-after-gating / ungated artifact)")
+    # Tri-state on purpose: absent (None) lets AREA_REQUIRE_PROVENANCE decide. As a
+    # store_true with default=False this flag swallowed the env var entirely.
+    d.add_argument("--require-provenance", dest="require_provenance",
+                   action="store_true", default=None,
+                   help="(DEFAULT) refuse to deploy an artifact AREA's gates never "
+                        "attested, or that changed after gating")
+    d.add_argument("--no-require-provenance", dest="require_provenance",
+                   action="store_false",
+                   help="deliberately ship an unattested build (a modified-after-"
+                        "gating MISMATCH still refuses)")
+    d.add_argument("--allow-provision-failure", action="store_true",
+                   help="deploy even if creating/migrating the PRODUCTION datastore "
+                        "failed (ships an app whose DB may be missing)")
 
     pv = sub.add_parser("provenance",
                         help="Show or verify an app's build provenance (SLSA-style)")
@@ -838,8 +926,11 @@ def _cmd_deploy(args: argparse.Namespace, expected: str | None) -> int:
     if not app_dir.exists():
         print(f"[area] no app at {app_dir}")
         return 1
-    ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes),
-                             require_provenance=getattr(args, "require_provenance", False))
+    ok, _ = deploy_with_gate(
+        app_dir, confirm=_confirm_fn(args.yes),
+        require_provenance=getattr(args, "require_provenance", None),
+        allow_provision_failure=bool(getattr(args, "allow_provision_failure", False)),
+    )
     return 0 if ok else 1
 
 

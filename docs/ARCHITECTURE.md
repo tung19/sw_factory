@@ -49,7 +49,7 @@ Requirement/source
 | Design | `area/design.py` | architect stage (`design.md`); auto-runs for a non-trivial app (entities or ≥3 features) |
 | Lock holdout | `area/verify/holdout.py` | an **independent subagent** authors the acceptance tests under `__tests__/_holdout/` from the spec ONLY, then they are **checksum-locked** (see "Independence enforcement") |
 | Build to green | `area/build/`, `area/engine/adapter.py` | the build agent writes app code until the **locked** holdout passes; it may never edit the holdout |
-| Gates | `area/verify/*` | the 8 gates below; a blocking failure stops the deploy |
+| Gates | `area/verify/*` | the 9 gates below; a blocking failure stops the deploy |
 | Provenance | `area/provenance.py` | SLSA-style record {spec digest → gates passed → artifact sha256} so a later deploy can prove the build wasn't modified after gating |
 | Deploy | `area/deploy/` | multi-provider (Cloudflare vinext / Vercel / plain), auto-detected; verifies provenance first |
 
@@ -94,20 +94,31 @@ exited 0 — see `area/verify/_runners.py`.)
 
 ## Independence enforcement (the heart)
 
-The holdout oracle is protected at three layers:
+The holdout oracle is protected at three layers. **They do not all cover the same
+agent** — AREA runs builders in two different contexts, so be precise about which:
+
+- **(A) a Claude Code session rooted in this repo** — the native flows, where *you* are
+  the agent following `CLAUDE.md` and the `build-from-docs` / `clone-from-source` skills.
+- **(B) the autonomous build agent** — the Claude Code CLI child that `area run/clone
+  --tdd` spawns, rooted at the generated app's directory.
 
 1. **Checksum lock** — `tools/lock-holdout.sh` writes `workspace/specs/<name>/holdout.lock`
    (a sha256 of every holdout file except the escape hatch). A `--tdd` build also keeps
    the lock in memory and persists it (`area/verify/holdout.py`). `tools/verify-holdout-intact.sh`
    re-checks it before/after each build step.
+   *Covers A and B — but it **detects and reverts**, it does not prevent the write.*
 2. **PreToolUse hook** — [`tools/hooks/guard_holdout.py`](../tools/hooks/guard_holdout.py),
    wired from [`.claude/settings.json`](../.claude/settings.json), **blocks** any
    Edit/Write to a locked holdout at the editor level (turns CLAUDE.md's "don't" into
-   "can't"). Travels with the clone.
-3. **The `_CHALLENGE.md` escape hatch** — the build agent cannot edit a locked test, but
-   if it believes one is *wrong* it writes `__tests__/_holdout/_CHALLENGE.md`; an
-   **independent verifier** (never the builder) re-adjudicates against the spec and
-   re-locks. This is "evolving tests under governance", not tampering.
+   "can't"). Travels with the clone, and is inert until the user trusts the project.
+   *Covers **A only**.* `area/skills.py` copies skills into a generated app but installs
+   no `.claude/settings.json` there, so the hook never reaches agent B — for B the
+   enforcement is layer 1 (detect-and-revert) plus layer 3. See
+   [secure-factory-gap-assessment.md](secure-factory-gap-assessment.md) item 3.
+3. **The `_CHALLENGE.md` escape hatch** — if a builder believes a locked test is *wrong*
+   it writes `__tests__/_holdout/_CHALLENGE.md`; an **independent verifier** (never the
+   builder) re-adjudicates against the spec and re-locks. This is "evolving tests under
+   governance", not tampering. *Covers A and B.*
 
 ## Execution engine
 
@@ -151,7 +162,7 @@ area/
   research.py        Flow B+ P1: survey comparable projects → research brief
   adapt.py           Flow B+ P2/P3 + capstone: requirement-anchored synthesis + data plan + the `area adapt` pipeline
   seed.py            Flow B+ P4: opt-in attested seed-from-reference (robots/PII/cap)
-  verify/            the 8 gates (holdout, audit, e2e, chaos, nfr, perf, product, cost)
+  verify/            the 9 gates (holdout, audit, e2e, chaos, nfr, perf, visual, product, cost)
   build/             the build prompts + cf_scaffold.py (deterministic vinext fixes)
   design.py          architect stage → design.md
   provenance.py      SLSA-style build attestation + verify-before-deploy

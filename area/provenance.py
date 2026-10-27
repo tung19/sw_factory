@@ -15,13 +15,26 @@ bundle (and capturing it AFTER the CF `harden_cf_app` mutation) is a deeper chan
 left for a signed-provenance pass.
 
 This is SLSA-style provenance (materials → build → product) at the logic level and
-keyless: no external signer, but a tamper-evident record tying the product to its
-inputs and the checks it passed. (Research seam: PLAN SecOps roadmap; the
+keyless: no external signer, but a record tying the product to its inputs, the checks
+it passed, and the POLICY it ran under. (Research seam: PLAN SecOps roadmap; the
 deterministic verify here is the "hard halt", complementing advisory review.)
+
+HOW TO READ THE `gates` BLOCK (v2) — the record must not claim more than it knows:
+  * `ran: false`            → the gate was not selected; nothing was measured.
+  * `blocking: true`        → a breach would have failed the build, so a pass here
+                              means the gate's own criterion was met.
+  * `blocking: false`       → the gate was ADVISORY. `blocked: false` then means only
+                              "it did not stop the build" — it does NOT mean the
+                              measurement passed. Read the gate's own artifact
+                              (e.g. `.visual/score.json`) for the number.
+Attestation is NOT tamper-evident in the strong sense: it is written inside the app's
+own `.area/` — a tree the build agent can reach — and is unsigned. See
+`docs/secure-factory-gap-assessment.md` (items 2, 9).
 """
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import json
 import time
 from collections.abc import Iterator
@@ -96,25 +109,84 @@ def spec_digest(spec_dir: Optional[str | Path]) -> Optional[str]:
     return ("sha256:" + h.hexdigest()) if found else None
 
 
+def factory_commit() -> str:
+    """The FACTORY's own git revision (`<sha>` or `<sha>-dirty`), or "unknown".
+
+    Without this, a past build can't be reproduced: the gates, prompts and thresholds
+    that judged it live in AREA itself, not in the app. Fail-soft — a missing git must
+    never break a build."""
+    from area.paths import REPO
+
+    def _git(*a: str) -> Optional[str]:
+        try:
+            r = subprocess.run(["git", "-C", str(REPO), *a],
+                               capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return r.stdout.strip() if r.returncode == 0 else None
+
+    sha = _git("rev-parse", "HEAD")
+    if not sha:
+        return "unknown"
+    dirty = _git("status", "--porcelain")
+    return sha + ("-dirty" if dirty else "")
+
+
+def skills_digest() -> Optional[str]:
+    """Digest of the skills pack `area/skills.py` installs into every built app — i.e.
+    WHICH prompt/domain-knowledge content shaped this build. None if absent."""
+    from area.paths import REPO
+
+    d = REPO / "skills"
+    if not d.is_dir():
+        return None
+    h = hashlib.sha256()
+    found = False
+    for p in sorted(d.rglob("*")):
+        if not p.is_file():
+            continue
+        found = True
+        h.update(p.relative_to(d).as_posix().encode())
+        h.update(b"\0")
+        try:
+            h.update(hashlib.sha256(p.read_bytes()).digest())
+        except OSError:
+            h.update(b"<unreadable>")
+    return ("sha256:" + h.hexdigest()) if found else None
+
+
 def write_provenance(
     app_dir: str | Path,
     *,
     name: str,
     target: str,
-    gates: dict[str, bool],
+    gates: dict[str, Any],
     spec_dir: Optional[str | Path] = None,
-    builder: str = "area/openhands-acp",
+    builder: Optional[str] = None,
+    policy: Optional[dict[str, Any]] = None,
+    gates_not_run: Optional[list[str]] = None,
 ) -> dict[str, Any]:
-    """Record a provenance attestation into <app>/.area/provenance.json."""
+    """Record a provenance attestation into <app>/.area/provenance.json.
+
+    `builder` must name what ACTUALLY built this (e.g. "area/acp"); it used to default
+    to a literal that was wrong for every non-ACP backend. `policy` records the run's
+    own configuration (model, flags, caps, factory revision) so the build can be
+    reconstructed. `gates` values may be a bool (v1 callers) or a
+    {ran, blocking, blocked} mapping — see the module docstring on how to read it."""
     app = Path(app_dir)
+    pol = dict(policy or {})
+    pol.setdefault("factoryCommit", factory_commit())
+    pol.setdefault("skillsDigest", skills_digest())
     prov = {
-        "_type": "area.slsa-like/v1",
+        "_type": "area.slsa-like/v2",
         "name": name,
         "builtAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "builder": builder,
+        "builder": builder or "area/unknown",
         "target": target,
         "materials": {"spec": spec_digest(spec_dir)},
         "gates": dict(gates),
+        "gatesNotRun": sorted(gates_not_run or []),
+        "policy": pol,
         "product": {"artifactDigest": artifact_digest(app)},
     }
     out = app / PROV_REL
@@ -134,6 +206,23 @@ def read_provenance(app_dir: str | Path) -> Optional[dict[str, Any]]:
         return None
 
 
+def _gate_summary(gates: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Split a recorded `gates` block into (enforced, advisory) names.
+
+    A plain bool is a v1 record: counted as enforced when true, because v1 had no way
+    to express "advisory pass" — that conflation is exactly what v2 fixes."""
+    enforced: list[str] = []
+    advisory: list[str] = []
+    for g, v in (gates or {}).items():
+        if isinstance(v, dict):
+            if not v.get("ran"):
+                continue
+            (enforced if v.get("blocking") else advisory).append(str(g))
+        elif v:
+            enforced.append(str(g))
+    return sorted(enforced), sorted(advisory)
+
+
 def verify_provenance(app_dir: str | Path) -> tuple[str, str]:
     """Re-verify the built artifact against its recorded provenance.
 
@@ -148,8 +237,14 @@ def verify_provenance(app_dir: str | Path) -> tuple[str, str]:
     recorded = (prov.get("product") or {}).get("artifactDigest")
     current = artifact_digest(app_dir)
     if recorded == current:
-        passed = [g for g, v in (prov.get("gates") or {}).items() if v]
-        return "ok", f"artifact matches provenance ({current[:23]}…); gates passed: {passed or '—'}"
+        enforced, advisory = _gate_summary(prov.get("gates") or {})
+        bits = [f"gates enforced: {', '.join(enforced) or '—'}"]
+        if advisory:
+            bits.append(f"advisory ONLY (not a pass): {', '.join(advisory)}")
+        not_run = [str(g) for g in (prov.get("gatesNotRun") or [])]
+        if not_run:
+            bits.append(f"not run: {', '.join(not_run)}")
+        return "ok", f"artifact matches provenance ({current[:23]}…); " + "; ".join(bits)
     return "mismatch", (
         "artifact digest CHANGED since it was gated — refusing to treat it as gated.\n"
         f"  recorded: {recorded}\n  current : {current}"

@@ -100,7 +100,8 @@ def test_cmd_iterate_basic():
 
 def test_cmd_iterate_opt_out_tdd_and_gates():
     cmd = J.MANAGER._cmd("iterate", {
-        "name": "app", "instruction": "x", "tdd": False, "e2e": True, "deploy": True,
+        "name": "app", "instruction": "x", "tdd": False, "e2e": True,
+        "deploy": True, "confirm": True,  # deploy now needs explicit approval
     })
     assert "--no-tdd" in cmd and "--e2e" in cmd and "--deploy" in cmd and "--yes" in cmd
     assert "--tdd" not in cmd  # never leaks the run-style flag into iterate

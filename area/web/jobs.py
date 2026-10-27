@@ -70,6 +70,22 @@ class JobManager:
             pass
 
     @staticmethod
+    def _deploy_approval(p: dict[str, Any]) -> list[str]:
+        """Turn the request's EXPLICIT approval into the deploy gate's --yes.
+
+        A dashboard job runs non-interactively, so it can never show the production
+        gate — which is why this used to hardcode `--yes` and thereby bypass the one
+        human approval before production. The approval now has to travel in the
+        request (`confirm: true`), so it is a recorded operator decision rather than
+        a silent default. Missing it refuses the job instead of approving it."""
+        if not p.get("confirm"):
+            raise ValueError(
+                "deploy requires explicit approval: send confirm=true. A dashboard "
+                "job cannot display the interactive PRODUCTION gate, so the approval "
+                "must be in the request.")
+        return ["--yes"]
+
+    @staticmethod
     def _flags(p: dict[str, Any]) -> list[str]:
         """TDD + gate + deploy flags shared by run/clone/intake."""
         f: list[str] = []
@@ -96,7 +112,7 @@ class JobManager:
                 if p.get(g):
                     f.append("--" + g)
         if p.get("deploy"):
-            f += ["--deploy", "--yes"]
+            f += ["--deploy", *JobManager._deploy_approval(p)]
         return f
 
     def _cmd(self, kind: str, p: dict[str, Any]) -> list[str]:
@@ -129,7 +145,7 @@ class JobManager:
                 cmd.append("--no-tdd")
             return cmd + [f for f in self._flags(p) if f != "--tdd"]
         if kind == "deploy":
-            return [b, "deploy", p["name"], "--yes"]
+            return [b, "deploy", p["name"], *self._deploy_approval(p)]
         raise ValueError(f"unknown job kind: {kind}")
 
     def start(self, kind: str, params: dict[str, Any]) -> str:
