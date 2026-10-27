@@ -464,6 +464,34 @@ real.
 
 ---
 
+### M7 · the cost gate printed a partial total as the total — FIXED
+
+Found by Tung asking what the "$176.84" in the ledger actually is. Answering it properly
+meant reading `obs.cost_of()` and the gate, and the answer has three parts, only the
+first of which was already written down:
+
+1. **It is not a bill.** `obs.cost_of()` reads `accumulated_cost` from the OpenHands
+   SDK, which prices the tokens an agent used at the model's list price. All $176.84 came
+   from `backend=ACPAgent` — the **keyless** path through the Claude Code login — between
+   2026-10-18 and 2026-10-21. On a Claude subscription that usage counts against plan
+   limits, not a per-token invoice. The `--backend llm` path (`LLM_API_KEY`) is where the
+   same number *is* real per-token billing.
+2. **The ledger is partial:** 110 of 204 rows carry a cost. `_Agent` (68) and
+   `claude-cli` (26) report none — `ask_cli`, which the spec reviewer and the product
+   reviewer use, has never reported a cost.
+3. **And the gate did not say so.** `build_cost()` drops unpriced rows and sums the rest.
+   The all-unpriced case was already handled loudly (an earlier remediation), but the
+   PARTIAL case took the normal path: three priced runs out of eight printed
+   `$0.42 spent / $5.00 cap — ok`, which reads as "this build cost $0.42".
+
+`cost_coverage()` now reports (priced, total) in scope; the gate prints it whenever
+anything is unpriced, states that the real total is **≥** the measured one rather than
+**=** it, and never prints a bare `ok` over partial data — `UNVERIFIED` by default,
+`FAIL` under `--strict`. Not blocking by default on purpose: `ask_cli` stages are
+unpriced, so blocking would fail almost every build that runs a spec review, which is a
+false block rather than a finding. A measured breach still blocks regardless of coverage,
+since partial pricing can only *understate* spend.
+
 ## Scores
 
 | Dimension | Score | Why |

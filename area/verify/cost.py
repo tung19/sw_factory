@@ -70,6 +70,24 @@ def build_cost(*, name: Optional[str] = None, since: Optional[float] = None,
     return round(total, 4)
 
 
+def cost_coverage(*, name: Optional[str] = None, since: Optional[float] = None,
+                  runs: Optional[list[dict[str, Any]]] = None) -> tuple[int, int]:
+    """(priced, total) agent runs in scope.
+
+    `build_cost` silently drops rows with no `cost_usd` and returns the sum of the rest,
+    so a partial total was being printed as THE total. Only the ACP backend reports a
+    cost; `ask_cli` (the spec reviewer, the product reviewer) reports none, and so did
+    the older `_Agent` runs — 94 of 204 rows in the live ledger carry no price at all.
+    A gate that can price three of eight runs must say so rather than print "ok".
+    """
+    rows = load_runs() if runs is None else runs
+    scope = [r for r in rows
+             if r.get("ts") is not None
+             and (name is None or r.get("name") == name)
+             and (since is None or float(r["ts"]) >= since)]
+    return sum(1 for r in scope if r.get("cost_usd") is not None), len(scope)
+
+
 def load_cap(name: str, *, strict: bool, override: Optional[float] = None,
              root: Optional[Path] = None) -> tuple[float, bool]:
     """Return (max_usd, blocking). An explicit --cost-max override or a committed
@@ -113,8 +131,26 @@ def cost_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
         return True
     ok = spent <= cap
     tag = "BLOCKING" if blocking else "advisory"
+    priced, total = cost_coverage(name=app, since=since)
+    unpriced = total - priced
     print(f"[cost] ${spent:.4f} spent / ${cap:.2f} cap ({tag}) — "
           f"{'ok' if ok else 'OVER'}")
+    if unpriced:
+        print(f"[cost] ⚠ priced {priced} of {total} run(s) for {app}: "
+              f"{unpriced} reported no cost (keyless CLI stages report none), so the "
+              f"real total is ≥ ${spent:.4f}, not = it.")
+    if ok and unpriced:
+        # Under the cap on the part we could price, with the rest unknown. The repo's
+        # posture rule is that a committed budget which cannot be fully measured must
+        # not read as a pass, so this is never printed as a bare "ok": advisory by
+        # default (failing every build whose spec-review stage is unpriced would be a
+        # false block), and a hard failure under --strict.
+        verdict = "FAIL" if strict else "UNVERIFIED"
+        print(f"[cost] {verdict} — under the cap on the measured ${spent:.4f}, but "
+              f"{unpriced} unpriced run(s) mean the total is not known"
+              + ("" if strict else " (advisory; --strict makes this block)"))
+        if strict:
+            return False
     if ok:
         return True
     if blocking:
