@@ -72,6 +72,25 @@ def is_relayable_from_ui(msg: dict[str, Any]) -> bool:
     return isinstance(msg, dict) and msg.get("type") in ("chat", "apps", "upload")
 
 
+def _deploy_approval(p: dict[str, Any]) -> list[str]:
+    """Turn the request's EXPLICIT approval into the deploy gate's --yes.
+
+    A relayed job runs non-interactively on the runner, so it can never show the
+    interactive PRODUCTION gate — which is why this used to hardcode `--yes`, and
+    thereby bypassed the one human approval before production for a job arriving
+    over the network. The approval now has to travel in the request
+    (`confirm: true`), the same rule the local dashboard enforces in
+    `area/web/jobs.py`. Missing it refuses the job instead of approving it:
+    `runner._exec_job` turns the ValueError into a failed job the UI can see.
+    """
+    if not p.get("confirm"):
+        raise ValueError(
+            "deploy requires explicit approval: send confirm=true. A relayed job "
+            "cannot display the interactive PRODUCTION gate, so the approval must "
+            "be in the request.")
+    return ["--yes"]
+
+
 def job_argv(kind: str, params: dict[str, Any] | None = None) -> list[str]:
     """Translate a typed job into `area` CLI args. Raises on an unknown kind."""
     p = params or {}
@@ -84,7 +103,8 @@ def job_argv(kind: str, params: dict[str, Any] | None = None) -> list[str]:
         if p.get("tdd"):
             a += ["--tdd"]
         if p.get("deploy"):
-            a += ["--deploy", "--yes"]  # build → gates → deploy to the runner's own infra
+            # build → gates → deploy to the runner's OWN infra, human-approved
+            a += ["--deploy", *_deploy_approval(p)]
         return a
     if kind == "clone":
         return ["clone", str(p.get("source", "")), "--name", str(p.get("name") or "clone")]
@@ -93,7 +113,7 @@ def job_argv(kind: str, params: dict[str, Any] | None = None) -> list[str]:
     if kind == "iterate":
         return ["iterate", str(p.get("name", "")), str(p.get("instruction", ""))]
     if kind == "deploy":
-        return ["deploy", str(p.get("name", "")), "--yes"]
+        return ["deploy", str(p.get("name", "")), *_deploy_approval(p)]
     if kind == "export":
         a = ["export", str(p.get("name", ""))]
         if p.get("repo"):
