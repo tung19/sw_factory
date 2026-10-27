@@ -1,16 +1,23 @@
 name: CI
 
 # AREA's own CI: run the dogfood test suite (pure orchestrator logic — no live
-# agents, no network, no npm) on every push / PR to main. This is the automated
-# regression guard called for in PLAN §11 (PR4 "CI cho AREA", PR8 bus-factor):
-# the oracle-policy tests (lock/challenge ordering, gate wiring, deploy routing,
-# auth gate, iterate composition) must stay green before anything merges.
+# agents, no network, no npm) on every push to main and on EVERY pull request. This is
+# the automated regression guard called for in PLAN §11 (PR4 "CI cho AREA", PR8
+# bus-factor): the oracle-policy tests (lock/challenge ordering, gate wiring, deploy
+# routing, auth gate, iterate composition) must stay green before anything merges.
 
 on:
   push:
     branches: [main]
+  # Deliberately NOT filtered by base branch. A `branches: [main]` filter here means a
+  # STACKED pr — base = another feature branch — gets no CI at all, and that bit this
+  # repo repeatedly: #28, #29, #31 and #32 each sat with zero `test` runs while looking
+  # reviewable. Retargeting such a PR to main does not fix it either, because the
+  # default activity types are opened/synchronize/reopened, so changing a base fires
+  # nothing (found the hard way: #32 had to be closed and reopened to get a run).
+  # The suite is ~1.5 min and `concurrency` below cancels superseded runs, so testing
+  # every PR regardless of target is cheap next to shipping an untested stack.
   pull_request:
-    branches: [main]
 
 # A newer push to the same branch/PR cancels the older run.
 concurrency:
