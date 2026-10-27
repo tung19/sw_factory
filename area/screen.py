@@ -57,7 +57,7 @@ class Finding:
 _ASSIGNMENT = re.compile(
     r"""(?P<key>api[_-]?key|secret[_a-z]*|password|passwd|access[_-]?token|auth[_-]?token
         |client[_-]?secret|private[_-]?key|token)
-        \s*["']?\s*[:=]\s*["']?
+        \s*["']?\s*[:=]\s*(?P<q>["']?)
         (?P<val>[A-Za-z0-9/+_.=~-]{16,})""",
     re.IGNORECASE | re.VERBOSE,
 )
@@ -88,16 +88,49 @@ _VENDOR: tuple[tuple[str, re.Pattern[str]], ...] = (
 # `postgres://admin:<real password>@db.example.com`, and `example.com` is the single
 # most common host in a config file.
 
-# LINE scope — the line reads a secret from somewhere instead of containing one, or we
-# already redacted it (which makes screening idempotent).
-_EXCLUDE_LINE = re.compile(
-    r"process\.env|import\.meta\.env|os\.environ|getenv|NEXT_PUBLIC|" + REDACTION,
+# STATEMENT scope — this assignment reads its value from the environment rather than
+# containing one, so it is not a credential.
+#
+# This was once LINE scope, which was wrong in two ways that each silently disabled
+# the screener, both reproduced in tests/test_screen_corpus.py:
+#   · A BUNDLED file is frequently ONE line. A single `process.env` anywhere in it
+#     excluded every secret in the whole file — and a bundled reference app is exactly
+#     the input this module exists to screen.
+#   · The marker `AREA-REDACTED` was on this list, to make screening idempotent. But
+#     the marker is attacker-supplied text: planting it in a file turned screening off
+#     for that file. It also meant redacting the FIRST secret on a line excluded the
+#     second. Idempotence now comes from `_EXCLUDE_VALUE` ("redacted"), which looks at
+#     the value we ourselves wrote, not at text an input can choose.
+#
+# Applied ONLY to `_ASSIGNMENT`, where "it came from the environment" is a real
+# alternative reading. A vendor pattern matches a literal credential (`ghp_…`,
+# `postgres://u:pw@…`); no env lookup can produce one, so nothing nearby excuses it.
+_EXCLUDE_STATEMENT = re.compile(
+    r"process\.env|import\.meta\.env|os\.environ|getenv|NEXT_PUBLIC",
     re.IGNORECASE,
 )
+# How far back a "statement" reaches. Bounded by the nearest separator so a minified
+# bundle is split into statements instead of being treated as one line.
+_STMT_BREAK = re.compile(r"[\n;,{}()\[\]]")
+_STMT_MAX = 120
 # VALUE scope — the matched value is itself a placeholder, not a credential.
 _EXCLUDE_VALUE = re.compile(
     r"example|placeholder|dummy|changeme|your[_-]|sample|fixture|xxxx|redacted|todo",
     re.IGNORECASE,
+)
+
+
+# An UNQUOTED value that is obviously JavaScript rather than a literal. Measured, not
+# guessed: screening 100 real files from a built app produced 15 findings and every one
+# was this shape — `token = creditTokenParam`, `privateKey: r.ECPrivateKey.decode`,
+# `Secret = sessionsTokenFromSecret`. Redaction REWRITES the copy the agent reads, so a
+# false positive here silently corrupts third-party source; that is the harm this module
+# is supposed to avoid. A credential literal is never a member expression, and never
+# camelCase (a random secret does not have a lowercase→uppercase hump at a word break).
+# A QUOTED value is a literal and is never excused by this.
+_CODE_VALUE = re.compile(
+    r"^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+$"   # member expression
+    r"|^[a-z][a-zA-Z0-9_$]*[a-z][A-Z][a-zA-Z0-9_$]*$"               # camelCase identifier
 )
 
 
@@ -107,48 +140,59 @@ _EXCLUDE_VALUE = re.compile(
 _PATHISH = re.compile(r"^\.{0,2}/|^[A-Za-z]:[\\/]|/[^/\s]*\.[A-Za-z0-9]{1,5}$")
 
 
-def _excluded(line: str) -> bool:
-    return bool(_EXCLUDE_LINE.search(line))
+def _statement_at(s: str, pos: int) -> str:
+    """The text just before `pos`, back to the nearest statement separator (newline,
+    `;`, `,`, bracket) and at most `_STMT_MAX` chars. This is the neighbourhood that
+    can legitimately explain a value — NOT the whole line, which in a bundled file is
+    the whole file."""
+    start = max(0, pos - _STMT_MAX)
+    window = s[start:pos]
+    m = None
+    for m in _STMT_BREAK.finditer(window):
+        pass  # keep the LAST separator before the match
+    return window[m.end():] if m else window
+
+
+def _env_sourced(s: str, pos: int, value: str) -> bool:
+    """True when this assignment takes its value from the environment. Checked on the
+    value itself (`x = process.env.API_KEY` captures the lookup AS the value) and on
+    the statement the match sits in (`NEXT_PUBLIC_…` keys, `getenv("KEY")` forms)."""
+    return (bool(_EXCLUDE_STATEMENT.search(value))
+            or bool(_EXCLUDE_STATEMENT.search(_statement_at(s, pos))))
 
 
 def _line_of(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
 
 
-def _skip_assignment(line: str, value: str) -> bool:
+def _skip_assignment(s: str, m: re.Match[str]) -> bool:
     """Shared by scan and redact so the two can never disagree about a hit."""
-    return (_excluded(line)
+    value = m.group("val")
+    return (_env_sourced(s, m.start(), value)
             or bool(_EXCLUDE_VALUE.search(value))
-            or bool(_PATHISH.search(value)))
+            or bool(_PATHISH.search(value))
+            or (not m.group("q") and bool(_CODE_VALUE.match(value))))
 
 
-def _skip_vendor(line: str, m: re.Match[str]) -> bool:
-    """Same two scopes for the vendor patterns — so the canonical doc placeholders
-    (`AKIAIOSFODNN7EXAMPLE`, `postgres://u:changeme@…`) don't get flagged."""
+def _skip_vendor(m: re.Match[str]) -> bool:
+    """VALUE scope only — so the canonical doc placeholders (`AKIAIOSFODNN7EXAMPLE`,
+    `postgres://u:changeme@…`) don't get flagged, while a real literal token is never
+    excused by its surroundings."""
     val = m.groupdict().get("val") or m.group(0)
-    return _excluded(line) or bool(_EXCLUDE_VALUE.search(val))
-
-
-def _line_at(s: str, pos: int) -> str:
-    """The whole line containing `pos`. Self-contained on purpose: during redaction the
-    string being substituted is NOT the one positions were first measured against, so
-    looking a line up in the original text would read the wrong offset."""
-    start = s.rfind("\n", 0, pos) + 1
-    end = s.find("\n", pos)
-    return s[start:end if end != -1 else len(s)]
+    return bool(_EXCLUDE_VALUE.search(val))
 
 
 def scan_text(text: str) -> list[Finding]:
     """Credential-shaped hits in `text`. Never returns the matched value."""
     out: list[Finding] = []
     for m in _ASSIGNMENT.finditer(text):
-        if _skip_assignment(_line_at(text, m.start()), m.group("val")):
+        if _skip_assignment(text, m):
             continue
         out.append(Finding("assigned-secret", _line_of(text, m.start()),
                            m.group("key").lower()))
     for kind, pat in _VENDOR:
         for m in pat.finditer(text):
-            if _skip_vendor(_line_at(text, m.start()), m):
+            if _skip_vendor(m):
                 continue
             out.append(Finding(kind, _line_of(text, m.start()), kind))
     return sorted(out, key=lambda f: (f.line, f.kind))
@@ -163,7 +207,7 @@ def redact_text(text: str) -> tuple[str, list[Finding]]:
         return text, []
 
     def _sub_assignment(m: re.Match[str]) -> str:
-        if _skip_assignment(_line_at(m.string, m.start()), m.group("val")):
+        if _skip_assignment(m.string, m):
             return m.group(0)  # scan_text skipped it too — stay consistent
         return m.group(0).replace(m.group("val"), f"{REDACTION}:{m.group('key').lower()}")
 
@@ -171,7 +215,7 @@ def redact_text(text: str) -> tuple[str, list[Finding]]:
 
     for kind, pat in _VENDOR:
         def _sub_vendor(m: re.Match[str], _kind: str = kind) -> str:
-            if _skip_vendor(_line_at(m.string, m.start()), m):
+            if _skip_vendor(m):
                 return m.group(0)
             val = m.groupdict().get("val")
             if val:  # only part of the match is the secret (e.g. a db URL password)

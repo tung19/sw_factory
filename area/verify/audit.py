@@ -2,10 +2,12 @@
 
 TIER 1 (deterministic, HARD BLOCK): tsc (types), `npm audit` (dependency CVEs at a
 severity threshold), and a hardcoded-secrets scan. This is the reliable halt.
-TIER 2 (advisory): a risky-pattern review of the generated source (eval, shell
-exec, dangerouslySetInnerHTML, SQL string-interpolation, Math.random for secrets).
-Advisory by default (research: promote to blocking only after measuring FP rate);
-with strict=True a tier-2 finding also blocks.
+TIER 2: a risky-pattern review of the generated source (eval, shell exec,
+dangerouslySetInnerHTML, SQL string-interpolation, Math.random for secrets). The
+INJECTION class (XSS / eval / SQL-injection) BLOCKS by default; the rest
+(shell-exec, weak-random) are advisory unless strict=True. Whatever blocks in the
+current posture is part of the gate's ORACLE (`_audit_oracle`) — not a decision
+taken next to it — so the gate can never print `BLOCK` and then return PASS.
 
 With fix=True an agent resolves the fixable issues and the gate re-runs.
 """
@@ -16,7 +18,9 @@ from pathlib import Path
 from typing import Optional
 
 from area._util import safe_name
-from area.engine import Backend, build_agent, command_verifier, run_until
+from area.engine import (
+    Backend, VerifyResult, Verifier, build_agent, command_verifier, run_until,
+)
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
 _LEVELS = ("low", "moderate", "high", "critical")
@@ -155,6 +159,49 @@ def _blocking_findings(findings: list[tuple[str, int, str]], *, strict: bool,
     return out
 
 
+def _tier2_lines(findings: list[tuple[str, int, str]],
+                 blocking: list[tuple[str, int, str]]) -> str:
+    """The tier-2 section of the oracle's feedback — the same text the gate prints,
+    so what the operator reads is exactly what the verdict was computed from."""
+    if not findings:
+        return "[area] audit tier-2: no risky patterns"
+    block_set = set(blocking)
+    head = (f"[area] audit tier-2 (security review): {len(findings)} finding(s), "
+            f"{len(blocking)} BLOCKING")
+    rows = [f"  {'❌ BLOCK' if f in block_set else '⚠ advisory'} {f[0]}:{f[1]} — {f[2]}"
+            for f in findings[:20]]
+    return "\n".join([head, *rows])
+
+
+def _audit_oracle(app: Path, audit_level: str, *, strict: bool,
+                  block_injection: bool) -> tuple[Verifier, dict[str, list[tuple[str, int, str]]]]:
+    """The gate's oracle: tier-1 (tsc + npm audit + secrets) AND the tier-2 findings
+    that BLOCK in this posture.
+
+    Tier 2 MUST be part of the oracle, not a decision taken beside it. It used to be
+    measured once up front and re-checked only under `strict`, while the fix loop ran
+    against a tier-1-only oracle — so with tier-1 already green the loop passed on
+    attempt 1 and the gate printed `❌ BLOCK` for every injection sink and then
+    `audit: ✅ PASS`. A gate must grade what it prints.
+
+    Returns the verifier and a dict the caller reads the latest findings from (for the
+    fix task), so the scan is never run twice against different source.
+    """
+    tier1 = command_verifier(["bash", "-lc", _check(audit_level)], cwd=app)
+    latest: dict[str, list[tuple[str, int, str]]] = {"findings": [], "blocking": []}
+
+    def check() -> VerifyResult:
+        r = tier1()
+        findings = advisory_scan(app)
+        blocking = _blocking_findings(findings, strict=strict,
+                                      block_injection=block_injection)
+        latest["findings"], latest["blocking"] = findings, blocking
+        feedback = f"{r.feedback}\n{_tier2_lines(findings, blocking)}"
+        return VerifyResult(r.ok and not blocking, feedback)
+
+    return check, latest
+
+
 def static_audit(
     name: str,
     *,
@@ -177,28 +224,14 @@ def static_audit(
     app = WORKSPACE / "apps" / name
     if not app.exists():
         raise RuntimeError(f"no app at {app}")
-    oracle = command_verifier(["bash", "-lc", _check(audit_level)], cwd=app)
+    oracle, latest = _audit_oracle(app, audit_level, strict=strict,
+                                   block_injection=block_injection)
 
     r = oracle()
     print(r.feedback)
-    tier1_ok = r.ok
+    findings, blocking = latest["findings"], latest["blocking"]
 
-    # Tier 2 — risky-pattern review (injection class blocks by default).
-    findings = advisory_scan(app)
-    blocking = _blocking_findings(findings, strict=strict, block_injection=block_injection)
-    if findings:
-        print(f"[area] audit tier-2 (security review): {len(findings)} finding(s), "
-              f"{len(blocking)} BLOCKING")
-        block_set = set(blocking)
-        for f in findings[:20]:
-            rel, ln, msg = f
-            mark = "❌ BLOCK" if f in block_set else "⚠ advisory"
-            print(f"  {mark} {rel}:{ln} — {msg}")
-    else:
-        print("[area] audit tier-2: no risky patterns")
-    tier2_block = bool(blocking)
-
-    if tier1_ok and not tier2_block:
+    if r.ok:
         suffix = " (tier-2 advisory only)" if findings else ""
         print(f"[area] audit: ✅ PASS (tsc + npm audit[{audit_level}+] + secrets){suffix}")
         return True
@@ -207,9 +240,9 @@ def static_audit(
         return False
 
     tier2_task = ""
-    if tier2_block:
-        tier2_task = "\n- rework these risky patterns (tier-2):\n" + "\n".join(
-            f"  {rel}:{ln} — {msg}" for rel, ln, msg in findings[:20]
+    if blocking:
+        tier2_task = "\n- rework these risky patterns (tier-2), they BLOCK:\n" + "\n".join(
+            f"  {rel}:{ln} — {msg}" for rel, ln, msg in blocking[:20]
         )
     task = (
         "A security/static AUDIT of this app FAILED. Fix the issues and make the "
@@ -227,9 +260,10 @@ def static_audit(
         )
     finally:
         agent.close()
-    # Re-check tier-2 after the fix when strict.
-    if passed and strict and advisory_scan(app):
-        print("[area] audit: ❌ tier-2 risky patterns remain (strict)")
-        return False
+    # No re-check needed: `oracle` IS tier-1 + blocking tier-2, so `passed` already
+    # means both are clean. (This used to be a `strict`-only re-scan, which is why a
+    # non-strict run could print BLOCK and still pass.)
+    if not passed and latest["blocking"]:
+        print(f"[area] audit: ❌ {len(latest['blocking'])} blocking tier-2 finding(s) remain")
     print(f"[area] audit: {'✅ PASS' if passed else '❌ FAIL'}")
     return passed
