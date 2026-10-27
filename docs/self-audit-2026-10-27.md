@@ -171,7 +171,7 @@ Only **1 of 16** profile digests changes as a result, which is correct: `builder
 only profile declaring `skills: all`, and `install_skills` is called from exactly one
 place (`area/build/nextjs.py:267`, the builder's path).
 
-### M6 · 15 profiles declare `skills: none` but their agents can still read the pack
+### M6 · 15 profiles declared `skills: none` but their agents can still read the pack — FIXED (Tung chose (b))
 
 Found while fixing H1; recorded rather than silently changed, because the fix is a design
 choice. `install_skills` copies the pack into `<app>/.claude/skills/` during the build and
@@ -184,6 +184,33 @@ are judged as unchanged across a factory change that can in fact alter their beh
 Either the profiles should record the inherited pack (which makes a skill edit invalidate
 them too — arguably right, possibly over-broad, since the chaos author has no use for the
 CF skill), or the nuance belongs in each profile's notes. Deciding that is Tung's call.
+
+**Tung chose (b): record it.** The reasoning that settled it is that (b) errs toward
+*"this changed, re-measure"* rather than *"nothing changed, trust the old baseline"*,
+which is the posture everything else in this audit moved toward — and the cost is
+currently **zero**, because no run carries a profile digest yet, so there is no baseline
+to invalidate. Option (c), declaring per-kind which skills are relevant, was rejected:
+nothing measures that, so it would be another unverified claim of exactly the kind this
+audit spent the day deleting.
+
+`skills:` now takes a third value, `inherited`, and `profile_digest` folds the skills
+hash for `all` **and** `inherited`. Which kinds get it was **measured from the call
+sites**, not guessed: the six that pass the APP directory to the engine (`auditor`,
+`chaos-author`, `e2e-author`, `holdout-author`, `holdout-fixer`,
+`holdout-readjudicator`). The `ask_cli` kinds (`product-reviewer`, `spec-reviewer`) run
+in a temp dir and the spec/inception/research kinds run in a spec or scratch directory,
+so they stay `none`. One honest caveat is recorded in the code: on a **first** `--tdd`
+build the holdout author runs before `build_app` installs anything, so its inheritance is
+conditional — it is marked `inherited` anyway, for the same err-toward-re-measuring
+reason.
+
+Measured effect: a skill edit now moves **7 of 16** profile digests, up from 1.
+
+Two things this surfaced, both fixed here: an unknown `skills:` value used to be read
+silently as `none` — which would quietly drop that kind out of the skills digest, the
+exact failure the field exists to prevent — and making it raise initially broke
+`load_profile`'s non-strict contract, where `evals.compare` branches on `prof is None`
+and would have crashed instead of reporting the profile broken.
 
 ### H2 · `npm install` / build / test run with cloud tokens present — FIXED
 `area/engine/adapter.py`: the scrub is inside `_send_and_run`, but `run_until` calls
@@ -444,8 +471,7 @@ that do not hold, and S3 ships a closed hole back open.
 1. ~~S3, S1, S2, S4~~ — done. ~~H1~~, ~~H2~~, ~~H3~~, ~~H4~~ (+ H4b) — done.
 2. ~~H5~~, ~~H6~~ — done. Neither was the one-liner it looked like: H5's "stronger" fix would have installed a hook that always fails open, and H6's `esc()` does not escape quotes.
 3. ~~M2~~, ~~M3~~, ~~M4~~ — done. **M1** (two `cf_scaffold` npm-ls calls still
-   uncapped), **M5** (the branch-scoped `area runner` entry point) and **M6** (a
-   design call for Tung) remain.
+   uncapped), and **M5** (the branch-scoped `area runner` entry point) remain; ~~M6~~ done.
 4. The unverified list above — first-hand check before any is treated as real. It is
    shorter than it was: `ask_cli` and the decoy-holdout item were both promoted to
    confirmed, fixed, and struck from it.
