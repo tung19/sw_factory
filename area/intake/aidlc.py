@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from area.engine import Backend, build_agent, run_until
 from area.spec.extract import _SCHEMA_GUIDE, _spec_verifier, expected_block
+from area import screen
 from area.spec.models import Acceptance, Spec, load_acceptance, load_spec
 
 _ARTIFACT_EXTS = {".md", ".markdown", ".txt", ".yaml", ".yml", ".json"}
@@ -63,6 +64,12 @@ def load_aidlc_artifacts(path: str | Path, *, max_chars: int = _MAX_CHARS) -> st
     blob = "\n".join(parts).strip()
     if not blob:
         raise RuntimeError(f"AI-DLC artifacts under {p} were empty")
+    # The artifacts are untrusted input (they may come from another team's tooling)
+    # and this blob is handed straight to an agent.
+    blob, found = screen.redact_text(blob)
+    if found:
+        print(screen.format_report([(str(p), f) for f in found],
+                                   what="the AI-DLC artifacts"))
     return blob
 
 

@@ -1,5 +1,16 @@
 # Run an AREA runner (on your own infra)
 
+> **⚠ Not on this branch.** This describes the hosted coordinator + runner from
+> [ADR 0002](adr/0002-coordinator-runner-saas.md), which lives on
+> `saas-coordinator-runner`. On `main` there is **no `area runner` subcommand** (no
+> `area/runner.py`), and the `scripts/run-runner.sh` and hosted `runner.sh` bootstrap
+> referenced below do not exist. `main` is the internal, Claude-Code-native path where
+> AREA runs locally. Read this as the design for that branch, not as instructions you
+> can follow here — and read
+> [secure-factory-gap-assessment.md](secure-factory-gap-assessment.md) first: a
+> multi-user runner needs the boundaries `main` does not have.
+
+
 The **coordinator** only relays; the **runner** does the work. You run the runner
 on a machine you control (your laptop, or a VM in your own cloud account), and it
 uses **your** Claude and **your** Cloudflare/Vercel. Nothing but log lines leaves

@@ -48,7 +48,9 @@ def test_gate_provisions_d1_before_deploy(monkeypatch, tmp_path):
                         lambda a: (order.append("provision"), (True, "d1 create ok"))[1])
     monkeypatch.setattr(C, "deploy",
                         lambda a: (order.append("deploy"), (True, "out", None))[1])
-    ok, _ = D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    # provisioning order, not the provenance policy → opt out of it explicitly
+    ok, _ = D.deploy_with_gate(tmp_path, confirm=lambda p: True,
+                               require_provenance=False)
     assert ok and order == ["provision", "deploy"]
 
 
@@ -59,7 +61,7 @@ def test_gate_skips_provision_for_plain_app(monkeypatch, tmp_path):
                         lambda a: (order.append("provision"), (True, ""))[1])
     monkeypatch.setattr(C, "deploy",
                         lambda a: (order.append("deploy"), (True, "out", None))[1])
-    D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    D.deploy_with_gate(tmp_path, confirm=lambda p: True, require_provenance=False)
     assert order == ["deploy"]  # no D1 -> no provisioning
 
 
@@ -68,7 +70,9 @@ def test_gate_cancelled_runs_nothing(monkeypatch, tmp_path):
     order = []
     monkeypatch.setattr(C, "provision_d1", lambda a: (order.append("p"), (True, ""))[1])
     monkeypatch.setattr(C, "deploy", lambda a: (order.append("d"), (True, "", None))[1])
-    ok, _ = D.deploy_with_gate(tmp_path, confirm=lambda p: False)
+    # require_provenance=False so the refusal must come from the HUMAN gate
+    ok, _ = D.deploy_with_gate(tmp_path, confirm=lambda p: False,
+                               require_provenance=False)
     assert not ok and order == []
 
 

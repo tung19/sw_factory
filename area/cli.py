@@ -12,10 +12,12 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from area._util import safe_name
 
@@ -28,7 +30,8 @@ if TYPE_CHECKING:
 # from this, so adding a gate can't drift one of them (a lesson from CONTRIBUTING's
 # "a gate change without a test silently drifts"). A test asserts _run_gate covers
 # every name here.
-_GATE_ORDER = ("verify", "audit", "e2e", "chaos", "nfr", "perf", "product", "cost")
+_GATE_ORDER = ("verify", "audit", "e2e", "chaos", "nfr", "perf", "visual",
+               "product", "cost")
 _ALL_GATES_HELP = "run all gates: " + " + ".join(_GATE_ORDER)
 
 
@@ -105,11 +108,15 @@ def _looks_auth(spec_dir: Path) -> bool:
 
 
 def _confirm_fn(assume_yes: bool) -> Callable[[str], bool]:
-    def confirm(path: str) -> bool:
+    """The deploy human gate. The argument is a DESCRIPTION of what is about to
+    happen (built by area.deploy._gate_description) — the old prompt hardcoded
+    "Cloudflare PRODUCTION" for every provider and never said that a production
+    database would be created and migrated."""
+    def confirm(what: str) -> bool:
         if assume_yes:
             return True
         try:
-            ans = input(f"Deploy {path} to Cloudflare PRODUCTION? [y/N] ").strip().lower()
+            ans = input(f"Deploy {what}? [y/N] ").strip().lower()
         except EOFError:
             return False
         return ans == "y"
@@ -241,6 +248,15 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
                     help="perf gate: total requests to fire (default 200)")
     sp.add_argument("--perf-concurrency", type=int, default=10,
                     help="perf gate: max requests in flight (default 10)")
+    sp.add_argument("--visual", action="store_true",
+                    help="visual-parity gate (clones): score the clone's LOOK against "
+                         "the reference UI captured in specs/<name>/_ui — design tokens "
+                         "+ DOM skeleton (+ screenshot diff with --visual-pixel) "
+                         "(specs/<name>/visual.yaml blocks; advisory unless --strict)")
+    sp.add_argument("--visual-pixel", action="store_true",
+                    help="visual gate: also boot the clone and screenshot-diff it "
+                         "against the LIVE reference URL (needs a url reference + "
+                         "playwright/chromium; skipped gracefully otherwise)")
     sp.add_argument("--product", action="store_true",
                     help="product-fit gate: an INDEPENDENT reviewer judges whether the "
                          "built app delivers the spec's product + UX/fit gaps "
@@ -256,11 +272,139 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--all", action="store_true", help=_ALL_GATES_HELP)
     sp.add_argument("--deploy", action="store_true", help="deploy after a green build")
     sp.add_argument("--yes", action="store_true", help="skip the deploy human gate")
+    sp.add_argument("--allow-provision-failure", action="store_true",
+                    help="deploy even if creating/migrating the PRODUCTION datastore "
+                         "failed (ships an app whose DB may be missing)")
     sp.add_argument("--open", dest="open", action="store_true", default=True,
                     help="(DEFAULT) after a green build, start the app + open it in "
                          "your browser so you can self-verify")
     sp.add_argument("--no-open", dest="open", action="store_false",
                     help="do not auto-open the app after a green build")
+
+
+def _gate_blocking(gate: str, name: str, args: argparse.Namespace) -> Optional[bool]:
+    """Was this gate in BLOCKING posture for this run? True/False, or None if unknown.
+
+    Asks each gate's OWN budget loader instead of re-deriving the "committed yaml or
+    --strict" rule, so the attestation can't drift from what the gate actually did.
+    Returns None rather than guessing when a loader errors — provenance must not
+    claim a posture it couldn't determine."""
+    strict = bool(getattr(args, "strict", False))
+    try:
+        if gate == "nfr":
+            from area.verify.nfr import load_budget as _nfr_budget
+
+            return _nfr_budget(name, strict=strict)[1]
+        if gate == "perf":
+            from area.verify.perf import load_budget as _perf_budget
+
+            return _perf_budget(name, strict=strict)[1]
+        if gate == "visual":
+            from area.verify.visual import load_threshold
+
+            return load_threshold(name, strict=strict)[1]
+        if gate == "cost":
+            from area.verify.cost import load_cap
+
+            return load_cap(name, strict=strict,
+                            override=getattr(args, "cost_max", None))[1]
+    except Exception:  # noqa: BLE001 — posture is metadata; record "unknown", not a guess
+        return None
+    if gate == "product":
+        return strict  # the LLM reviewer only blocks under --strict
+    return True  # verify/audit/e2e/chaos: a tier-1/oracle failure always blocks
+
+
+# Commands that run an agent on the host and therefore need the factory pinned.
+_FACTORY_GUARDED = ("run", "clone", "intake", "iterate")
+
+
+def _factory_script() -> Path:
+    return Path(__file__).resolve().parent.parent / "tools" / "verify-factory-intact.sh"
+
+
+def _factory_snapshot(args: argparse.Namespace) -> None:
+    """Checksum AREA's OWN code before a build.
+
+    The build agent runs unsandboxed on the host, and with the default workspace
+    (REPO/workspace) it writes INSIDE this repo — so nothing stopped it from editing a
+    gate's checker, a skill, or `area/` mid-run. The lock lives in the OS temp dir, not
+    the workspace, because the workspace is exactly what the agent can write.
+
+    Best-effort: a missing script must not block a build. But the absence is recorded
+    (`_factory_lock = None` → `factoryIntact: null`) so the attestation never implies a
+    check that did not run."""
+    args._factory_lock = None
+    script = _factory_script()
+    if not script.exists():
+        return
+    lock = Path(tempfile.gettempdir()) / f"area-factory-{os.getpid()}.lock"
+    try:
+        r = subprocess.run(["bash", str(script), "snapshot", str(lock)],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:  # noqa: BLE001
+        print(f"[area] factory snapshot skipped (warn): {e}")
+        return
+    if r.returncode == 0:
+        args._factory_lock = str(lock)
+    else:
+        print(f"[area] factory snapshot skipped (warn): {r.stderr.strip()}")
+
+
+def _factory_verify(args: argparse.Namespace) -> Optional[bool]:
+    """True = intact · False = CHANGED during the run · None = not checked."""
+    lock = getattr(args, "_factory_lock", None)
+    if not lock:
+        return None
+    try:
+        r = subprocess.run(["bash", str(_factory_script()), "verify", str(lock)],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:  # noqa: BLE001
+        print(f"[area] factory verify skipped (warn): {e}")
+        return None
+    finally:
+        try:
+            Path(lock).unlink(missing_ok=True)
+        except OSError:
+            pass
+    out = (r.stdout.strip() or "") + ("\n" + r.stderr.strip() if r.stderr.strip() else "")
+    print(out.strip())
+    return True if r.returncode == 0 else (False if r.returncode == 1 else None)
+
+
+def _builder_id(args: argparse.Namespace) -> str:
+    """What ACTUALLY built this. Used to be a hardcoded "area/openhands-acp", which
+    was simply false for `--backend llm`."""
+    return f"area/{getattr(args, 'backend', None) or 'acp'}"
+
+
+def _profile_digests() -> dict[str, str]:
+    """{kind: digest} for every agent profile — "which policy applied" in the
+    reference's sense, and the key a later `area evals` comparison hangs on."""
+    try:
+        from area.profile import all_profiles
+
+        return {k: p.digest for k, p in all_profiles().items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _run_policy(args: argparse.Namespace) -> dict[str, Any]:
+    """The run's own configuration, for the attestation. Without this a past build
+    can't be reconstructed: the model, strictness and caps that shaped it are gone."""
+    return {
+        "backend": getattr(args, "backend", None) or "acp",
+        "model": getattr(args, "model", None),
+        "strict": bool(getattr(args, "strict", False)),
+        "tdd": bool(getattr(args, "tdd", False)),
+        "auditLevel": getattr(args, "audit_level", None),
+        "blockInjection": not bool(getattr(args, "no_block_injection", False)),
+        "budgetUsd": getattr(args, "budget", None),
+        "agentIters": getattr(args, "agent_iters", None),
+        "specIters": getattr(args, "spec_iters", None),
+        "buildIters": getattr(args, "build_iters", None),
+        "profiles": _profile_digests(),
+    }
 
 
 def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
@@ -314,19 +458,39 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
             print(f"[area] ❌ gate '{g}' failed — skipping deploy")
             return 1
 
-    # SLSA-style provenance: attest what was built + which gates passed, so deploy
-    # can later verify the artifact wasn't modified after gating.
+    # The factory itself is in the TRUSTED row of the threat model: it "changes only
+    # through review, never during a run". Check that before attesting anything — a
+    # gate that graded with modified code proves nothing.
+    factory_intact = _factory_verify(args)
+    if factory_intact is False:
+        print("[area] ❌ refusing to attest or deploy — AREA's own code changed while "
+              "this build was running. Revert it and rebuild.")
+        _ev("factory.tampered")
+        return 1
+
+    # SLSA-style provenance: attest what was built, which gates ACTUALLY enforced it
+    # (vs merely ran advisory, vs never ran), and the policy it ran under — so deploy
+    # can verify the artifact, and a human can reconstruct the build months later.
     try:
         from area.provenance import write_provenance
 
-        gate_results = {g: True for g in gates}
-        gate_results["holdout_tdd"] = bool(getattr(args, "tdd", False))
+        gate_results: dict[str, Any] = {
+            g: {"ran": True, "blocking": _gate_blocking(g, res.name, args),
+                "blocked": False}  # a blocking breach returned above, so: not blocked
+            for g in gates
+        }
         write_provenance(res.app_dir, name=res.name,
                          target=getattr(args, "target", None) or "?",
-                         gates=gate_results, spec_dir=res.spec_dir)
-        print(f"[area] provenance recorded ({sum(gate_results.values())} checks) "
-              "→ .area/provenance.json")
-        _ev("provenance.recorded", {"checks": sum(gate_results.values())})
+                         gates=gate_results,
+                         gates_not_run=[g for g in _GATE_ORDER if g not in gates],
+                         builder=_builder_id(args),
+                         policy={**_run_policy(args),
+                                 "factoryIntact": factory_intact},
+                         spec_dir=res.spec_dir)
+        enforced = sum(1 for v in gate_results.values() if v["blocking"] is True)
+        print(f"[area] provenance recorded ({enforced} enforced / {len(gates)} ran "
+              f"/ {len(_GATE_ORDER) - len(gates)} not run) → .area/provenance.json")
+        _ev("provenance.recorded", {"enforced": enforced, "ran": len(gates)})
     except Exception as e:  # noqa: BLE001
         print(f"[area] provenance write skipped (warn): {e}")
 
@@ -352,7 +516,11 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
     if args.deploy:
         from area.deploy import deploy_with_gate
 
-        ok, url = deploy_with_gate(res.app_dir, confirm=_confirm_fn(args.yes))
+        ok, url = deploy_with_gate(
+            res.app_dir, confirm=_confirm_fn(args.yes),
+            allow_provision_failure=bool(
+                getattr(args, "allow_provision_failure", False)),
+        )
         _ev("deploy.done" if ok else "deploy.failed",
             {"url": url} if isinstance(url, str) else None)
         return 0 if ok else 1
@@ -361,7 +529,8 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
 
 def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
     from area.verify import (chaos_verify, cost_verify, e2e_verify, holdout_verify,
-                             nfr_verify, perf_verify, product_verify, static_audit)
+                             nfr_verify, perf_verify, product_verify, static_audit,
+                             visual_verify)
 
     kw = dict(backend=args.backend, model=args.model)
     strict = getattr(args, "strict", False)
@@ -380,6 +549,8 @@ def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
         "perf": lambda: perf_verify(name, strict=strict,
                                     total=getattr(args, "perf_requests", 200),
                                     concurrency=getattr(args, "perf_concurrency", 10), **kw),
+        "visual": lambda: visual_verify(
+            name, strict=strict, pixel=getattr(args, "visual_pixel", False), **kw),
         "product": lambda: product_verify(name, strict=strict, **kw),
         "cost": lambda: cost_verify(name, strict=strict,
                                     override=getattr(args, "cost_max", None),
@@ -485,17 +656,29 @@ def _build_parser() -> argparse.ArgumentParser:
     it.add_argument("--all", action="store_true", help=_ALL_GATES_HELP + " (after rebuild)")
     it.add_argument("--deploy", action="store_true")
     it.add_argument("--yes", action="store_true", help="skip the deploy human gate")
+    it.add_argument("--allow-provision-failure", action="store_true",
+                    help="deploy even if PRODUCTION datastore provisioning failed")
     it.add_argument("--open", dest="open", action="store_true", default=True,
                     help="(DEFAULT) open the rebuilt app in your browser to verify")
     it.add_argument("--no-open", dest="open", action="store_false",
                     help="do not auto-open after rebuild")
 
-    d = sub.add_parser("deploy", help="Deploy a built app to Cloudflare (human gate)")
+    d = sub.add_parser("deploy", help="Deploy a built app to your infra (human gate)")
     d.add_argument("name")
     d.add_argument("--yes", action="store_true", help="skip the human gate")
-    d.add_argument("--require-provenance", action="store_true",
-                   help="refuse to deploy unless build provenance verifies "
-                        "(hard block on a modified-after-gating / ungated artifact)")
+    # Tri-state on purpose: absent (None) lets AREA_REQUIRE_PROVENANCE decide. As a
+    # store_true with default=False this flag swallowed the env var entirely.
+    d.add_argument("--require-provenance", dest="require_provenance",
+                   action="store_true", default=None,
+                   help="(DEFAULT) refuse to deploy an artifact AREA's gates never "
+                        "attested, or that changed after gating")
+    d.add_argument("--no-require-provenance", dest="require_provenance",
+                   action="store_false",
+                   help="deliberately ship an unattested build (a modified-after-"
+                        "gating MISMATCH still refuses)")
+    d.add_argument("--allow-provision-failure", action="store_true",
+                   help="deploy even if creating/migrating the PRODUCTION datastore "
+                        "failed (ships an app whose DB may be missing)")
 
     pv = sub.add_parser("provenance",
                         help="Show or verify an app's build provenance (SLSA-style)")
@@ -559,6 +742,16 @@ def _build_parser() -> argparse.ArgumentParser:
     ob = sub.add_parser("obs", help="Show cost/latency/outcome summary of agent runs")
     ob.add_argument("--json", action="store_true")
 
+    ev = sub.add_parser("evals", help="Grade a change to the FACTORY: compare each "
+                                      "agent profile's current version against the "
+                                      "previous one (prompts/skills/knobs)")
+    ev.add_argument("kind", nargs="*", help="profile kind(s); default: all")
+    ev.add_argument("--check", action="store_true",
+                    help="exit 1 on a regression (use before promoting a change)")
+    ev.add_argument("--strict", action="store_true",
+                    help="also fail when there is not enough data to judge")
+    ev.add_argument("--json", action="store_true")
+
     tr = sub.add_parser("trace", help="Show an app's end-to-end audit trail "
                                       "(Inception → spec → gates → provenance → deploy)")
     tr.add_argument("name")
@@ -602,6 +795,17 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="make a default-budget breach BLOCK (exit 1)")
     pf.add_argument("--backend", default="acp", choices=["acp", "llm"])
     pf.add_argument("--model", default=None)
+
+    vi = sub.add_parser("visual", help="Visual-parity gate (clones): score the "
+                                       "clone's look vs the captured reference UI")
+    vi.add_argument("name")
+    vi.add_argument("--pixel", dest="visual_pixel", action="store_true",
+                    help="also boot the clone + screenshot-diff it against the LIVE "
+                         "reference URL (needs playwright/chromium)")
+    vi.add_argument("--strict", action="store_true",
+                    help="make a below-threshold score BLOCK (exit 1)")
+    vi.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    vi.add_argument("--model", default=None)
 
     co = sub.add_parser("cost", help="Hard cost-cap gate: total build spend vs "
                                      "budget (the most-recent build session)")
@@ -686,6 +890,10 @@ def main(argv: list[str] | None = None) -> int:
     # Stamp the invocation start so the post-build `cost` gate can sum only THIS
     # build's agent runs (obs.runs.jsonl is global + per-run; see area/verify/cost).
     args._build_start = time.time()
+    # Pin AREA's own code for the commands that let an agent loose on this host, so
+    # `_finish` can prove the factory did not change while it was running.
+    if getattr(args, "cmd", None) in _FACTORY_GUARDED:
+        _factory_snapshot(args)
 
     # P2 cost/budget cap -> env read by area/engine at call time
     if getattr(args, "budget", None) is not None:
@@ -814,8 +1022,11 @@ def _cmd_deploy(args: argparse.Namespace, expected: str | None) -> int:
     if not app_dir.exists():
         print(f"[area] no app at {app_dir}")
         return 1
-    ok, _ = deploy_with_gate(app_dir, confirm=_confirm_fn(args.yes),
-                             require_provenance=getattr(args, "require_provenance", False))
+    ok, _ = deploy_with_gate(
+        app_dir, confirm=_confirm_fn(args.yes),
+        require_provenance=getattr(args, "require_provenance", None),
+        allow_provision_failure=bool(getattr(args, "allow_provision_failure", False)),
+    )
     return 0 if ok else 1
 
 
@@ -996,6 +1207,37 @@ def _cmd_e2e(args: argparse.Namespace, expected: str | None) -> int:
     return 0 if ok else 1
 
 
+def _cmd_evals(args: argparse.Namespace, expected: str | None) -> int:
+    """Grade a change to the FACTORY. Not an app gate: `_GATE_ORDER` decides whether
+    an APP may ship, while this decides whether a change to AREA's own prompts,
+    skills or knobs may be promoted — so it is a separate command (and part of
+    `make check`), never a member of the app gate set."""
+    import json as _json
+
+    from area.evals import check, report_text
+
+    ok, results = check(args.kind or None, strict=args.strict)
+    if args.json:
+        print(_json.dumps(results, indent=2))
+    else:
+        from area.profile import all_profiles
+
+        profs = all_profiles()
+        print(f"[area] evals — {len(profs)} agent profile(s); grading the CURRENT "
+              "version of each against the previous one\n")
+        print(report_text(results))
+        unattr = sum(r.get("unattributed_runs") or 0 for r in results)
+        if unattr:
+            print(f"\n[area] {unattr} run(s) predate profiles and carry no digest — "
+                  "they cannot be attributed, so they are excluded from every "
+                  "baseline. New runs are attributed from now on.")
+    if args.check:
+        print(f"\n[area] evals gate: {'✅ no regression' if ok else '❌ REGRESSION'}"
+              + ("" if ok else " — do not promote this change"))
+        return 0 if ok else 1
+    return 0
+
+
 def _cmd_obs(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
@@ -1103,6 +1345,21 @@ def _cmd_perf(args: argparse.Namespace, expected: str | None) -> int:
         total=args.requests, concurrency=args.concurrency, path=args.path,
     )
     print(f"\n[area] perf: {'✅ PASS' if ok else '❌ FAIL'} — {args.name}")
+    return 0 if ok else 1
+
+
+def _cmd_visual(args: argparse.Namespace, expected: str | None) -> int:
+    from area.verify import visual_verify
+
+    ok = visual_verify(
+        args.name, backend=args.backend, model=args.model,
+        strict=getattr(args, "strict", False),
+        pixel=getattr(args, "visual_pixel", False),
+    )
+    # "not blocking" rather than "PASS": an advisory breach also returns True, and
+    # claiming PASS right under a "below threshold" line would be a lie.
+    print(f"\n[area] visual gate: {'✅ not blocking' if ok else '❌ BLOCKING'} "
+          f"— {args.name}")
     return 0 if ok else 1
 
 
@@ -1250,7 +1507,9 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
-    "perf": _cmd_perf, "cost": _cmd_cost, "cf-fix": _cmd_cf_fix,
+    "evals": _cmd_evals,
+    "perf": _cmd_perf, "visual": _cmd_visual, "cost": _cmd_cost,
+    "cf-fix": _cmd_cf_fix,
     "cf-clone": _cmd_cf_clone, "research": _cmd_research, "adapt": _cmd_adapt,
     "monitor": _cmd_monitor, "status": _cmd_status, "watch": _cmd_watch,
 }

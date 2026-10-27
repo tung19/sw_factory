@@ -49,8 +49,9 @@ Requirement/source
 | Design | `area/design.py` | architect stage (`design.md`); auto-runs for a non-trivial app (entities or ≥3 features) |
 | Lock holdout | `area/verify/holdout.py` | an **independent subagent** authors the acceptance tests under `__tests__/_holdout/` from the spec ONLY, then they are **checksum-locked** (see "Independence enforcement") |
 | Build to green | `area/build/`, `area/engine/adapter.py` | the build agent writes app code until the **locked** holdout passes; it may never edit the holdout |
-| Gates | `area/verify/*` | the 8 gates below; a blocking failure stops the deploy |
+| Gates | `area/verify/*` | the 9 gates below; a blocking failure stops the deploy |
 | Provenance | `area/provenance.py` | SLSA-style record {spec digest → gates passed → artifact sha256} so a later deploy can prove the build wasn't modified after gating |
+| Outer loop | `profiles/*.yaml`, `area/profile.py`, `area/evals.py` | every agent run is stamped with the **profile digest** that produced it, so `area evals` can grade a change to AREA's own prompts/skills/knobs against the previous version — the spine applied to the factory itself (see "The outer loop" below) |
 | Deploy | `area/deploy/` | multi-provider (Cloudflare vinext / Vercel / plain), auto-detected; verifies provenance first |
 
 Post-build, a **reality report** ([`area/reality.py`](../area/reality.py)) prints the
@@ -94,20 +95,57 @@ exited 0 — see `area/verify/_runners.py`.)
 
 ## Independence enforcement (the heart)
 
-The holdout oracle is protected at three layers:
+The holdout oracle is protected at three layers. **They do not all cover the same
+agent** — AREA runs builders in two different contexts, so be precise about which:
+
+- **(A) a Claude Code session rooted in this repo** — the native flows, where *you* are
+  the agent following `CLAUDE.md` and the `build-from-docs` / `clone-from-source` skills.
+- **(B) the autonomous build agent** — the Claude Code CLI child that `area run/clone
+  --tdd` spawns, rooted at the generated app's directory.
 
 1. **Checksum lock** — `tools/lock-holdout.sh` writes `workspace/specs/<name>/holdout.lock`
    (a sha256 of every holdout file except the escape hatch). A `--tdd` build also keeps
    the lock in memory and persists it (`area/verify/holdout.py`). `tools/verify-holdout-intact.sh`
    re-checks it before/after each build step.
+   *Covers A and B — but it **detects and reverts**, it does not prevent the write.*
 2. **PreToolUse hook** — [`tools/hooks/guard_holdout.py`](../tools/hooks/guard_holdout.py),
    wired from [`.claude/settings.json`](../.claude/settings.json), **blocks** any
    Edit/Write to a locked holdout at the editor level (turns CLAUDE.md's "don't" into
-   "can't"). Travels with the clone.
-3. **The `_CHALLENGE.md` escape hatch** — the build agent cannot edit a locked test, but
-   if it believes one is *wrong* it writes `__tests__/_holdout/_CHALLENGE.md`; an
-   **independent verifier** (never the builder) re-adjudicates against the spec and
-   re-locks. This is "evolving tests under governance", not tampering.
+   "can't"). Travels with the clone, and is inert until the user trusts the project.
+   *Covers **A only**.* `area/skills.py` copies skills into a generated app but installs
+   no `.claude/settings.json` there, so the hook never reaches agent B — for B the
+   enforcement is layer 1 (detect-and-revert) plus layer 3. See
+   [secure-factory-gap-assessment.md](secure-factory-gap-assessment.md) item 3.
+3. **The `_CHALLENGE.md` escape hatch** — if a builder believes a locked test is *wrong*
+   it writes `__tests__/_holdout/_CHALLENGE.md`; an **independent verifier** (never the
+   builder) re-adjudicates against the spec and re-locks. This is "evolving tests under
+   governance", not tampering. *Covers A and B.*
+
+## The outer loop (grading the factory, not the app)
+
+The gates decide whether an **app** may ship. Nothing decided whether a change to the
+**factory** was an improvement — edit a prompt and no measurement told you, which is the
+one thing AREA's spine forbids, applied to AREA itself.
+
+- **`profiles/<kind>.yaml`** — one versioned artifact per kind of agent (16: builder,
+  holdout-author, holdout-fixer, spec-extractor, …). It declares the obs label globs
+  that attribute a run to it, the prompt symbols whose **source is hashed** into its
+  digest, whether the skills pack is installed, and per-kind `agent_iters` /
+  `budget_usd` / `max_iters` defaults (a CLI flag still wins). Prompts stay in Python:
+  they are interpolated f-strings with branching, and hashing their source gives the
+  same attribution as rewriting them as templates would.
+- **The digest** changes when a prompt, a skill, or a knob changes — that is what makes
+  a "version" of a kind.
+- **`obs.log_run`** stamps `(profile, profile_digest)` on every run from one place, so
+  every agent call site is attributed without being touched.
+- **`area evals` / `make evals`** compares a kind's current version against the previous
+  one (first-try rate, pass rate, avg attempts, avg cost) and fails `--check` on a
+  regression. It is **not** a member of `_GATE_ORDER` — an app must not be blocked
+  because a prompt regressed, and this must not run after every build.
+
+`holdout-author` and `holdout-fixer` are deliberately separate profiles in the same
+module: one writes the oracle, the other fixes code against it, and keeping them apart
+is the independence guarantee.
 
 ## Execution engine
 
@@ -151,9 +189,12 @@ area/
   research.py        Flow B+ P1: survey comparable projects → research brief
   adapt.py           Flow B+ P2/P3 + capstone: requirement-anchored synthesis + data plan + the `area adapt` pipeline
   seed.py            Flow B+ P4: opt-in attested seed-from-reference (robots/PII/cap)
-  verify/            the 8 gates (holdout, audit, e2e, chaos, nfr, perf, product, cost)
+  verify/            the 9 gates (holdout, audit, e2e, chaos, nfr, perf, visual, product, cost)
   build/             the build prompts + cf_scaffold.py (deterministic vinext fixes)
   design.py          architect stage → design.md
+  profile.py         one versioned artifact per agent kind (profiles/*.yaml) + digest
+  evals.py           grade a FACTORY change against the previous profile version
+  screen.py          redact credentials in anything untrusted the agent will read
   provenance.py      SLSA-style build attestation + verify-before-deploy
   reality.py         post-build "did we build what you meant?" report
   deploy/            cloudflare.py · vercel.py (auto-detected, provenance-gated)

@@ -22,13 +22,14 @@ upstream fixes with `git subtree pull --prefix=vendor/software-agent-sdk <repo> 
 
 ```bash
 source .venv/bin/activate
-make check     # ruff (lint) + mypy (phased subset) + pytest — what CI runs
-# or individually:  make lint  ·  make typecheck  ·  make test  (~347 tests, ~2-3s)
+make check     # ruff (lint) + mypy (strict, whole package) + pytest — what CI runs
+# or individually:  make lint  ·  make typecheck  ·  make test  (569 tests, ~15s)
 ```
 
-Lint is `ruff` (pyflakes + syntax). Type-checking is `mypy` on a **phased subset**
-of already-clean modules (see `[tool.mypy]` in `pyproject.toml`); growing that list
-as modules get typed is a welcome contribution.
+Lint is `ruff` (pyflakes + syntax). Type-checking is `mypy` with **`strict = true`
+over the whole `area` package** (see `[tool.mypy]` in `pyproject.toml`) — the phased
+coverage list it used to carry is gone, so new code missing annotations, leaking
+`Any`, or using a bare generic fails CI.
 
 The suite is **logic-only and agent-free** — it never spawns a build agent or hits an
 LLM (those are validated by dogfood runs). So tests must stub the agent/pipeline and
@@ -78,6 +79,24 @@ This is the most common extension. Worked example — the `perf` gate added exac
    Keep it `mypy --strict` clean — the whole `area` package is fully strict-typed.
 5. **Dogfood it** against a real built app before trusting it — live runs flush out bugs
    unit tests can't (every gate fix this repo has shipped was found that way).
+
+### Changing a prompt, a skill, or an agent knob
+
+Those are changes to the **factory**, and AREA's own rule says the same reasoning must
+not write and grade them. So:
+
+1. The thing you are editing belongs to a profile — `profiles/<kind>.yaml` names the
+   prompt symbols it covers (`area/profile.py` explains the digest).
+2. Editing it changes that profile's digest, which starts a new measured version.
+3. Run **`make evals`** (or `area evals --check`) before promoting the change. It
+   compares the new version's runs against the previous version's on first-try rate,
+   pass rate, attempts and cost.
+4. Expect **`insufficient-data` at first** — that is the honest answer until the new
+   version has runs, and it is why the gate is advisory by default. Build a few apps,
+   then re-run it.
+
+Tuning a knob per kind (a tighter budget for the researcher, more attempts for the
+auditor) is a one-file edit in the profile, not a code change.
 
 ## How to add an engine backend
 

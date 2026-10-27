@@ -31,7 +31,9 @@ def test_gate_routes_to_vercel(monkeypatch, tmp_path):
                         lambda a: (called.append("vercel"), (True, "o", "https://x.vercel.app"))[1])
     monkeypatch.setattr(C, "deploy",
                         lambda a: (called.append("cf"), (True, "", "https://x.workers.dev"))[1])
-    ok, url = D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    # provider routing, not the provenance policy → opt out of it explicitly
+    ok, url = D.deploy_with_gate(tmp_path, confirm=lambda p: True,
+                                 require_provenance=False)
     assert ok and called == ["vercel"] and url == "https://x.vercel.app"
 
 
@@ -42,7 +44,7 @@ def test_gate_routes_to_cloudflare_and_provisions_d1(monkeypatch, tmp_path):
     monkeypatch.setattr(C, "deploy",
                         lambda a: (order.append("cf-deploy"), (True, "", "https://x.workers.dev"))[1])
     monkeypatch.setattr(V, "deploy", lambda a: (order.append("vercel"), (True, "", None))[1])
-    D.deploy_with_gate(tmp_path, confirm=lambda p: True)
+    D.deploy_with_gate(tmp_path, confirm=lambda p: True, require_provenance=False)
     assert order == ["provision", "cf-deploy"]
 
 
@@ -51,14 +53,18 @@ def test_gate_explicit_provider_overrides_detection(monkeypatch, tmp_path):
     called = []
     monkeypatch.setattr(V, "deploy", lambda a: (called.append("vercel"), (True, "", None))[1])
     monkeypatch.setattr(C, "deploy", lambda a: (called.append("cf"), (True, "", None))[1])
-    D.deploy_with_gate(tmp_path, confirm=lambda p: True, provider="vercel")
+    D.deploy_with_gate(tmp_path, confirm=lambda p: True, provider="vercel",
+                       require_provenance=False)
     assert called == ["vercel"]
 
 
 def test_gate_cancelled_deploys_nothing(monkeypatch, tmp_path):
     called = []
     monkeypatch.setattr(V, "deploy", lambda a: (called.append("v"), (True, "", None))[1])
-    ok, _ = D.deploy_with_gate(tmp_path, confirm=lambda p: False)
+    # require_provenance=False so this really exercises the HUMAN gate — otherwise
+    # the refusal would come from the (absent) attestation and the test be vacuous.
+    ok, _ = D.deploy_with_gate(tmp_path, confirm=lambda p: False,
+                               require_provenance=False)
     assert not ok and called == []
 
 

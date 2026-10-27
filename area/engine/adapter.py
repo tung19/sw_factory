@@ -33,6 +33,9 @@ from openhands.tools.file_editor import FileEditorTool
 from openhands.tools.task_tracker import TaskTrackerTool
 from openhands.tools.terminal import TerminalTool
 
+# stdlib-only leaf, so importing it at module level costs nothing
+from area._util import kill_process_group
+
 if TYPE_CHECKING:
     from openhands.sdk.conversation.goal import GoalOutcome
     from openhands.sdk.mcp.config import MCPServer
@@ -223,6 +226,25 @@ def _scrubbed_agent_env() -> Iterator[None]:
         os.environ.update(saved)
 
 
+def _send_and_run(conv: Conversation, message: str) -> None:
+    """Send a message and run the agent with the deploy/cloud secrets removed for the
+    WHOLE exchange, not just for `run()`.
+
+    Why the whole exchange: `send_message` can itself initialize the agent — for a
+    non-ACP backend `LocalConversation._should_initialize_agent_on_send_message()`
+    returns True — and an initialized agent spawns a long-lived terminal that inherits
+    the parent environment at spawn time. Scrubbing only around `run()` would let that
+    shell keep the secrets for the rest of the run. For the default ACP backend the
+    spawn is deferred into `run()`, so this was not exploitable there; it is closed so
+    the posture no longer depends on which backend happens to be in use.
+
+    `_scrubbed_agent_env` nests harmlessly (the inner one finds nothing to pop and
+    restores nothing), so `_run_retry` keeps its own guard for direct callers."""
+    with _scrubbed_agent_env():
+        conv.send_message(message)
+        _run_retry(conv)
+
+
 def _run_retry(conv: Conversation, *, tries: int = 5, base: float = 15.0) -> None:
     """conv.run() with exponential backoff on transient errors (rate-limit etc.)."""
     import time as _t
@@ -241,19 +263,38 @@ def _run_retry(conv: Conversation, *, tries: int = 5, base: float = 15.0) -> Non
             _t.sleep(delay)
 
 
+def _profile_defaults(label: str) -> dict[str, Any]:
+    """Per-kind knobs from profiles/<kind>.yaml. Best-effort — a missing or broken
+    profile just means the global defaults apply, exactly as before profiles existed."""
+    try:
+        from area.profile import defaults_for
+
+        return defaults_for(label)[2]
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def run_once(
     agent: AgentBase, workspace: str | Path, message: str, *,
     agent_iters: int | None = None, budget: float | None = None, label: str = "agent",
 ) -> Conversation:
-    """Send one message and run the agent to completion (capped)."""
+    """Send one message and run the agent to completion (capped).
+
+    An unspecified cap falls back to this kind's profile before the global default,
+    so a per-kind budget is set in one reviewable file; an explicit argument (i.e. a
+    CLI flag) always wins."""
     import time as _t
 
+    _d = _profile_defaults(label)
+    if agent_iters is None:
+        agent_iters = _d.get("agent_iters")
+    if budget is None:
+        budget = _d.get("budget_usd")
     t0 = _t.time()
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     conv = _mk_conversation(agent, ws, agent_iters, budget)
-    conv.send_message(message)
-    _run_retry(conv)
+    _send_and_run(conv, message)
     try:
         from area import obs
 
@@ -270,7 +311,7 @@ def run_until(
     task: str,
     verify: Verifier,
     *,
-    max_iters: int = 5,
+    max_iters: int | None = None,
     agent_iters: int | None = None,
     budget: float | None = None,
     label: str = "agent",
@@ -284,16 +325,23 @@ def run_until(
     """
     import time as _t
 
+    _d = _profile_defaults(label)
+    if agent_iters is None:
+        agent_iters = _d.get("agent_iters")
+    if budget is None:
+        budget = _d.get("budget_usd")
+    if max_iters is None:
+        max_iters = _d.get("max_iters") or 5
     t0 = _t.time()
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
     conv = _mk_conversation(agent, ws, agent_iters, budget)
-    conv.send_message(task)
-    _run_retry(conv)
+    _send_and_run(conv, task)
 
     passed = False
     used = max_iters
     first_fail = None
+    wall = _wall_timeout()
     for attempt in range(1, max_iters + 1):
         result = verify()
         if result.ok:
@@ -301,11 +349,20 @@ def run_until(
             break
         if first_fail is None:
             first_fail = result.feedback
-        conv.send_message(
+        elapsed = _t.time() - t0
+        if wall > 0 and elapsed > wall:
+            # Stop THRASHING rather than grinding through the remaining attempts: each
+            # one costs real money and the loop has already shown it is not converging.
+            print(f"[area] ⏱ wall-clock cap hit ({elapsed:.0f}s > {wall:.0f}s) after "
+                  f"attempt {attempt}/{max_iters} — stopping the loop. Raise "
+                  "AREA_MAX_WALL_S to allow longer.")
+            used = attempt
+            break
+        _send_and_run(
+            conv,
             "The acceptance checks did not pass yet. Fix the code so they pass.\n\n"
             f"--- check output (attempt {attempt}/{max_iters}) ---\n{result.feedback}"
         )
-        _run_retry(conv)
     else:
         passed = verify().ok
 
@@ -330,20 +387,69 @@ def run_until(
     return passed, conv
 
 
-def command_verifier(cmd: Sequence[str], *, cwd: str | Path | None = None) -> Verifier:
-    """A Verifier that runs a shell command; exit code 0 means pass."""
+# Wall clock for one verifier command (`npm install && build && test`). Read at CALL
+# time, never at import: a value captured at import can't be changed for a running
+# process, which is the stale-oracle trap AREA already hit with gate checkers.
+_CMD_TIMEOUT_DEFAULT = 1800.0
+
+
+def _cmd_timeout() -> float:
+    raw = (os.getenv("AREA_CMD_TIMEOUT") or "").strip()
+    try:
+        return float(raw) if raw else _CMD_TIMEOUT_DEFAULT
+    except ValueError:
+        return _CMD_TIMEOUT_DEFAULT
+
+
+# Wall clock for a WHOLE self-correct loop. The hard cost gate is post-hoc — it blocks
+# a deploy after the money is spent — so a thrashing agent needs a clock, not just a
+# budget. Observed real builds run ~900s (taskboard: 917s), so 1h is ~4x the worst case
+# measured, not a guess. Read at call time; 0/negative disables it.
+_WALL_TIMEOUT_DEFAULT = 3600.0
+
+
+def _wall_timeout() -> float:
+    raw = (os.getenv("AREA_MAX_WALL_S") or "").strip()
+    try:
+        return float(raw) if raw else _WALL_TIMEOUT_DEFAULT
+    except ValueError:
+        return _WALL_TIMEOUT_DEFAULT
+
+
+def command_verifier(cmd: Sequence[str], *, cwd: str | Path | None = None,
+                     timeout: float | None = None) -> Verifier:
+    """A Verifier that runs a shell command; exit code 0 means pass.
+
+    Capped on purpose. This is the longest-running call in a build and it had NO
+    timeout, so a hung `npm install` or a dev server that never exits would wedge the
+    whole run — with the cost gate unable to help, since it only measures after the
+    fact. A timeout is reported as an ordinary failure so `run_until` can feed it back
+    to the agent instead of crashing, and the whole process GROUP is killed: the
+    command forks children, and signalling one pid leaves them running."""
 
     def _run() -> VerifyResult:
+        cap = _cmd_timeout() if timeout is None else timeout
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 list(cmd),
                 cwd=str(cwd) if cwd else None,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
+                start_new_session=True,  # required for the group kill below
             )
         except OSError as e:  # missing binary, bad cwd, etc. — never crash the loop
             return VerifyResult(ok=False, feedback=f"verifier command failed: {e}")
-        out = (proc.stdout + "\n" + proc.stderr).strip()
+        try:
+            stdout, stderr = proc.communicate(timeout=cap)
+        except subprocess.TimeoutExpired:
+            kill_process_group(proc)
+            stdout, stderr = proc.communicate()
+            tail = ((stdout or "") + "\n" + (stderr or "")).strip()[-3000:]
+            return VerifyResult(ok=False, feedback=(
+                f"verifier command TIMED OUT after {cap:.0f}s and was killed "
+                f"(AREA_CMD_TIMEOUT to change it). Last output:\n{tail}"))
+        out = ((stdout or "") + "\n" + (stderr or "")).strip()
         return VerifyResult(ok=proc.returncode == 0, feedback=out[-4000:])
 
     return _run

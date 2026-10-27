@@ -14,12 +14,28 @@ import area.web.upload as U
 def test_cmd_run_with_tdd_all_deploy():
     cmd = J.MANAGER._cmd("run", {
         "requirement": "do x", "name": "app", "target": "plain",
-        "tdd": True, "all": True, "deploy": True,
+        "tdd": True, "all": True, "deploy": True, "confirm": True,
     })
     assert cmd[1] == "run" and "do x" in cmd
     assert "--tdd" in cmd and "--all" in cmd
     assert "--deploy" in cmd and "--yes" in cmd
     assert cmd[cmd.index("--target") + 1] == "plain"
+
+
+def test_deploy_needs_explicit_approval_in_the_request():
+    """A dashboard job can't show the interactive PRODUCTION gate, so it used to
+    hardcode --yes — bypassing the only human approval. The approval now has to
+    travel in the request, and its absence refuses the job."""
+    import pytest
+
+    for kind, params in (
+        ("run", {"requirement": "x", "name": "app", "deploy": True}),
+        ("deploy", {"name": "app"}),
+    ):
+        with pytest.raises(ValueError, match="explicit approval"):
+            J.MANAGER._cmd(kind, params)
+    # with the approval present, the gate is satisfied
+    assert "--yes" in J.MANAGER._cmd("deploy", {"name": "app", "confirm": True})
 
 
 def test_cmd_intake_tdd():

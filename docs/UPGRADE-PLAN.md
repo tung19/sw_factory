@@ -9,7 +9,7 @@ codebase the diagnosis sharpens:
 > seeing it work at all needs a Claude key + ~$ + ~10 min. The gap to 10/10 is
 > **packaging + visible evidence**, not "more AI".
 
-What the review missed (already in the repo): CI + **343 tests**, an
+What the review missed (already in the repo): CI + **569 tests**, an
 independently-audited + hardened security/gate layer (holdout-must-run, provenance
 blocks deploy, clone-RCE guard, …), `docs/ARCHITECTURE.md` + `CONTRIBUTING.md`, 2
 ADRs, `scripts/install.sh` + `area doctor`.

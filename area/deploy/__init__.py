@@ -30,34 +30,95 @@ def detect_provider(app_dir: str | Path) -> str:
     return "vercel"
 
 
+_NeedFn = Callable[["str | Path"], bool]
+_ProvFn = Callable[["str | Path"], "tuple[bool, str]"]
+
+
+def _provision_steps(provider: str) -> tuple[tuple[_NeedFn, _ProvFn, str], ...]:
+    """The production datastores a deploy to `provider` creates/migrates."""
+    if provider == "cloudflare":
+        return ((cloudflare.needs_d1, cloudflare.provision_d1, "D1"),)
+    return ((vercel.needs_postgres, vercel.provision_postgres, "Postgres"),
+            (vercel.needs_kv, vercel.provision_kv, "KV/Redis"))
+
+
+def _gate_description(app_dir: str, provider: str) -> str:
+    """What the human is actually approving.
+
+    The old prompt said "Cloudflare PRODUCTION" for every provider, and never
+    mentioned that a PRODUCTION database would be created and migrated."""
+    bits = [f"{Path(app_dir).name} → {provider} PRODUCTION"]
+    stores: list[str] = []
+    for need, _prov, label in _provision_steps(provider):
+        try:
+            if need(app_dir):
+                stores.append(label)
+        except Exception:  # noqa: BLE001 — detection must never break the prompt
+            # not "{label}?" — the prompt itself ends in "?", so that reads as a
+            # clean detection ("creates/migrates: Postgres?")
+            stores.append(f"{label} (detection FAILED — assume yes)")
+    if stores:
+        bits.append("creates/migrates: " + ", ".join(stores))
+    return " | ".join(bits)
+
+
+def _provision(provider: str, app_dir: str, *, allow_failure: bool) -> bool:
+    """Create/migrate the datastores the app needs. False ⇒ stop the deploy.
+
+    This used to be "NON-FATAL by design": a failed migration still shipped, i.e.
+    AREA deployed an app whose database was not there. A failed provision now blocks
+    unless the caller explicitly allows it."""
+    for need, prov, label in _provision_steps(provider):
+        try:
+            if not need(app_dir):
+                continue
+            print(f"[area] {label} needed — provisioning before deploy…")
+            pok, plog = prov(app_dir)
+        except Exception as e:  # noqa: BLE001
+            pok, plog = False, f"{type(e).__name__}: {e}"
+        if pok:
+            print(f"[area] {label} provision ok:\n{plog}")
+            continue
+        print(f"[area] ❌ {label} provision FAILED:\n{plog}")
+        if not allow_failure:
+            print("[area] refusing deploy — shipping an app whose datastore was not "
+                  "provisioned ships a broken app. Pass --allow-provision-failure "
+                  "to deploy anyway.")
+            return False
+        print(f"[area] ⚠ continuing despite the {label} failure "
+              "(--allow-provision-failure).")
+    return True
+
+
 def deploy_with_gate(
     app_dir: str | Path,
     *,
     confirm: Callable[[str], bool],
     provider: Optional[str] = None,
     require_provenance: Optional[bool] = None,
+    allow_provision_failure: bool = False,
 ) -> tuple[bool, Optional[str]]:
-    """Human gate, then deploy to the right provider (auto-detected if not given).
+    """Verify provenance, take a human gate, then deploy to the right provider.
 
-    Cloudflare path auto-provisions D1 first; Vercel path is a plain deploy.
+    Order matters: the artifact is attested BEFORE a human is asked, so nobody is
+    asked to approve a build that cannot ship, and the human gate stays the last
+    word. The Cloudflare path provisions D1 first; the Vercel path provisions
+    connected Postgres/KV.
 
-    Provenance check (SLSA-style): before deploying, the built artifact is verified
-    against its recorded provenance. A "mismatch" (the source changed since it was
-    gated) blocks the deploy when require_provenance is set (flag or the
-    AREA_REQUIRE_PROVENANCE env); "absent" only warns (back-compat).
+    Provenance (SLSA-style): a "mismatch" (source changed since gating) ALWAYS
+    refuses. "absent" (never gated through AREA) refuses too unless explicitly
+    allowed — `require_provenance=False` or `AREA_REQUIRE_PROVENANCE=0`. A checker
+    that cannot RUN also refuses: an enforcement point that is down must not pass.
     """
     import os
 
     app_dir = str(app_dir)
     provider = provider or detect_provider(app_dir)
-    if not confirm(app_dir):
-        print("[area] deploy cancelled by human gate.")
-        return False, None
 
     if require_provenance is None:
-        require_provenance = (os.getenv("AREA_REQUIRE_PROVENANCE") or "").strip().lower() in (
-            "1", "true", "yes",
-        )
+        env = (os.getenv("AREA_REQUIRE_PROVENANCE") or "").strip().lower()
+        # Fail-CLOSED default: an ungated artifact does not ship unless asked for.
+        require_provenance = env not in ("0", "false", "no")
     try:
         from area.provenance import verify_provenance
 
@@ -74,35 +135,28 @@ def deploy_with_gate(
         else:  # absent
             print(f"[area] ⚠ provenance: {detail}")
             if require_provenance:
-                print("[area] refusing deploy (AREA_REQUIRE_PROVENANCE) — build through "
-                      "AREA's gates first to record provenance.")
+                print("[area] refusing deploy — this artifact was never gated through "
+                      "AREA. Build through the gates to attest it, or pass "
+                      "--no-require-provenance / AREA_REQUIRE_PROVENANCE=0 to ship "
+                      "an unattested build deliberately.")
                 return False, None
-    except Exception as e:  # noqa: BLE001 — never block deploy on the checker itself
-        print(f"[area] provenance check skipped (warn): {e}")
+    except Exception as e:  # noqa: BLE001
+        # The checker itself failing used to warn and deploy anyway — i.e. the one
+        # enforcement point before production failed OPEN. It now refuses.
+        print(f"[area] ❌ provenance check could not RUN: {e}")
+        print("[area] refusing deploy — an enforcement point that is down must not pass.")
+        return False, None
+
+    if not confirm(_gate_description(app_dir, provider)):
+        print("[area] deploy cancelled by human gate.")
+        return False, None
+
+    if not _provision(provider, app_dir, allow_failure=allow_provision_failure):
+        return False, None
 
     if provider == "cloudflare":
-        if cloudflare.needs_d1(app_dir):
-            print("[area] D1 detected — provisioning database before deploy…")
-            try:
-                pok, plog = cloudflare.provision_d1(app_dir)
-                print(f"[area] D1 provision ({'ok' if pok else 'warn'}):\n{plog}")
-            except Exception as e:  # noqa: BLE001 — never block deploy on provisioning
-                print(f"[area] D1 provision skipped (warn): {e}")
         ok, out, url = cloudflare.deploy(app_dir)
     else:
-        # Vercel: auto-provision connected storage (Postgres/Neon, KV/Upstash)
-        # before deploy, mirroring the D1 step. Non-fatal — never block on it.
-        for need, prov, label in (
-            (vercel.needs_postgres, vercel.provision_postgres, "Postgres"),
-            (vercel.needs_kv, vercel.provision_kv, "KV/Redis"),
-        ):
-            try:
-                if need(app_dir):
-                    print(f"[area] {label} usage detected — provisioning before deploy…")
-                    pok, plog = prov(app_dir)
-                    print(f"[area] {label} provision ({'ok' if pok else 'warn'}):\n{plog}")
-            except Exception as e:  # noqa: BLE001 — never block deploy on provisioning
-                print(f"[area] {label} provision skipped (warn): {e}")
         ok, out, url = vercel.deploy(app_dir)
 
     if ok:

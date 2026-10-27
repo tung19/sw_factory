@@ -106,7 +106,18 @@ async def api_export(request: Request) -> Response:
 
 
 async def api_job(request: Request) -> Response:
-    j = MANAGER.get(request.path_params["id"])
+    jid = request.path_params["id"]
+    if request.method == "DELETE":
+        # The kill switch. Idempotent-ish: 409 when there is nothing running to stop,
+        # so a double-click doesn't read as success.
+        if MANAGER.cancel(jid):
+            return JSONResponse({"id": jid, "status": "cancelled"})
+        j = MANAGER.get(jid)
+        if not j:
+            return JSONResponse({"error": "unknown job"}, status_code=404)
+        return JSONResponse({"error": f"job is {j.get('status')}, not running"},
+                            status_code=409)
+    j = MANAGER.get(jid)
     return JSONResponse(j or {}, status_code=200 if j else 404)
 
 
@@ -216,7 +227,7 @@ app = Starlette(
         Route("/api/chat", api_chat, methods=["POST"]),
         Route("/api/export", api_export, methods=["POST"]),
         Route("/api/jobs", api_jobs, methods=["GET", "POST"]),
-        Route("/api/jobs/{id}", api_job),
+        Route("/api/jobs/{id}", api_job, methods=["GET", "DELETE"]),
         Route("/api/jobs/{id}/stream", api_stream),
         Route("/api/jobs/{id}/log", api_job_log),
         Route("/api/metrics", api_metrics),

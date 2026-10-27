@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import IO, Any
 
-from area._util import safe_name
+from area._util import kill_process_group, safe_name
 
 from area.paths import REPO as ROOT, WORKSPACE as WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware; `as` = explicit re-export for `from area.web.jobs import WORKSPACE`)
 
@@ -70,6 +70,22 @@ class JobManager:
             pass
 
     @staticmethod
+    def _deploy_approval(p: dict[str, Any]) -> list[str]:
+        """Turn the request's EXPLICIT approval into the deploy gate's --yes.
+
+        A dashboard job runs non-interactively, so it can never show the production
+        gate — which is why this used to hardcode `--yes` and thereby bypass the one
+        human approval before production. The approval now has to travel in the
+        request (`confirm: true`), so it is a recorded operator decision rather than
+        a silent default. Missing it refuses the job instead of approving it."""
+        if not p.get("confirm"):
+            raise ValueError(
+                "deploy requires explicit approval: send confirm=true. A dashboard "
+                "job cannot display the interactive PRODUCTION gate, so the approval "
+                "must be in the request.")
+        return ["--yes"]
+
+    @staticmethod
     def _flags(p: dict[str, Any]) -> list[str]:
         """TDD + gate + deploy flags shared by run/clone/intake."""
         f: list[str] = []
@@ -96,7 +112,7 @@ class JobManager:
                 if p.get(g):
                     f.append("--" + g)
         if p.get("deploy"):
-            f += ["--deploy", "--yes"]
+            f += ["--deploy", *JobManager._deploy_approval(p)]
         return f
 
     def _cmd(self, kind: str, p: dict[str, Any]) -> list[str]:
@@ -129,7 +145,7 @@ class JobManager:
                 cmd.append("--no-tdd")
             return cmd + [f for f in self._flags(p) if f != "--tdd"]
         if kind == "deploy":
-            return [b, "deploy", p["name"], "--yes"]
+            return [b, "deploy", p["name"], *self._deploy_approval(p)]
         raise ValueError(f"unknown job kind: {kind}")
 
     def start(self, kind: str, params: dict[str, Any]) -> str:
@@ -139,7 +155,11 @@ class JobManager:
         log = LOG_DIR / f"{jid}.log"
         f = open(log, "wb")
         proc = subprocess.Popen(
-            cmd, cwd=str(ROOT), stdout=f, stderr=subprocess.STDOUT, env=_env()
+            cmd, cwd=str(ROOT), stdout=f, stderr=subprocess.STDOUT, env=_env(),
+            # Own process group, so cancel() can stop the whole tree. Without it a
+            # cancelled job's children (node/npm/playwright) keep running — and
+            # killpg would target the dashboard's own group.
+            start_new_session=True,
         )
         self._procs[jid] = (proc, f)
         self._jobs[jid] = {
@@ -150,6 +170,30 @@ class JobManager:
         }
         self._save()
         return jid
+
+    def cancel(self, jid: str) -> bool:
+        """Stop a running job and everything it spawned. False if there is nothing to
+        stop (unknown id, or already finished).
+
+        This is the kill switch the factory had no way to pull: a build that thrashes
+        costs real money, and the cost gate only measures AFTER the fact."""
+        entry = self._jobs.get(jid)
+        pf = self._procs.get(jid)
+        if not entry or entry.get("status") != "running" or not pf:
+            return False
+        proc, f = pf
+        kill_process_group(proc)
+        try:
+            f.flush()
+            f.close()
+        except Exception:  # noqa: BLE001
+            pass
+        self._procs.pop(jid, None)
+        entry["status"] = "cancelled"
+        entry["ended"] = time.time()
+        entry["exit"] = proc.poll()
+        self._save()
+        return True
 
     def _finalize_if_done(self, jid: str) -> None:
         entry = self._jobs.get(jid)

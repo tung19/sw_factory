@@ -18,15 +18,100 @@ The factory's capabilities to date (grouped; see the git history for detail).
 - **Clarify-by-default** + an independent spec-vs-intent reviewer (stop on material
   ambiguity instead of guessing).
 
-### Gates (8)
+### Gates (9)
 - `holdout` (the locked oracle), `audit` (two-tier: tsc + npm-audit + secrets, +
   a risky-pattern scan whose **injection class — XSS/eval/SQL-injection — blocks by
   default**), `e2e` (Playwright, forced before deploying an auth/session/form app),
   `chaos`, `nfr` (static budget, enforces a committed budget it can't measure),
-  `perf` (live load), `product` (independent product-fit reviewer), and **`cost`**
+  `perf` (live load), `visual` (3-layer visual-parity for a clone; advisory until a committed `visual.yaml`), `product` (independent product-fit reviewer), and **`cost`**
   (hard total-spend cap, app-scoped from obs — the HARD complement to `--budget`).
   The gate set is a single source (`_GATE_ORDER`) driving selection, dispatch, and
   `--all`. `--all` runs them after a build and blocks the deploy on a failure.
+
+### Attestation & the deploy gate (secure-factory assessment)
+Measured against *The Secure Software Factory* (Agent Baseline v1) —
+see [docs/secure-factory-gap-assessment.md](docs/secure-factory-gap-assessment.md).
+- **Provenance tells the truth** (`area.slsa-like/v2`). `builder` names the real
+  backend (it was a hardcoded literal, wrong for every `--backend llm` run). Per-gate
+  records are `{ran, blocking, blocked}` plus `gatesNotRun`, so an **advisory** gate
+  below its threshold is no longer attested identically to an enforced pass; posture
+  comes from each gate's own budget loader, and is recorded as `null` rather than
+  guessed when it can't be determined. A new `policy` block records model, backend,
+  strictness, caps, the **factory's own git revision** and a digest of the skills
+  pack — without which a past build could not be reconstructed.
+- **The deploy gate fails closed.** A provenance check that *cannot run* now refuses
+  instead of warning and deploying. An artifact AREA never gated does not ship unless
+  asked (`--no-require-provenance` / `AREA_REQUIRE_PROVENANCE=0`); that env var was
+  previously dead code, because `--require-provenance` is a `store_true` whose `False`
+  was passed through explicitly.
+- **High-impact actions are named and approved.** `tools/deploy.sh` no longer forces
+  `--yes` (it silently bypassed the only human gate), the dashboard must carry an
+  explicit `confirm: true`, and the prompt now names the real provider and says when a
+  PRODUCTION database will be created/migrated. A failed datastore provision blocks the
+  deploy (`--allow-provision-failure` to override) instead of shipping an app whose DB
+  isn't there.
+- `docs/ARCHITECTURE.md` states **which agent** each independence layer covers: the
+  PreToolUse hook guards a Claude Code session rooted in the repo, not the autonomous
+  ACP build agent, for which layer 1 is detect-and-revert.
+
+### Boundaries: input screening, factory integrity, timeouts, a kill switch
+Group 3 of the same assessment — the controls that make spending money on real builds
+safe, and the last ones that need no deploy token.
+- **Credentials are screened on the way IN** (`area/screen.py`, stdlib leaf). Every
+  copy that reaches the agent is redacted — an untrusted reference (`_sample/` →
+  `_ui/` → `.area-ui/`), uploads, AI-DLC artifacts — while `_sample/` stays byte-exact
+  and is scanned-and-reported, because it is the evidence the clone was built from.
+  Redactions are counted in `UiEvidence`/the manifest and **printed**, so a false
+  positive is visible instead of quietly corrupting a clone. It carries its own
+  Python-native patterns on purpose: the audit gate's regex is written for grep, and
+  its `[[:space:]]` is a POSIX class that Python's `re` accepts and misreads.
+- **The factory is pinned during a run** (`tools/verify-factory-intact.sh`). Checksums
+  `area/`/`tools/`/`skills/`/`.claude/settings.json` before a build and fails it if they
+  changed — a gate that graded with modified code proves nothing. The lock lives in the
+  OS temp dir, not the workspace the agent can write, and the result is attested as
+  `policy.factoryIntact`. `area doctor` warns when the workspace sits inside the repo.
+- **Nothing runs unbounded any more.** `command_verifier` (the `npm install && build &&
+  test` call), the holdout runner and every wrangler/vercel/psql invocation are capped;
+  a timeout reports as an ordinary failure so the loop feeds it back instead of
+  crashing. `run_until` gained a whole-loop wall clock (`AREA_MAX_WALL_S`, 1h default).
+- **There is a kill switch.** `area._util.kill_process_group` (promoted from
+  `perf._stop`, now the only implementation) kills the process GROUP; dashboard jobs
+  start their own session, and `DELETE /api/jobs/{id}` plus a stop button can cancel
+  one. The cost gate only measures after the fact, so a thrashing build needed this.
+- The agent env scrub wraps the whole exchange, not only `run()`, with a drift guard
+  so a new `send_message` call site cannot fall outside it again.
+- `SECURITY.md` now states the gaps that remain (no sandbox, no egress boundary, no
+  per-agent identity, unsigned attestation) instead of being silent about them, and
+  `docs/RUNNER.md` + `Dockerfile.runner` carry a banner saying the `area runner` they
+  describe does not exist on `main`.
+
+### The outer loop: agent profiles + evals on the factory itself
+Group 4 of the assessment, and the one that turns AREA's own spine on AREA.
+- **`profiles/<kind>.yaml` + `area/profile.py`** — one versioned artifact per kind of
+  agent (16 of them; the obs log's label families are the ground truth). A profile holds
+  only what it controls or identifies: the label globs that attribute a run to it, the
+  prompt symbols whose **source is hashed into a digest**, whether the skills pack is
+  installed, and `agent_iters`/`budget_usd`/`max_iters` defaults used when a caller
+  passes nothing (a CLI flag still wins). Editing a prompt, a skill or a knob produces a
+  new digest. Prompts stay in Python — they are interpolated f-strings with real
+  branching, so hashing their source buys the same attribution as a lossy template
+  rewrite. Every default ships as `null`, so adoption changed no behaviour.
+  `holdout-author` and `holdout-fixer` are deliberately separate profiles in the same
+  module: that separation is the spine.
+- **`obs.log_run` stamps `(profile, profile_digest)` on every run**, from one place — so
+  all 19 agent call sites became attributable without being touched. Before this, 110
+  recorded runs could not be tied to any prompt/skill/knob version.
+- **`area evals [--check] [--strict]`, `make evals`** — grades each kind's *current*
+  version against the previous one on first-try rate, pass rate, avg attempts and avg
+  cost (cost compared relatively, so a cheap stage doubling is caught). A regression
+  fails `--check`; so does an unloadable profile, because that silently stops attributing
+  runs. "Not enough data" passes unless `--strict`. It is **not** in `_GATE_ORDER`, and a
+  test pins that: the gate set decides whether an *app* ships, evals decides whether a
+  change to the *factory* may be promoted.
+- Honest limits, both reported rather than hidden: runs predating profiles carry no
+  digest and are excluded from baselines, and the first report revealed that **5 of 16
+  agent kinds have never run** in 110 recorded runs.
+- `provenance` now records `policy.profiles` — the digest of every profile at build time.
 
 ### Flow B+ — `area adapt` (research-augmented clone & adapt)
 - `area adapt <reference> "<requirement>"`: **research** comparable projects

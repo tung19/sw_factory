@@ -393,6 +393,15 @@ wireDrop('dropIntake','fileIntake','intake');
 
 function gates(){
   const p={tdd:$('tdd').checked, deploy:$('deploy').checked};
+  // Ticking "deploy" means a PRODUCTION deploy will run unattended at the end of the
+  // build, so take the approval here and send it (confirm:true). The server refuses a
+  // deploy job without it rather than assuming --yes. See area/web/jobs.py.
+  if(p.deploy){
+    if(!confirm('Build xong sẽ DEPLOY LÊN PRODUCTION ngay, không hỏi lại.\n\n'
+      +'Nếu app dùng database, bước đó sẽ TẠO + MIGRATE database production.\n\nTiếp tục?')){
+      p.deploy=false; $('deploy').checked=false;
+    } else { p.confirm=true; }
+  }
   if($('clarify').checked) p.clarify=true;
   const exp=$('expected').value.trim(); if(exp) p.expected=exp;
   if($('gateAll').checked) p.all=true;
@@ -486,10 +495,15 @@ async function saveAndBuild(name,target){
 }
 
 async function deployApp(name){
-  if(!confirm('Deploy "'+name+'" lên Cloudflare production?'))return;
+  // This answer IS the production approval, so it has to travel to the server
+  // (confirm:true). The provider is auto-detected, so don't claim "Cloudflare".
+  if(!confirm('Deploy "'+name+'" lên PRODUCTION?\n\n'
+    +'Nếu app dùng database, bước này sẽ TẠO + MIGRATE database production.'))return;
   const r=await fetch('/api/jobs',{method:'POST',headers:{'content-type':'application/json'},
-    body:JSON.stringify({kind:'deploy',params:{name}})});
-  const j=await r.json(); if(j.id){openLog(j.id);refreshJobs();}
+    body:JSON.stringify({kind:'deploy',params:{name,confirm:true}})});
+  const j=await r.json();
+  if(j.id){openLog(j.id);refreshJobs();}
+  else if(j.error){alert('Deploy bị từ chối: '+j.error);}
 }
 
 // ---- pipeline visualization (parsed live from the streamed [area] markers) ----
@@ -616,9 +630,21 @@ function renderJobs(jobs){
     d.innerHTML=`<span class="dot ${j.status}"></span>
       <span class="grow"><b>${j.kind}</b> · ${esc(j.name||'')}<span class="meta">${flags} ${fmtTime(j.started)}</span></span>
       ${j.url?`<a href="${j.url}" target="_blank" onclick="event.stopPropagation()">open ↗</a>`:''}
+      ${j.status==='running'?`<button class="mini" title="dừng job + mọi process con"
+        onclick="event.stopPropagation();cancelJob('${j.id}')">stop</button>`:''}
       <span class="badge">${j.status}</span>`;
     box.appendChild(d);
   });
+}
+
+// The kill switch. A build that thrashes costs real money and the cost gate only
+// measures AFTER the fact, so stopping one has to be possible from here.
+async function cancelJob(jid){
+  if(!confirm('Dừng job này? Toàn bộ process con (npm/node/playwright) sẽ bị kill.'))return;
+  const r=await fetch('/api/jobs/'+jid,{method:'DELETE'});
+  const j=await r.json();
+  if(!r.ok) alert('Không dừng được: '+(j.error||r.status));
+  refreshJobs();
 }
 async function refreshJobs(){const r=await fetch('/api/jobs');renderJobs(await r.json());}
 
