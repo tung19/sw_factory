@@ -16,9 +16,20 @@ Tung's chosen rule. `current` is the profile's digest as it stands right now, so
 moment you edit a prompt the current version has zero measured runs and the verdict is
 `insufficient-data`: the honest answer, and the reason the gate is advisory by default.
 
+HOW IT COMPARES — MATCHED PAIRS, not aggregates. Two versions that ran on different
+work are not comparable: a prompt that looks better may simply have drawn easier
+tasks. So a version is graded only on the tasks BOTH versions ran, the way Harness2's
+"probe" step runs a candidate on the same task under matched settings
+(arXiv:2610.14224). With no shared task the verdict is `unpaired` and nothing is
+certified — the deltas are still reported, labelled confounded, because a regression
+is worth seeing even when it cannot be attributed.
+
 WHAT IT CANNOT DO: attribute history. Runs recorded before profiles existed carry a
 null digest and are reported as `unattributed` rather than silently folded into a
-baseline — we do not know which prompt produced them.
+baseline — we do not know which prompt produced them. Do not try to rescue them as
+one: that ledger ALSO over-reports passes, because `run_once` used to record
+`passed=True` without any verifier (109 of its 110 runs say they passed). Those runs
+can tell you about cost and duration; they cannot tell you about outcomes.
 """
 from __future__ import annotations
 
@@ -61,6 +72,46 @@ def metrics(runs: list[dict[str, Any]]) -> dict[str, Any]:
         if conv else None,
         "avg_cost_usd": round(sum(costed) / len(costed), 4) if costed else None,
     }
+
+
+TASKS_FILE = "evals/tasks.yaml"
+
+
+def load_task_set(root: Optional[Path] = None) -> Optional[set[str]]:
+    """The declared fixed eval set (`evals/tasks.yaml`), or None if absent.
+
+    Names are app names, the key `obs.set_app()` stamps onto every agent run in a
+    pipeline. Returning None means "compare on whatever both versions happened to run",
+    which is weaker but still paired."""
+    import yaml
+
+    from area.paths import REPO
+
+    f = (Path(root) if root else REPO) / TASKS_FILE
+    if not f.is_file():
+        return None
+    try:
+        raw = yaml.safe_load(f.read_text()) or {}
+        names = {str(t["name"]) for t in raw.get("tasks", []) if t.get("name")}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    return names or None
+
+
+def _task_of(run: dict[str, Any]) -> Optional[str]:
+    """Which task a run was on. `obs` stamps the app name, which IS the unit of work
+    for every agent kind. None when nothing was recorded — such a run cannot be paired."""
+    t = run.get("name")
+    return str(t) if t else None
+
+
+def paired_tasks(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> set[str]:
+    """Tasks BOTH sides ran — the only tasks on which two versions are comparable."""
+    return ({t for t in map(_task_of, a) if t} & {t for t in map(_task_of, b) if t})
+
+
+def _on_tasks(runs: list[dict[str, Any]], tasks: set[str]) -> list[dict[str, Any]]:
+    return [r for r in runs if _task_of(r) in tasks]
 
 
 def _runs_for(kind: str, runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -116,8 +167,12 @@ def _delta(metric: str, cur: Optional[float], prev: Optional[float],
 
 
 def compare(kind: str, *, runs: Optional[list[dict[str, Any]]] = None,
-            min_runs: int = MIN_RUNS, root: Optional[Path] = None) -> dict[str, Any]:
-    """Grade this kind's CURRENT profile version against the previous one."""
+            min_runs: int = MIN_RUNS, root: Optional[Path] = None,
+            only_tasks: Optional[set[str]] = None) -> dict[str, Any]:
+    """Grade this kind's CURRENT profile version against the previous one, on the tasks
+    BOTH versions ran. `only_tasks` narrows that further to a declared fixed set
+    (`evals/tasks.yaml`), so the A/B is over known work rather than whatever happened
+    to be built."""
     from area import obs
     from area.profile import load_profile
 
@@ -135,12 +190,22 @@ def compare(kind: str, *, runs: Optional[list[dict[str, Any]]] = None,
     prev_digest = next((d for d, _ in reversed(vers) if d != current_digest), None)
     prev_runs = next((rs for d, rs in vers if d == prev_digest), []) if prev_digest else []
 
+    if only_tasks is not None:
+        cur_runs, prev_runs = _on_tasks(cur_runs, only_tasks), _on_tasks(prev_runs, only_tasks)
+    shared = paired_tasks(cur_runs, prev_runs)
+    # Judge on the shared tasks only. Without them the two versions did different work
+    # and any delta is a difference in the WORK, not in the prompt.
+    cur_cmp = _on_tasks(cur_runs, shared) if shared else cur_runs
+    prev_cmp = _on_tasks(prev_runs, shared) if shared else prev_runs
+
     out: dict[str, Any] = {
         "kind": kind,
         "current_digest": current_digest,
         "previous_digest": prev_digest,
-        "current": metrics(cur_runs),
-        "previous": metrics(prev_runs),
+        "current": metrics(cur_cmp),
+        "previous": metrics(prev_cmp),
+        "comparison": "matched-pairs" if shared else "unpaired",
+        "paired_tasks": sorted(shared),
         "unattributed_runs": unattributed,
         "deltas": {},
     }
@@ -158,12 +223,6 @@ def compare(kind: str, *, runs: Optional[list[dict[str, Any]]] = None,
             + (f"; {unattributed} older run(s) predate profiles and cannot be "
                "attributed" if unattributed else "")))
         return out
-    if len(cur_runs) < min_runs or len(prev_runs) < min_runs:
-        out.update(verdict="insufficient-data", reason=(
-            f"need >={min_runs} runs per version to judge "
-            f"(current {len(cur_runs)}, previous {len(prev_runs)})"))
-        return out
-
     regressions: list[str] = []
     improvements: list[str] = []
     for m in TOLERANCE:
@@ -175,38 +234,72 @@ def compare(kind: str, *, runs: Optional[list[dict[str, Any]]] = None,
             regressions.append(m)
         elif (d > 0) is (m not in _LOWER_IS_BETTER) and d != 0:
             improvements.append(m)
+    # ORDER MATTERS. "They did different work" is a STRUCTURAL failure to compare and
+    # outranks "the sample is small": reporting `insufficient-data` for disjoint tasks
+    # would invite someone to fix it by collecting more unpaired runs, which can never
+    # make the two versions comparable.
+    if not shared:
+        # Report what the numbers say — a regression is worth seeing — but certify
+        # nothing: the two versions did not run the same work.
+        note = ("; the deltas shown are CONFOUNDED by that difference"
+                + (f" and point to a regression in {', '.join(regressions)}"
+                   if regressions else ""))
+        out.update(verdict="unpaired", reason=(
+            "the two versions share no task, so they are not comparable "
+            f"(current ran {sorted({t for t in map(_task_of, cur_runs) if t})}, "
+            f"previous ran {sorted({t for t in map(_task_of, prev_runs) if t})})" + note))
+        return out
+    if len(cur_cmp) < min_runs or len(prev_cmp) < min_runs:
+        out.update(verdict="insufficient-data", reason=(
+            f"need >={min_runs} runs per version to judge on the {len(shared)} shared "
+            f"task(s) (current {len(cur_cmp)}, previous {len(prev_cmp)})"))
+        return out
     if regressions:
-        out.update(verdict="regressed",
-                   reason="worse than the previous version: " + ", ".join(regressions))
+        out.update(verdict="regressed", reason=(
+            f"worse than the previous version on {len(shared)} shared task(s): "
+            + ", ".join(regressions)))
     else:
         out.update(verdict="improved" if improvements else "ok",
-                   reason=("better on: " + ", ".join(improvements)) if improvements
-                   else "within tolerance of the previous version")
+                   reason=((f"better on {len(shared)} shared task(s): "
+                            + ", ".join(improvements)) if improvements
+                           else f"within tolerance over {len(shared)} shared task(s)"))
     return out
 
 
 def check(kinds: Optional[list[str]] = None, *, strict: bool = False,
           runs: Optional[list[dict[str, Any]]] = None,
-          root: Optional[Path] = None) -> tuple[bool, list[dict[str, Any]]]:
+          root: Optional[Path] = None,
+          only_tasks: Optional[set[str]] = None,
+          use_task_set: bool = True) -> tuple[bool, list[dict[str, Any]]]:
     """(ok, results). A regression always fails. A broken profile always fails — it
-    silently stops attributing runs. "insufficient-data"/"no-data" pass unless strict,
-    because a gate that cannot measure must not pretend to have measured."""
+    silently stops attributing runs. "insufficient-data"/"no-data"/"unpaired" pass
+    unless strict, because a gate that cannot measure must not pretend to have
+    measured.
+
+    By default the A/B is restricted to the declared eval set (`evals/tasks.yaml`);
+    `use_task_set=False` compares on any task both versions ran."""
     from area.profile import all_profiles, broken_profiles
 
     broken = broken_profiles(root=root)
     names = kinds or sorted(all_profiles(root=root))
-    results = [compare(k, runs=runs, root=root) for k in names]
+    # Only impose the repo's declared set on the REAL installation. `root` here names
+    # the profiles directory, not a repo root, so it cannot locate evals/tasks.yaml;
+    # and an explicit root means an alternate/synthetic install whose runs have nothing
+    # to do with this repo's eval tasks. Such a caller passes `only_tasks` itself.
+    if only_tasks is None and use_task_set and root is None:
+        only_tasks = load_task_set()
+    results = [compare(k, runs=runs, root=root, only_tasks=only_tasks) for k in names]
     for name, why in broken.items():
         results.append({"kind": name, "verdict": "broken", "reason": why})
     bad = {"regressed", "broken"}
     if strict:
-        bad |= {"insufficient-data", "no-data", "no-profile"}
+        bad |= {"insufficient-data", "no-data", "no-profile", "unpaired"}
     return (not any(r["verdict"] in bad for r in results)), results
 
 
 _ICON = {"ok": "✅", "improved": "🎉", "regressed": "❌", "broken": "💥",
          "insufficient-data": "…", "no-data": "–", "new-profile": "🆕",
-         "no-profile": "?"}
+         "no-profile": "?", "unpaired": "⚖"}
 
 
 def report_text(results: list[dict[str, Any]]) -> str:
@@ -214,6 +307,8 @@ def report_text(results: list[dict[str, Any]]) -> str:
     for r in sorted(results, key=lambda r: (r["verdict"] != "regressed", r["kind"])):
         lines.append(f"  {_ICON.get(r['verdict'], ' ')} {r['kind']:24s} "
                      f"{r['verdict']:18s} {r.get('reason', '')}")
+        if r.get("paired_tasks"):
+            lines.append(f"        on task(s): {', '.join(r['paired_tasks'])}")
         cur, prev = r.get("current"), r.get("previous")
         if r["verdict"] in ("regressed", "improved", "ok") and cur and prev:
             for m, d in (r.get("deltas") or {}).items():

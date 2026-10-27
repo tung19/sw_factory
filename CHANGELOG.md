@@ -3,6 +3,23 @@
 All notable changes to AREA. Format: [Keep a Changelog](https://keepachangelog.com/);
 versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still change.
 
+## Unreleased
+
+### Fixed
+- **`area evals` graded the factory on a constant.** `run_once` recorded `passed=True`
+  although it takes no Verifier, so the ledger said 109 of 110 runs passed. The field is
+  gone; `obs.log_run` already defaulted it to `None` and `evals.metrics` already excluded
+  unjudged runs.
+- **`area evals` compared versions that ran different work.** A version is now graded only
+  on the tasks both versions ran (keyed on the app name `obs.set_app()` stamps); with no
+  shared task the verdict is `unpaired` and nothing is certified. Adopted from Harness²'s
+  "probe" step (arXiv:2610.14224) — and only that: its premise, refinement without
+  ground-truth verifiers, is the opposite of AREA's spine.
+
+### Added
+- `evals/tasks.yaml` — the declared fixed A/B set for a factory change, plus
+  `area evals --tasks` to print it and `--any-task` to compare on any shared task.
+
 ## [Unreleased]
 
 The factory's capabilities to date (grouped; see the git history for detail).

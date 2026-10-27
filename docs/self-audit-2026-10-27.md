@@ -162,10 +162,44 @@ agent-authored `package.json`, with the parent environment intact.
 consulted. `area/verify/nfr.py:173-176` does the same situation correctly (committed +
 unmeasured → `return False`, "not silently passing"). The repo's own rule is nfr's.
 
-### H4 · `run_once` records every run as a pass
+### H4 · `run_once` records every run as a pass — FIXED
 `area/engine/adapter.py:302` — `passed=True` is a literal. `area evals`, the group-4 gate
 on changes to the factory's own prompts and thresholds, grades on `pass_rate` from this
 ledger. The gate is reading a constant.
+
+Worse than a wrong value: `run_once` takes **no Verifier** — it sends one message and runs
+the agent to completion — so the field asserted a verdict nobody measured. Measured
+damage in the live ledger: **110 runs, 109 saying `passed=True`, exactly one `False`.**
+
+**Fix:** `run_once` no longer passes `passed` at all. `obs.log_run` already defaults it to
+`None` and `evals.metrics` already excludes unjudged runs ("None where it cannot be
+computed — never 0"), so the honest ledger needed only the lie removed. A caller that
+does verify afterwards must log its own verdict; it must not be inferred from "the agent
+finished". The 110 legacy runs are untouched and remain excluded from every baseline (they
+carry no profile digest); `evals.py` now records *why* they must not be rescued as one.
+
+### H4b · `area evals` compared versions that ran different work — FIXED
+
+Found while fixing H4, and the reason H4 alone would not have been enough. `compare()`
+took every run of version A and every run of version B and compared the aggregates, with
+no regard for *which task* each run was on. A prompt that looks better may simply have
+drawn easier tasks.
+
+This is exactly what Google Research's Harness² controls for in its "probe" step — it runs
+a candidate harness **on the same task under matched model and environment settings**
+([arXiv:2610.14224](https://arxiv.org/abs/2610.14224)). Adopting that one idea, and
+nothing else from it: Harness²'s core trick is refinement *without ground-truth
+verifiers*, which is the opposite of AREA's spine.
+
+**Fix:** a version is now graded only on the tasks **both** versions ran, keyed on the app
+name `obs.set_app()` stamps. With no shared task the verdict is `unpaired` and nothing is
+certified — deltas are still printed, labelled confounded, because a regression is worth
+seeing even when it cannot be attributed. `unpaired` outranks `insufficient-data` on
+purpose: "they did different work" is structural, and reporting "too small a sample" would
+invite someone to fix it by collecting more unpaired runs, which can never make the two
+comparable. `evals/tasks.yaml` declares the fixed A/B set (the three apps that already
+have independent locked oracles, so "did it work" is not a judgement call), and
+`area evals --tasks` prints it; `--any-task` opts out.
 
 ### H5 · "The builder can never edit the oracle (hook-enforced)" — three unqualified claims
 `README.md:44`, `SECURITY.md:72`, `docs/CASE-STUDY.md:60`. `area/skills.py` installs
