@@ -385,8 +385,11 @@ that do not hold, and S3 ships a closed hole back open.
 
 1. ~~S3, S1, S2, S4~~ — done. ~~H1~~, ~~H2~~, ~~H3~~, ~~H4~~ (+ H4b) — done.
 2. ~~H5~~, ~~H6~~ — done. Neither was the one-liner it looked like: H5's "stronger" fix would have installed a hook that always fails open, and H6's `esc()` does not escape quotes.
-3. **H5, M1–M5** — a docs-truth pass, same shape as the one in PR #34.
-4. The unverified list above — first-hand check before any is treated as real.
+3. **M1–M6** — M1's timeout gap narrowed when H2 swept the same subprocesses; M3's
+   showcase provenance needs a re-gated taskboard run; M6 is a design call for Tung.
+4. The unverified list above — first-hand check before any is treated as real. It is
+   shorter than it was: `ask_cli` and the decoy-holdout item were both promoted to
+   confirmed, fixed, and struck from it.
 
 ## The question this audit leaves behind
 

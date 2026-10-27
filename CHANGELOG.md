@@ -15,13 +15,11 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   shared task the verdict is `unpaired` and nothing is certified. Adopted from Harness²'s
   "probe" step (arXiv:2610.14224) — and only that: its premise, refinement without
   ground-truth verifiers, is the opposite of AREA's spine.
-
 - **The build agent was shipped a stale skills pack.** `vinext-cf-build` was rewritten in
   `.claude/skills/` when `area cf-fix`/`cf-clone` shipped, but `area.skills` installs from
   `skills/`, which still held the older text with zero mentions of either — so the
   automation never reached the builder and the attestation digested the stale copy. The
   maintained text now ships, and a test enforces that any skill in both trees is identical.
-
 - **The build ran with the deploy tokens in its environment.** The scrub covered only
   the agent exchange, so `verify()` — which runs `npm install` on an agent-authored
   `package.json`, then its build and tests — inherited them. `command_verifier` now hands
@@ -30,7 +28,6 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
 - **`perf` failed open on a committed budget.** `return True` ran before `blocking` was
   consulted, so a server that never started passed a committed `perf.yaml`. Fixed in the
   same change, because scrubbing perf's environment makes that failure more likely.
-
 - **Stored-XSS sink on the dashboard.** The deploy URL was scraped from a build log with
   an unbounded `\S*` tail and interpolated into an `href` inside `innerHTML` unescaped, on
   a page that can trigger deploys. Bounded the regex in all three copies, added `escAttr()`
