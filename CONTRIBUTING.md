@@ -23,7 +23,9 @@ upstream fixes with `git subtree pull --prefix=vendor/software-agent-sdk <repo> 
 ```bash
 source .venv/bin/activate
 make check     # ruff (lint) + mypy (strict, whole package) + pytest — what CI runs
-# or individually:  make lint  ·  make typecheck  ·  make test  (569 tests, ~15s)
+# or individually:  make lint  ·  make typecheck  ·  make test  (whole suite, ~20s)
+# No count is quoted on purpose: every such number in this repo had gone stale, and a
+# figure nobody re-measures is worse than none. `make test` prints the real one.
 ```
 
 Lint is `ruff` (pyflakes + syntax). Type-checking is `mypy` with **`strict = true`

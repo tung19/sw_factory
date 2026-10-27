@@ -35,7 +35,8 @@ Built with: `area run "<the requirement>" --name taskboard --target plain --tdd`
 
 | Check | Result |
 |-------|--------|
-| Locked holdout (`npm test`) | ✅ **18/18** — covers AC-1 … AC-12 |
+| Locked holdout (`npx vitest run __tests__/_holdout`) | ✅ **18/18** — covers AC-1 … AC-12 |
+| Everything `npm test` runs | ✅ **73** — the 18 above plus 55 chaos tests; `vitest.config.mts` includes all of `__tests__/**`, so `npm test` has never printed 18 |
 | Holdout integrity | ✅ checksums identical to `holdout.lock` — oracle never touched |
 | `audit` (tsc + `npm audit` + secrets) | ✅ **0 vulnerabilities** |
 | `nfr` (bundle / deps / weight) | ✅ within budget |

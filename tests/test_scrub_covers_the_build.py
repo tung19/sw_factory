@@ -251,3 +251,38 @@ def test_ask_cli_does_not_hand_an_agent_session_the_deploy_tokens(monkeypatch,
     assert not (set(SECRETS) & set(captured["env"]))
     if "HOME" in os.environ:   # the login it actually needs must survive
         assert captured["env"]["HOME"] == os.environ["HOME"]
+
+
+# ---- a directory is not a build ----------------------------------------------
+
+def test_a_leftover_next_dir_is_not_treated_as_a_production_build(tmp_path):
+    """`_pick_start_cmd` chose the production `start` script whenever `.next` merely
+    EXISTED — but `next dev` creates it too. `next start` then exited with "Could not
+    find a production build", which the gate reported as "server booted but never
+    became ready" and skipped: advisory, so green. Measured on the showcase app, whose
+    perf numbers were therefore unreproducible for weeks."""
+    from area.verify.perf import _has_build, _pick_start_cmd
+
+    app = tmp_path
+    (app / "package.json").write_text(
+        '{"scripts":{"dev":"next dev","start":"next start","build":"next build"}}')
+
+    (app / ".next").mkdir()                      # a dev leftover: no BUILD_ID
+    assert _has_build(app / ".next") is False
+    assert _pick_start_cmd(app) == ("npm run dev", "dev")
+
+    (app / ".next" / "BUILD_ID").write_text("abc123")   # a finished build
+    assert _has_build(app / ".next") is True
+    assert _pick_start_cmd(app) == ("npm run start", "start")
+
+
+def test_other_build_dirs_still_count_by_existence(tmp_path):
+    """Only `.next` needs a marker — the others are created by a build, not by a dev
+    server, so requiring a marker there would break them."""
+    from area.verify.perf import _has_build, _pick_start_cmd
+
+    app = tmp_path
+    (app / "package.json").write_text('{"scripts":{"dev":"vite","preview":"vite preview"}}')
+    (app / "dist").mkdir()
+    assert _has_build(app / "dist") is True
+    assert _pick_start_cmd(app) == ("npm run preview", "preview")

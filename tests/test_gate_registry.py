@@ -53,3 +53,20 @@ def test_run_gate_passes_through_per_gate_kwargs(monkeypatch):
     assert CLI._run_gate("cost", "appX", args) is True
     assert seen["name"] == "appX" and seen["strict"] is True
     assert seen["override"] == 7.0 and seen["since"] == 123.0
+
+
+def test_every_gate_has_a_row_in_the_architecture_table():
+    """`docs/ARCHITECTURE.md` claimed "the 9 gates below" above a table with 8 rows —
+    `visual` had none, though the prose named it twice elsewhere. A count in prose goes
+    stale silently; this makes the table itself the thing that has to keep up."""
+    import re
+
+    from area.cli import _GATE_ORDER
+    from area.paths import REPO
+
+    doc = (REPO / "docs" / "ARCHITECTURE.md").read_text()
+    section = doc[doc.index("## The gates"):]
+    section = section[:section.index("The gate set is a single source")]
+    documented = set(re.findall(r"^\| [`/ \w]*`(\w+)`", section, re.M))
+    missing = [g for g in _GATE_ORDER if g not in documented]
+    assert not missing, f"gate(s) with no row in the ARCHITECTURE table: {missing}"

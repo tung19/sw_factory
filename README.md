@@ -22,9 +22,13 @@ area demo taskboard # install → build → serve → opens your browser
 `taskboard` is a **real app the factory built** (multi-page, signup/login with
 hashed passwords, per-user isolation, durable sqlite). It's committed under
 [`examples/taskboard/`](examples/taskboard/) with its **spec, the independent
-locked oracle, and the gate evidence** (18/18 holdout, 0 vulns, e2e on a real
-browser, ~505 req/s). Read its [README](examples/taskboard/README.md) to see the
-oracle-loop end to end.
+locked oracle, and its build attestation**. Re-measured 2026-10-27: 18/18 holdout,
+0 vulns, 15 e2e specs on a real browser, 513 req/s, 55 chaos tests — and one honest
+⚠, the bundle is over the default NFR budget. The committed attestation covers the
+spec digest, the artifact sha and the locked oracle; the rest is a dated measurement,
+with the command for each row in
+[docs/CASE-STUDY.md](docs/CASE-STUDY.md#5--the-gates-evidence). Read the app's
+[README](examples/taskboard/README.md) to see the oracle-loop end to end.
 
 ## Build your own app (the golden path)
 
