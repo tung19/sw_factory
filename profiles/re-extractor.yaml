@@ -1,0 +1,30 @@
+# AREA agent profile — see area/profile.py for what this file controls.
+#
+# This file is DESCRIPTIVE of what the code does today: every `defaults` value is
+# null, so adopting profiles changed no behaviour. Tune a value here and it becomes
+# the default for this kind (a CLI flag still wins), and the change shows up as a new
+# `digest` that `area evals` compares against the previous version's measured runs.
+
+kind: re-extractor
+description: >-
+  Flow B: reverse-engineers a reference app into a spec from evidence only.
+
+# obs labels this kind owns (globs); how a run is attributed to this profile
+labels:
+  - "re"
+
+# dotted names whose SOURCE is hashed into the digest: edit a prompt -> new version
+prompt_sources:
+  - area.re.extract.spec_from_source
+
+skills: none
+
+# applied when the caller passes nothing; null = today's global behaviour
+defaults:
+  agent_iters: null
+  budget_usd: null
+  max_iters: null
+
+notes: |
+  Reads UNTRUSTED reference material, so its inputs are credential-screened
+  (area/screen.py) before they reach it.

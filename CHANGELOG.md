@@ -85,6 +85,34 @@ safe, and the last ones that need no deploy token.
   `docs/RUNNER.md` + `Dockerfile.runner` carry a banner saying the `area runner` they
   describe does not exist on `main`.
 
+### The outer loop: agent profiles + evals on the factory itself
+Group 4 of the assessment, and the one that turns AREA's own spine on AREA.
+- **`profiles/<kind>.yaml` + `area/profile.py`** — one versioned artifact per kind of
+  agent (16 of them; the obs log's label families are the ground truth). A profile holds
+  only what it controls or identifies: the label globs that attribute a run to it, the
+  prompt symbols whose **source is hashed into a digest**, whether the skills pack is
+  installed, and `agent_iters`/`budget_usd`/`max_iters` defaults used when a caller
+  passes nothing (a CLI flag still wins). Editing a prompt, a skill or a knob produces a
+  new digest. Prompts stay in Python — they are interpolated f-strings with real
+  branching, so hashing their source buys the same attribution as a lossy template
+  rewrite. Every default ships as `null`, so adoption changed no behaviour.
+  `holdout-author` and `holdout-fixer` are deliberately separate profiles in the same
+  module: that separation is the spine.
+- **`obs.log_run` stamps `(profile, profile_digest)` on every run**, from one place — so
+  all 19 agent call sites became attributable without being touched. Before this, 110
+  recorded runs could not be tied to any prompt/skill/knob version.
+- **`area evals [--check] [--strict]`, `make evals`** — grades each kind's *current*
+  version against the previous one on first-try rate, pass rate, avg attempts and avg
+  cost (cost compared relatively, so a cheap stage doubling is caught). A regression
+  fails `--check`; so does an unloadable profile, because that silently stops attributing
+  runs. "Not enough data" passes unless `--strict`. It is **not** in `_GATE_ORDER`, and a
+  test pins that: the gate set decides whether an *app* ships, evals decides whether a
+  change to the *factory* may be promoted.
+- Honest limits, both reported rather than hidden: runs predating profiles carry no
+  digest and are excluded from baselines, and the first report revealed that **5 of 16
+  agent kinds have never run** in 110 recorded runs.
+- `provenance` now records `policy.profiles` — the digest of every profile at build time.
+
 ### Flow B+ — `area adapt` (research-augmented clone & adapt)
 - `area adapt <reference> "<requirement>"`: **research** comparable projects
   (`area/research.py` — discover → rank → top-5 → analyse the data dimension →

@@ -378,6 +378,17 @@ def _builder_id(args: argparse.Namespace) -> str:
     return f"area/{getattr(args, 'backend', None) or 'acp'}"
 
 
+def _profile_digests() -> dict[str, str]:
+    """{kind: digest} for every agent profile — "which policy applied" in the
+    reference's sense, and the key a later `area evals` comparison hangs on."""
+    try:
+        from area.profile import all_profiles
+
+        return {k: p.digest for k, p in all_profiles().items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _run_policy(args: argparse.Namespace) -> dict[str, Any]:
     """The run's own configuration, for the attestation. Without this a past build
     can't be reconstructed: the model, strictness and caps that shaped it are gone."""
@@ -392,6 +403,7 @@ def _run_policy(args: argparse.Namespace) -> dict[str, Any]:
         "agentIters": getattr(args, "agent_iters", None),
         "specIters": getattr(args, "spec_iters", None),
         "buildIters": getattr(args, "build_iters", None),
+        "profiles": _profile_digests(),
     }
 
 
@@ -729,6 +741,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ob = sub.add_parser("obs", help="Show cost/latency/outcome summary of agent runs")
     ob.add_argument("--json", action="store_true")
+
+    ev = sub.add_parser("evals", help="Grade a change to the FACTORY: compare each "
+                                      "agent profile's current version against the "
+                                      "previous one (prompts/skills/knobs)")
+    ev.add_argument("kind", nargs="*", help="profile kind(s); default: all")
+    ev.add_argument("--check", action="store_true",
+                    help="exit 1 on a regression (use before promoting a change)")
+    ev.add_argument("--strict", action="store_true",
+                    help="also fail when there is not enough data to judge")
+    ev.add_argument("--json", action="store_true")
 
     tr = sub.add_parser("trace", help="Show an app's end-to-end audit trail "
                                       "(Inception → spec → gates → provenance → deploy)")
@@ -1185,6 +1207,37 @@ def _cmd_e2e(args: argparse.Namespace, expected: str | None) -> int:
     return 0 if ok else 1
 
 
+def _cmd_evals(args: argparse.Namespace, expected: str | None) -> int:
+    """Grade a change to the FACTORY. Not an app gate: `_GATE_ORDER` decides whether
+    an APP may ship, while this decides whether a change to AREA's own prompts,
+    skills or knobs may be promoted — so it is a separate command (and part of
+    `make check`), never a member of the app gate set."""
+    import json as _json
+
+    from area.evals import check, report_text
+
+    ok, results = check(args.kind or None, strict=args.strict)
+    if args.json:
+        print(_json.dumps(results, indent=2))
+    else:
+        from area.profile import all_profiles
+
+        profs = all_profiles()
+        print(f"[area] evals — {len(profs)} agent profile(s); grading the CURRENT "
+              "version of each against the previous one\n")
+        print(report_text(results))
+        unattr = sum(r.get("unattributed_runs") or 0 for r in results)
+        if unattr:
+            print(f"\n[area] {unattr} run(s) predate profiles and carry no digest — "
+                  "they cannot be attributed, so they are excluded from every "
+                  "baseline. New runs are attributed from now on.")
+    if args.check:
+        print(f"\n[area] evals gate: {'✅ no regression' if ok else '❌ REGRESSION'}"
+              + ("" if ok else " — do not promote this change"))
+        return 0 if ok else 1
+    return 0
+
+
 def _cmd_obs(args: argparse.Namespace, expected: str | None) -> int:
     import json as _json
 
@@ -1454,6 +1507,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
+    "evals": _cmd_evals,
     "perf": _cmd_perf, "visual": _cmd_visual, "cost": _cmd_cost,
     "cf-fix": _cmd_cf_fix,
     "cf-clone": _cmd_cf_clone, "research": _cmd_research, "adapt": _cmd_adapt,

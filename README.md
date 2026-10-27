@@ -91,7 +91,8 @@ gate. See [ADR-0001](docs/adr/0001-local-first-byo-everything.md) and
 ```
 area/        the factory: intake · re · research/adapt/seed (Flow B+) · spec · engine (seam to the SDK) · verify (9 gates) · deploy · inception · web (dashboard)
 examples/    REAL apps the factory built (committed: source + spec + locked oracle + evidence)
-tools/       deterministic shell gates (lock/verify-holdout, gate, provenance)
+profiles/    one versioned artifact per agent kind — what `area evals` grades
+tools/       deterministic shell gates (lock/verify-holdout, verify-factory-intact, gate, provenance)
 docs/        ARCHITECTURE, ADRs, UPGRADE-PLAN
 vendor/      the engine (OpenHands SDK), vendored in-tree
 workspace/   default output (apps/<name> + specs/<name>) — override with AREA_WORKSPACE

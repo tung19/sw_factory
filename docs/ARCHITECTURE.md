@@ -51,6 +51,7 @@ Requirement/source
 | Build to green | `area/build/`, `area/engine/adapter.py` | the build agent writes app code until the **locked** holdout passes; it may never edit the holdout |
 | Gates | `area/verify/*` | the 9 gates below; a blocking failure stops the deploy |
 | Provenance | `area/provenance.py` | SLSA-style record {spec digest → gates passed → artifact sha256} so a later deploy can prove the build wasn't modified after gating |
+| Outer loop | `profiles/*.yaml`, `area/profile.py`, `area/evals.py` | every agent run is stamped with the **profile digest** that produced it, so `area evals` can grade a change to AREA's own prompts/skills/knobs against the previous version — the spine applied to the factory itself (see "The outer loop" below) |
 | Deploy | `area/deploy/` | multi-provider (Cloudflare vinext / Vercel / plain), auto-detected; verifies provenance first |
 
 Post-build, a **reality report** ([`area/reality.py`](../area/reality.py)) prints the
@@ -120,6 +121,32 @@ agent** — AREA runs builders in two different contexts, so be precise about wh
    builder) re-adjudicates against the spec and re-locks. This is "evolving tests under
    governance", not tampering. *Covers A and B.*
 
+## The outer loop (grading the factory, not the app)
+
+The gates decide whether an **app** may ship. Nothing decided whether a change to the
+**factory** was an improvement — edit a prompt and no measurement told you, which is the
+one thing AREA's spine forbids, applied to AREA itself.
+
+- **`profiles/<kind>.yaml`** — one versioned artifact per kind of agent (16: builder,
+  holdout-author, holdout-fixer, spec-extractor, …). It declares the obs label globs
+  that attribute a run to it, the prompt symbols whose **source is hashed** into its
+  digest, whether the skills pack is installed, and per-kind `agent_iters` /
+  `budget_usd` / `max_iters` defaults (a CLI flag still wins). Prompts stay in Python:
+  they are interpolated f-strings with branching, and hashing their source gives the
+  same attribution as rewriting them as templates would.
+- **The digest** changes when a prompt, a skill, or a knob changes — that is what makes
+  a "version" of a kind.
+- **`obs.log_run`** stamps `(profile, profile_digest)` on every run from one place, so
+  every agent call site is attributed without being touched.
+- **`area evals` / `make evals`** compares a kind's current version against the previous
+  one (first-try rate, pass rate, avg attempts, avg cost) and fails `--check` on a
+  regression. It is **not** a member of `_GATE_ORDER` — an app must not be blocked
+  because a prompt regressed, and this must not run after every build.
+
+`holdout-author` and `holdout-fixer` are deliberately separate profiles in the same
+module: one writes the oracle, the other fixes code against it, and keeping them apart
+is the independence guarantee.
+
 ## Execution engine
 
 The build/verify agents run through one seam: [`area/engine/adapter.py`](../area/engine/adapter.py).
@@ -165,6 +192,9 @@ area/
   verify/            the 9 gates (holdout, audit, e2e, chaos, nfr, perf, visual, product, cost)
   build/             the build prompts + cf_scaffold.py (deterministic vinext fixes)
   design.py          architect stage → design.md
+  profile.py         one versioned artifact per agent kind (profiles/*.yaml) + digest
+  evals.py           grade a FACTORY change against the previous profile version
+  screen.py          redact credentials in anything untrusted the agent will read
   provenance.py      SLSA-style build attestation + verify-before-deploy
   reality.py         post-build "did we build what you meant?" report
   deploy/            cloudflare.py · vercel.py (auto-detected, provenance-gated)

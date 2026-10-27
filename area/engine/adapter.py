@@ -263,13 +263,33 @@ def _run_retry(conv: Conversation, *, tries: int = 5, base: float = 15.0) -> Non
             _t.sleep(delay)
 
 
+def _profile_defaults(label: str) -> dict[str, Any]:
+    """Per-kind knobs from profiles/<kind>.yaml. Best-effort — a missing or broken
+    profile just means the global defaults apply, exactly as before profiles existed."""
+    try:
+        from area.profile import defaults_for
+
+        return defaults_for(label)[2]
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def run_once(
     agent: AgentBase, workspace: str | Path, message: str, *,
     agent_iters: int | None = None, budget: float | None = None, label: str = "agent",
 ) -> Conversation:
-    """Send one message and run the agent to completion (capped)."""
+    """Send one message and run the agent to completion (capped).
+
+    An unspecified cap falls back to this kind's profile before the global default,
+    so a per-kind budget is set in one reviewable file; an explicit argument (i.e. a
+    CLI flag) always wins."""
     import time as _t
 
+    _d = _profile_defaults(label)
+    if agent_iters is None:
+        agent_iters = _d.get("agent_iters")
+    if budget is None:
+        budget = _d.get("budget_usd")
     t0 = _t.time()
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
@@ -291,7 +311,7 @@ def run_until(
     task: str,
     verify: Verifier,
     *,
-    max_iters: int = 5,
+    max_iters: int | None = None,
     agent_iters: int | None = None,
     budget: float | None = None,
     label: str = "agent",
@@ -305,6 +325,13 @@ def run_until(
     """
     import time as _t
 
+    _d = _profile_defaults(label)
+    if agent_iters is None:
+        agent_iters = _d.get("agent_iters")
+    if budget is None:
+        budget = _d.get("budget_usd")
+    if max_iters is None:
+        max_iters = _d.get("max_iters") or 5
     t0 = _t.time()
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)

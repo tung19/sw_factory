@@ -4,8 +4,7 @@
   Factory: A Reference Architecture"*, Agent Baseline v1, 13 Oct 2026 (Docker, Keycard,
   Barclays, Socket, Secure Theory). Prose and figures CC BY 4.0.
 - **Scope of the assessment:** AREA `main` as of `5be44d2e` (~9.9k LOC in `area/`).
-- **Status:** assessment accepted. Backlog groups **1–2 and 3 implemented**; group 4
-  (profile + evals) open.
+- **Status:** assessment accepted; the whole backlog (groups **1–4**) is implemented.
 
 ## What the reference architecture says
 
@@ -146,15 +145,39 @@ number, not a gate on factory changes. This is the real outer loop and it is mis
     for `--backend llm` init happens during `send_message`, and the posture should not
     depend on which backend is in use.
 
-### Group 4 — a real outer loop · open
-12. **A profile artifact.** An agent run's configuration is assembled from seven places
-    (CLI flags → env → `build_agent` → per-module prompt literals → skills copy → memory
-    injection → ad-hoc MCP config). AREA already has distinct agent kinds: re-extractor,
-    spec-extractor, holdout-author, builder, product-reviewer, healer, researcher. The
-    reference's profile is one versioned artifact per kind, which *"gives the outer loop
-    one thing to improve, evaluate, and roll back"* (p.20).
-13. **Evals for the factory.** Turn `obs.summary()` into the gate on changes to prompts,
-    skills, models and thresholds. Depends on 12.
+### Group 4 — a real outer loop · **done**
+12. **A profile artifact** — `profiles/<kind>.yaml` + `area/profile.py`, one per kind of
+    agent AREA runs. The real count is **16, not the 7 estimated above**: the obs log's
+    label families are the ground truth, and they include distinctions worth keeping —
+    `holdout-author` (writes the oracle) and `holdout-fixer` (fixes code against it) are
+    separate profiles in the same module, because that separation *is* the spine.
+    Each profile holds only what it controls or identifies — the obs label globs that
+    attribute a run to it, the prompt symbols whose **source is hashed**, the skills
+    flag, and `agent_iters`/`budget_usd`/`max_iters` defaults applied when a caller
+    passes nothing (a CLI flag still wins). Prompts stay in Python: they are
+    interpolated f-strings with real branching, so hashing their source buys the same
+    attribution as a lossy rewrite into templates. Every `defaults` value ships as
+    `null`, so adopting profiles changed no behaviour — tuning one is now a one-file,
+    reviewable, rollback-able edit, which is the reference's whole point (p.20).
+    Per-kind model selection (model tiering, `PLAN.md` §10 P5) is the obvious next use
+    of this seam and is deliberately not claimed yet.
+13. **Evals for the factory** — `area/evals.py` + `area evals [--check] [--strict]`,
+    also `make evals`. `obs.log_run` now stamps `(profile, profile_digest)` on **every**
+    run from one place, so all 19 agent call sites are attributed without being touched.
+    `area evals` grades each kind's **current** version against the previous one on
+    first-try rate, pass rate, avg attempts and avg cost (cost relatively, so a cheap
+    stage doubling is caught). A regression fails `--check`; so does a profile file that
+    cannot load, because that silently stops attributing runs. "Not enough data" passes
+    unless `--strict` — a gate that cannot measure must not pretend it did.
+    It is **not** in `_GATE_ORDER` and a test pins that: the gate set decides whether an
+    *app* may ship, evals decides whether a change to the *factory* may be promoted.
+    Honest limit: the 110 runs recorded before profiles existed carry no digest and are
+    reported as `unattributed` rather than folded into a baseline — we do not know which
+    prompt produced them, so every kind starts at "no attributed runs yet".
+    That report also surfaced something worth acting on: **5 of the 16 kinds
+    (`holdout-fixer`, `holdout-readjudicator`, `product-reviewer`, `researcher`,
+    `spec-reviewer`) have never run** in 110 recorded runs — stages that exist but are
+    unexercised, and therefore ungraded by anything.
 
 ## Deliberately out of scope
 

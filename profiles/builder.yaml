@@ -1,0 +1,35 @@
+# AREA agent profile — see area/profile.py for what this file controls.
+#
+# This file is DESCRIPTIVE of what the code does today: every `defaults` value is
+# null, so adopting profiles changed no behaviour. Tune a value here and it becomes
+# the default for this kind (a CLI flag still wins), and the change shows up as a new
+# `digest` that `area evals` compares against the previous version's measured runs.
+
+kind: builder
+description: >-
+  Writes the app from the spec and iterates until the acceptance oracle passes.
+
+# obs labels this kind owns (globs); how a run is attributed to this profile
+labels:
+  - "build:*"
+
+# dotted names whose SOURCE is hashed into the digest: edit a prompt -> new version
+prompt_sources:
+  - area.build.nextjs._prompt_plain
+  - area.build.nextjs._prompt_cloudflare
+  - area.build.nextjs._COMMON_RULES
+  - area.build.nextjs._TDD_PREAMBLE
+  - area.build.nextjs.build_app
+
+skills: all
+
+# applied when the caller passes nothing; null = today's global behaviour
+defaults:
+  agent_iters: null
+  budget_usd: null
+  max_iters: null
+
+notes: |
+  The only kind that gets the skills pack installed into the app, so a skill edit
+  bumps this digest. Biggest cost centre: ~$1.65/run average across all kinds, and a
+  build is several runs.

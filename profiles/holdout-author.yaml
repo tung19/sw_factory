@@ -1,0 +1,33 @@
+# AREA agent profile — see area/profile.py for what this file controls.
+#
+# This file is DESCRIPTIVE of what the code does today: every `defaults` value is
+# null, so adopting profiles changed no behaviour. Tune a value here and it becomes
+# the default for this kind (a CLI flag still wins), and the change shows up as a new
+# `digest` that `area evals` compares against the previous version's measured runs.
+
+kind: holdout-author
+description: >-
+  Authors the locked acceptance oracle from the spec alone, before any code exists.
+
+# obs labels this kind owns (globs); how a run is attributed to this profile
+labels:
+  - "holdout:author*"
+
+# dotted names whose SOURCE is hashed into the digest: edit a prompt -> new version
+prompt_sources:
+  - area.verify.holdout._author_prompt
+  - area.verify.holdout._parity_preamble
+  - area.verify.holdout.author_until
+
+skills: none
+
+# applied when the caller passes nothing; null = today's global behaviour
+defaults:
+  agent_iters: null
+  budget_usd: null
+  max_iters: null
+
+notes: |
+  This kind MUST stay independent of `holdout-fixer` — that separation IS the spine
+  ("never let the same reasoning write AND grade"). Keep them as two profiles even
+  though both live in area/verify/holdout.py.

@@ -153,6 +153,7 @@ SW_Factory/
 | ~~**P3**~~ | ✅ | ~~**Rollback**~~ **XONG**: `area rollback <name>` (wrangler rollback, server-side, human gate) | ⚠️ cần re-deploy thật để validate |
 | **P4** | 🟢 | **E2E/parity test** (Playwright) cho app & clone | parity test pass trên UI thật |
 | **P5** | 🟢 | **Model tiering + observability** (log chi phí/vòng mỗi stage) | thấy được cost/latency mỗi run |
+| **P5b** | 🟡 | **Model tiering THẬT** — nay đã có seam: `profiles/<kind>.yaml` (16 kind) + `area evals` đo được riêng từng kind. Chọn model theo kind là bước kế trên seam đó; profile hiện CHƯA khai `model` (cố ý — artifact chỉ chứa thứ nó thật sự điều khiển, xem `docs/secure-factory-gap-assessment.md` item 12) | mỗi kind chạy model riêng, `area evals` chứng minh không hồi quy |
 | **P6** | 🟢 | **Memory/experience store** (`area/memory`): lưu pattern lỗi→fix, inject lại | lần sau tránh lỗi đã gặp |
 
 **Đã xong P1–P6 + design.** **Rigor thêm:** security/static gate (`area audit`) + chaos/resilience (`area chaos`). **Prod-monitoring + self-heal loop** (`area monitor/status/watch`: probe→heal→rebuild→gate→redeploy) ✅. **Đủ bộ gate:** NFR ✅, **perf/load ✅** (2026-10-20), CI/CD ✅. **Tự động:** `area run ... --all [--deploy]` chạy MỌI gate (verify→audit→e2e→chaos→nfr→perf→product) sau build, chặn deploy nếu fail; audit/chaos tự ghi memory.

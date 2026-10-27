@@ -26,6 +26,32 @@ def set_app(name: Optional[str]) -> None:
     _current_app = name
 
 
+# (kind, digest) per obs label, resolved once per process. Computing a digest imports
+# the prompt-owning modules and hashes their source, so it must not happen per run.
+_profile_cache: dict[str, tuple[Optional[str], Optional[str]]] = {}
+
+
+def profile_of(label: str) -> tuple[Optional[str], Optional[str]]:
+    """(kind, digest) for an obs label — how a run is attributed to the factory
+    configuration that produced it. Without this, 110 recorded runs could not be tied
+    to any prompt/skill/knob version, so a factory change was ungradeable.
+
+    Best-effort: attribution must never break a run, and a label no profile claims
+    simply records nulls."""
+    if label in _profile_cache:
+        return _profile_cache[label]
+    kind: Optional[str] = None
+    dig: Optional[str] = None
+    try:
+        from area.profile import defaults_for
+
+        kind, dig, _ = defaults_for(label)
+    except Exception:  # noqa: BLE001
+        pass
+    _profile_cache[label] = (kind, dig)
+    return kind, dig
+
+
 def cost_of(conv: Any) -> Optional[float]:
     """Best-effort accumulated USD cost of a conversation."""
     try:
@@ -49,6 +75,7 @@ def log_run(
     name: Optional[str] = None,
 ) -> None:
     RUNS.parent.mkdir(parents=True, exist_ok=True)
+    prof_kind, prof_digest = profile_of(label)
     rec = {
         "ts": time.time(),
         "label": label,
@@ -58,6 +85,9 @@ def log_run(
         "outer_iters": outer_iters,
         "passed": passed,
         "backend": backend,
+        # which version of this kind's configuration produced the run (area.profile)
+        "profile": prof_kind,
+        "profile_digest": prof_digest,
     }
     try:
         with RUNS.open("a") as f:
