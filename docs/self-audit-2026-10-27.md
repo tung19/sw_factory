@@ -141,7 +141,7 @@ honest build. Only the end-to-end run caught it.
 
 ## Severity H
 
-### H1 · The autonomous builder is shipped a stale skills pack
+### H1 · The autonomous builder is shipped a stale skills pack — FIXED
 `area/skills.py:15` → `SKILLS_DIR = <repo>/skills`, and `area/provenance.py` `skills_digest()`
 hashes the same directory. `skills/vinext-cf-build/SKILL.md` is **70 lines (2026-10-19)**
 with **zero** mentions of `cf-fix`; `.claude/skills/vinext-cf-build/SKILL.md` is
@@ -150,6 +150,40 @@ with **zero** mentions of `cf-fix`; `.claude/skills/vinext-cf-build/SKILL.md` is
 the changelog records as shipped never reaches the build agent, and the attestation
 digests the stale copy. (`area-oracle-loop` is byte-identical in both trees — the drift
 is specific to the CF skill.)
+
+**Fix:** the maintained text is now shipped, and `tests/test_skills_in_sync.py` makes the
+drift impossible to merge unnoticed — any skill name present in **both** trees must be
+byte-identical, and the interactive-only set (`build-from-docs`, `clone-from-source`,
+which drive the factory and mean nothing inside a generated app) is declared, so adding
+one is deliberate. Same invariant CI already enforces for the two copies of the
+coordinator UI, kept as a test so `make check` catches it locally too.
+
+Two things were checked before copying rather than assumed. First, whether the newer text
+is even appropriate for the in-app agent, since it leads with `area cf-fix <app>` — a
+factory command, and the `area` CLI is only on an in-app agent's PATH when the venv
+happens to be activated. It is appropriate: the rewrite is a superset that keeps the
+mechanism and says so explicitly, and §3/§4 give both the automated and the manual route.
+Only §1 had lost its manual route, so that sentence is restored. Second, that
+`skills_digest()` hashes the shipped tree and is actually sensitive to its content —
+verified by probe, and now pinned by a test.
+
+Only **1 of 16** profile digests changes as a result, which is correct: `builder` is the
+only profile declaring `skills: all`, and `install_skills` is called from exactly one
+place (`area/build/nextjs.py:267`, the builder's path).
+
+### M6 · 15 profiles declare `skills: none` but their agents can still read the pack
+
+Found while fixing H1; recorded rather than silently changed, because the fix is a design
+choice. `install_skills` copies the pack into `<app>/.claude/skills/` during the build and
+the files **stay there**. Every agent that later runs with the app as its working directory
+— `audit --fix`, the chaos author, the e2e author — is a Claude Code session in that
+directory, so it discovers those project skills too, while its profile says `skills: none`.
+
+Consequence for `area evals`: a skill edit changes only `builder`'s digest, so those kinds
+are judged as unchanged across a factory change that can in fact alter their behaviour.
+Either the profiles should record the inherited pack (which makes a skill edit invalidate
+them too — arguably right, possibly over-broad, since the chaos author has no use for the
+CF skill), or the nuance belongs in each profile's notes. Deciding that is Tung's call.
 
 ### H2 · `npm install` / build / test run with cloud tokens present
 `area/engine/adapter.py`: the scrub is inside `_send_and_run`, but `run_until` calls
@@ -299,8 +333,8 @@ that do not hold, and S3 ships a closed hole back open.
 
 ## Remaining order
 
-1. ~~S3, S1, S2, S4~~ — done.
-2. **H1, H2, H3, H4** — one commit each, all small.
+1. ~~S3, S1, S2, S4~~ — done. ~~H4~~ (+ H4b) and ~~H1~~ — done.
+2. **H2, H3** — one commit each, both small.
 3. **H5, M1–M5** — a docs-truth pass, same shape as the one in PR #34.
 4. The unverified list above — first-hand check before any is treated as real.
 
