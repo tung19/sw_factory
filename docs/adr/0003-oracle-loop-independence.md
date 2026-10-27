@@ -17,12 +17,20 @@ Quality is bounded by **the strength + INDEPENDENCE of the oracle**:
 1. Before any implementation exists, a **separate agent** authors acceptance tests
    (the *holdout*) from the spec ONLY, under `__tests__/_holdout/`.
 2. Those tests are **checksum-locked** (`tools/lock-holdout.sh` →
-   `specs/<name>/holdout.lock`). The build agent may never edit them — enforced in
-   code by a PreToolUse hook (`tools/hooks/guard_holdout.py`) and re-checked by
-   `tools/verify-holdout-intact.sh`.
-3. The build loop converges to **"oracle green"** — the locked suite passes AND is
-   confirmed to have actually executed (`area/verify/_runners.py`), not merely
-   exited 0 — then stops.
+   `specs/<name>/holdout.lock`). The build agent may never edit them. Two different
+   layers do the enforcing, and they are not equally strong: a PreToolUse hook
+   (`tools/hooks/guard_holdout.py`) *blocks* the edit, but only in an interactive Claude
+   Code session rooted in this repo — nothing installs it into a generated app, and the
+   guard script is not there either. For the autonomous build agent the enforcement is
+   `tools/verify-holdout-intact.sh` plus the checksum re-check inside every oracle run:
+   detect-and-revert, not prevent.
+3. The build loop converges to **"oracle green"** — the locked suite passes, enough
+   tests ran to cover the AC, AND **the locked files themselves** appear in the test
+   runner's own report of what it executed (`area/verify/_runners.py`), not merely
+   exited 0 — then stops. The last of those is what closes the gap the previous two
+   left: a builder-authored `exclude` in `vitest.config.ts` plus a decoy directory whose
+   name contains the locked path produced exit 0, a plausible passed-count, and zero
+   locked tests run.
 4. If the builder believes a locked test is genuinely wrong, it writes a
    `_CHALLENGE.md`; an **independent verifier** re-adjudicates and re-locks. The
    builder can never silently change the oracle.
