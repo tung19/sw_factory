@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from area._util import safe_name
+from area._util import cmd_timeout_or_none
 from area.engine import scrubbed_env
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
@@ -108,8 +109,10 @@ def measure(app_dir: str | Path, *, run_build: bool = False,
     m: dict[str, float] = {}
     if run_build:
         t0 = time.monotonic()
+        # Capped: `--nfr-build` runs a full production build of the generated app.
         bp = subprocess.run(["bash", "-lc", f"{build_cmd} 2>&1"], cwd=str(app),
-                            capture_output=True, text=True, env=_env())
+                            capture_output=True, text=True, env=_env(),
+                            timeout=cmd_timeout_or_none())
         m["build_ms"] = int((time.monotonic() - t0) * 1000)
         if bp.returncode != 0:
             # don't silently time + measure a FAILED build as if it were fine

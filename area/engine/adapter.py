@@ -34,7 +34,8 @@ from openhands.tools.task_tracker import TaskTrackerTool
 from openhands.tools.terminal import TerminalTool
 
 # stdlib-only leaf, so importing it at module level costs nothing
-from area._util import kill_process_group
+from area._util import CMD_TIMEOUT_DEFAULT as _UTIL_CMD_TIMEOUT_DEFAULT
+from area._util import cmd_timeout, kill_process_group
 
 if TYPE_CHECKING:
     from openhands.sdk.conversation.goal import GoalOutcome
@@ -430,15 +431,13 @@ def run_until(
 # Wall clock for one verifier command (`npm install && build && test`). Read at CALL
 # time, never at import: a value captured at import can't be changed for a running
 # process, which is the stale-oracle trap AREA already hit with gate checkers.
-_CMD_TIMEOUT_DEFAULT = 1800.0
+# Kept as a name for compatibility; the definition lives in area._util so the build,
+# nfr, demo and export commands share exactly this dial.
+_CMD_TIMEOUT_DEFAULT = _UTIL_CMD_TIMEOUT_DEFAULT
 
 
 def _cmd_timeout() -> float:
-    raw = (os.getenv("AREA_CMD_TIMEOUT") or "").strip()
-    try:
-        return float(raw) if raw else _CMD_TIMEOUT_DEFAULT
-    except ValueError:
-        return _CMD_TIMEOUT_DEFAULT
+    return cmd_timeout()
 
 
 # Wall clock for a WHOLE self-correct loop. The hard cost gate is post-hoc — it blocks

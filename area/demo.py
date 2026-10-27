@@ -17,6 +17,7 @@ import webbrowser
 from pathlib import Path
 
 from area.paths import REPO
+from area._util import cmd_timeout_or_none
 
 EXAMPLES = REPO / "examples"
 
@@ -64,7 +65,10 @@ def run_demo(name: str, *, open_browser: bool = True, build: bool = True) -> int
     env["PORT"] = str(port)
 
     def sh(cmd: str) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(["bash", "-lc", f"{cmd} 2>&1"], cwd=str(app), env=env)
+        # Only used for `npm install` and `npm run build` — both finite, so both capped.
+        # (The dev SERVER is started separately and must not be.)
+        return subprocess.run(["bash", "-lc", f"{cmd} 2>&1"], cwd=str(app), env=env,
+                              timeout=cmd_timeout_or_none())
 
     if not (app / "node_modules").is_dir():
         print(f"[area] demo {name}: installing dependencies (one-time)…")

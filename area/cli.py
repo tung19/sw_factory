@@ -138,6 +138,9 @@ def _edit_via_editor(text: str, filename: str) -> str:
         tf.write(text)
         path = tf.name
     try:
+        # DELIBERATELY uncapped: this is the operator's $EDITOR. A wall clock here
+        # would kill their session mid-sentence. Allow-listed in
+        # tests/test_every_build_command_has_a_clock.py.
         subprocess.run([*editor.split(), path])
         with open(path) as f:
             return f.read()
