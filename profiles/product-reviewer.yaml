@@ -29,3 +29,8 @@ defaults:
 notes: |
   Advisory unless --strict. An LLM judge, so promoting it to blocking needs a
   false-positive measurement first — which is exactly what evals are for.
+  WHY IT HAS NO MEASURED RUNS (triaged 2026-10-27): opt-in (`--product`) and never
+  requested. Note the circularity this creates: SECURITY.md and CONTRIBUTING say an
+  LLM-judgement gate may only be promoted to blocking after its false-positive rate is
+  measured — which cannot happen until it runs at all. Running it on a few real builds
+  is the cheapest way to unblock that decision.

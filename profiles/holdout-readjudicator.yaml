@@ -28,3 +28,7 @@ defaults:
 notes: |
   The governed escape hatch (_CHALLENGE.md). Runs rarely, so expect
   'insufficient-data' from evals for a long time.
+  WHY IT HAS NO MEASURED RUNS (triaged 2026-10-27): rare by design — it runs only when
+  a builder writes `_CHALLENGE.md` to contest a locked test. That has never happened.
+  Expect this profile to sit at "insufficient-data" indefinitely; its logic is covered
+  agent-free by tests/test_holdout_lock.py and tests/test_pipeline_tdd.py instead.

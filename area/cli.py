@@ -214,7 +214,9 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
                          "before building, instead of guessing silently")
     sp.add_argument("--no-clarify", dest="clarify", action="store_false",
                     help="skip the clarify gate — guess defaults and build without "
-                         "asking (NOT recommended for a vague requirement)")
+                         "asking (NOT recommended for a vague requirement). The "
+                         "independent spec reviewer still RUNS and records what it "
+                         "finds; use --no-spec-review to skip that too")
     sp.add_argument("--spec-review", dest="spec_review", action="store_true", default=True,
                     help="(DEFAULT) an INDEPENDENT reviewer hunts for material "
                          "ambiguities the spec stage missed, to surface via --clarify")
@@ -626,7 +628,9 @@ def _build_parser() -> argparse.ArgumentParser:
     it.add_argument("--clarify", dest="clarify", action="store_true", default=True,
                     help="(DEFAULT) stop at spec and surface MATERIAL ambiguities before rebuilding")
     it.add_argument("--no-clarify", dest="clarify", action="store_false",
-                    help="skip the clarify gate (guess + rebuild without asking)")
+                    help="skip the clarify gate (guess + rebuild without asking); the "
+                         "independent spec reviewer still runs — --no-spec-review "
+                         "skips that")
     it.add_argument("--spec-review", dest="spec_review", action="store_true", default=True,
                     help="(DEFAULT) independent reviewer flags material ambiguities the spec missed")
     it.add_argument("--no-spec-review", dest="spec_review", action="store_false",

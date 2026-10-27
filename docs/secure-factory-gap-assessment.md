@@ -174,10 +174,28 @@ number, not a gate on factory changes. This is the real outer loop and it is mis
     Honest limit: the 110 runs recorded before profiles existed carry no digest and are
     reported as `unattributed` rather than folded into a baseline — we do not know which
     prompt produced them, so every kind starts at "no attributed runs yet".
-    That report also surfaced something worth acting on: **5 of the 16 kinds
-    (`holdout-fixer`, `holdout-readjudicator`, `product-reviewer`, `researcher`,
-    `spec-reviewer`) have never run** in 110 recorded runs — stages that exist but are
-    unexercised, and therefore ungraded by anything.
+    That report also surfaced something worth acting on: **5 of the 16 kinds have never
+    run** in 110 recorded runs. Triaged 2026-10-27, and each profile's `notes` now
+    records its reason — because "never ran" meant two very different things:
+    - **`spec-reviewer` was a BUG, now fixed.** The pipeline guard was
+      `clarify and spec_review`, so `--no-clarify` silently switched the *independent*
+      spec reviewer off as a side effect — and `--no-clarify` is exactly what you pass
+      for an unattended run, so the review was disabled precisely when nobody was
+      watching. It is now gated on `spec_review` alone: `clarify` decides whether the
+      build STOPS, `spec_review` decides whether the reviewer RUNS. Its findings matter
+      either way, since they land in `assumptions.yaml`, which `area/reality.py` prints
+      and `provenance._MATERIALS` attests. Evidence it truly never ran: 5 spec/intake
+      runs happened *after* the reviewer shipped and obs recorded zero `spec-review`
+      runs — conclusive because `ask_cli` logs in a `finally` and so records failures
+      too.
+    - **The other four are genuinely un-invoked, for four different reasons**, all now
+      written into their profiles: `holdout-fixer` is unreachable on the default path
+      (`--tdd` removes the non-TDD `verify` gate that owns it); `holdout-readjudicator`
+      needs a `_CHALLENGE.md`, which has never happened; `product-reviewer` is opt-in,
+      and its own promotion rule is circular — it may only become blocking after its
+      false-positive rate is measured, which cannot happen until it runs;
+      `researcher`'s live dogfood is deferred pending a funded run. All four are covered
+      agent-free by tests, so what is missing is live exercise, not logic.
 
 ## Deliberately out of scope
 
