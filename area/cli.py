@@ -791,6 +791,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--json", action="store_true")
     ev.add_argument("--tasks", action="store_true",
                     help="show the declared eval set (evals/tasks.yaml) and exit")
+    ev.add_argument("--record", metavar="LESSON", default=None,
+                    help="append an evidence-stamped lesson to the kind's profile "
+                         "(refuses unless there is a measured verdict to attach it to)")
+    ev.add_argument("--notes", action="store_true",
+                    help="show every recorded lesson across all kinds, newest first")
     ev.add_argument("--any-task", action="store_true",
                     help="A/B on any task both versions ran, not just the declared "
                          "eval set (weaker: the task mix is then uncontrolled)")
@@ -1257,9 +1262,23 @@ def _cmd_evals(args: argparse.Namespace, expected: str | None) -> int:
     `make check`), never a member of the app gate set."""
     import json as _json
 
-    from area.evals import TASKS_FILE, check, load_task_set, report_text
+    from area.evals import (
+        TASKS_FILE, check, experience_index, experience_text, load_task_set,
+        record_experience, report_text,
+    )
 
     declared = load_task_set()
+    if args.notes:
+        print(experience_text(experience_index()))
+        return 0
+    if args.record is not None:
+        if len(args.kind or []) != 1:
+            print("[area] evals --record needs exactly one kind: "
+                  "`area evals <kind> --record \"<lesson>\"`")
+            return 2
+        ok, why = record_experience(args.kind[0], args.record)
+        print(f"[area] evals --record: {'✅ ' if ok else '❌ '}{why}")
+        return 0 if ok else 1
     if args.tasks:
         if not declared:
             print(f"[area] evals: no declared eval set ({TASKS_FILE} missing or empty) "

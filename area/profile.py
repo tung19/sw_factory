@@ -55,6 +55,12 @@ class Profile:
     prompt_sources: tuple[str, ...] = ()
     skills: str = "none"              # "all" | "inherited" | "none" — see SKILLS_VALUES
     notes: str = ""
+    # Evidence-gated log of what a measured change to this kind actually did. Appended
+    # only by `area evals --record`, which refuses when there is no decisive verdict —
+    # Harness2's "no entry when the evidence is insufficient" (arXiv:2610.14224), kept
+    # as the one habit of that framework worth adopting into a factory that DOES have an
+    # oracle. Excluded from the digest, so recording does not invalidate what it records.
+    experience: tuple[dict[str, Any], ...] = ()
     agent_iters: Optional[int] = None
     budget_usd: Optional[float] = None
     max_iters: Optional[int] = None
@@ -122,11 +128,22 @@ def _skills_hash() -> str:
         return "unknown"
 
 
+# The fields that make a VERSION. Documentation (`description`, `notes`, `experience`)
+# is excluded on purpose: the digest used to hash the whole raw mapping, so fixing a
+# typo in a profile's prose changed its version and orphaned every run that had been
+# attributed to it. That also made an evidence log impossible to keep in this file — the
+# act of recording what the measurements showed would invalidate the measurements.
+# `labels` IS included: it decides which runs belong to this kind, so changing it changes
+# what is being measured even though it changes no behaviour.
+_DIGEST_FIELDS = ("labels", "prompt_sources", "skills", "defaults")
+
+
 def profile_digest(p: Profile) -> str:
-    """sha256 over the declared config + the hashed source of each prompt + the skills
-    pack. Editing any of them is a new version."""
+    """sha256 over the behavioural config + the hashed source of each prompt + the skills
+    pack. Editing any of those is a new version; editing the prose is not."""
     h = hashlib.sha256()
-    h.update(yaml.safe_dump(p.raw, sort_keys=True).encode())
+    h.update(yaml.safe_dump({k: p.raw.get(k) for k in _DIGEST_FIELDS},
+                            sort_keys=True).encode())
     for dotted in sorted(p.prompt_sources):
         h.update(_source_hash(dotted).encode())
         h.update(b"\0")
@@ -155,6 +172,7 @@ def _from_raw(kind: str, raw: dict[str, Any]) -> Profile:
         prompt_sources=tuple(raw.get("prompt_sources") or ()),
         skills=_checked_skills(kind, raw.get("skills")),
         notes=str(raw.get("notes") or "").strip(),
+        experience=tuple(e for e in (raw.get("experience") or []) if isinstance(e, dict)),
         agent_iters=d.get("agent_iters"),
         budget_usd=d.get("budget_usd"),
         max_iters=d.get("max_iters"),

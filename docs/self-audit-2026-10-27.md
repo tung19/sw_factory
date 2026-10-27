@@ -513,7 +513,11 @@ that do not hold, and S3 ships a closed hole back open.
 2. ~~H5~~, ~~H6~~ — done. Neither was the one-liner it looked like: H5's "stronger" fix would have installed a hook that always fails open, and H6's `esc()` does not escape quotes.
 3. ~~M1~~, ~~M2~~, ~~M3~~, ~~M4~~, ~~M6~~ — done. **M5** (the branch-scoped `area
    runner` entry point) remains.
-4. The unverified list above — first-hand check before any is treated as real. It is
+4. ~~Harness² step (3)~~ — done: the experience log is evidence-gated
+   (`area evals <kind> --record`, `--notes`). Fixing it first required scoping the
+   profile digest to the behavioural fields, because hashing the prose meant writing a
+   lesson down invalidated the measurements it described.
+5. The unverified list above — first-hand check before any is treated as real. It is
    shorter than it was: `ask_cli` and the decoy-holdout item were both promoted to
    confirmed, fixed, and struck from it.
 
