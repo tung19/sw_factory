@@ -75,10 +75,19 @@ def cost_coverage(*, name: Optional[str] = None, since: Optional[float] = None,
     """(priced, total) agent runs in scope.
 
     `build_cost` silently drops rows with no `cost_usd` and returns the sum of the rest,
-    so a partial total was being printed as THE total. Only the ACP backend reports a
-    cost; `ask_cli` (the spec reviewer, the product reviewer) reports none, and so did
-    the older `_Agent` runs — 94 of 204 rows in the live ledger carry no price at all.
-    A gate that can price three of eight runs must say so rather than print "ok".
+    so a partial total was being printed as THE total.
+
+    The unpriced rows are not hypothetical, and the claim is from the SOURCE rather
+    than from a ledger: `ask_cli` logs `cost=None` unconditionally
+    (area/engine/adapter.py:196), and it is what runs the independent spec reviewer
+    (area/spec/review.py:125), the product gate (area/verify/product.py:136) and web
+    intake. So every build that reviews its spec has rows the gate cannot price.
+
+    (An earlier version of this docstring cited "94 of 204 rows in the live ledger".
+    That number was wrong: those rows were written by AREA's own test suite, which
+    appended to the real ledger until `tests/conftest.py` was given a guard. On the
+    110 genuine runs recorded there, coverage was 110/110. The defect is in the
+    arithmetic, not in that ledger — which is why the evidence is a line of code.)
     """
     rows = load_runs() if runs is None else runs
     scope = [r for r in rows
