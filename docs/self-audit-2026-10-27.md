@@ -18,7 +18,8 @@ strict clean (71 files), ruff clean.
 
 > **Status:** S1, S2, S3, S4 are **fixed** — S1+S2 in this branch
 > (`fix/gate-grades-what-it-prints`), S3 on `feat/saas-forward-port` where the code
-> lives. H1–H6 and M1–M5 are open. Each fix section below records what changed.
+> lives. Everything below is now closed except **M5**. Each fix section records what
+> changed.
 
 ## Severity S — a gate says PASS when it should say FAIL
 
@@ -332,7 +333,7 @@ is enough to inject; in Flow B the log carries output from an untrusted referenc
 
 ## Severity M
 
-- **M1 (partly closed by H2) · `SECURITY.md:43` says "*every* agent/build/provider subprocess has a wall clock"** —
+- **M1 · FIXED — `SECURITY.md:43` says "*every* agent/build/provider subprocess has a wall clock"** —
   four do not: `area/verify/nfr.py:106` (the full `--nfr-build`) and
   `area/build/cf_scaffold.py:100,109,296` (incl. `npm run build:cf`, the fallback build).
   The deploy CLIs genuinely are capped; the sentence overstates to "every".
@@ -340,6 +341,29 @@ is enough to inject; in Flow B the log carries output from an untrusted referenc
   `--strict|--e2e`, and the script runs no chaos gate at all, while `CLAUDE.md` step 3
   instructs the builder to pass `--e2e --chaos`. The factory's master rule set names a
   flag its own tool drops.
+
+  **Fixed, and the finding undercounted it.** M1 named two `npm ls` calls; sweeping for
+  the whole class found **six** uncapped `subprocess.run` sites, including the two longest
+  commands in the factory — `cf_scaffold._npm_run` (`npm run build:cf`, the CF fallback
+  build) and `nfr.measure`'s `--nfr-build` full production build — plus `demo.sh` and
+  `export._run`. Two `except OSError` clauses also had to learn about `TimeoutExpired`,
+  which is a `SubprocessError` and would otherwise have escaped the helper that exists to
+  degrade gracefully.
+
+  The default used to live only in the adapter while four other modules had none — which
+  is how the SECURITY.md claim drifted from the code — so it now lives once in
+  `area/_util.cmd_timeout()` and the adapter delegates: one dial (`AREA_CMD_TIMEOUT`),
+  read at call time, `0` to disable. Two sites are deliberately uncapped and allow-listed
+  **with reasons**: the operator's `$EDITOR` (a clock would kill their session
+  mid-sentence) and a dashboard job (it runs as long as the build takes and has an
+  explicit stop button instead — `JobManager.cancel()`).
+
+  `tests/test_every_build_command_has_a_clock.py` parses `area/` with `ast` and fails on
+  any new uncapped call, on a `Popen` with neither a bounded wait nor a cancel path, on a
+  second definition of the dial, and on an allow-list entry whose function no longer
+  exists — a stale allow-list stops protecting anything while still looking like a
+  decision. Verified to go red by removing the `nfr` cap, with an `assert` on the
+  injection so the proof could not be hollow.
 
   **Fixed, and it was worse than a dropped flag.** The same script's e2e gate looked in
   `workspace/apps/$APP` — a repo-relative path — while generated apps live in
@@ -487,8 +511,8 @@ that do not hold, and S3 ships a closed hole back open.
 
 1. ~~S3, S1, S2, S4~~ — done. ~~H1~~, ~~H2~~, ~~H3~~, ~~H4~~ (+ H4b) — done.
 2. ~~H5~~, ~~H6~~ — done. Neither was the one-liner it looked like: H5's "stronger" fix would have installed a hook that always fails open, and H6's `esc()` does not escape quotes.
-3. ~~M2~~, ~~M3~~, ~~M4~~ — done. **M1** (two `cf_scaffold` npm-ls calls still
-   uncapped), and **M5** (the branch-scoped `area runner` entry point) remain; ~~M6~~ done.
+3. ~~M1~~, ~~M2~~, ~~M3~~, ~~M4~~, ~~M6~~ — done. **M5** (the branch-scoped `area
+   runner` entry point) remains.
 4. The unverified list above — first-hand check before any is treated as real. It is
    shorter than it was: `ask_cli` and the decoy-holdout item were both promoted to
    confirmed, fixed, and struck from it.
