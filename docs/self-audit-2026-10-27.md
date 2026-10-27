@@ -325,6 +325,26 @@ is enough to inject; in Flow B the log carries output from an untrusted referenc
   here at all, though CASE-STUDY tabled a perf result — an unknown flag is now a **hard
   error** rather than a silent no-op, and the script states that it covers 5 of the
   registry's 9 gates. Proven live: `--e2e` 15 passed, `--chaos` 55 passed.
+
+  **And the same bug was in two more scripts, both named by CLAUDE.md** — found by asking
+  where else a repo-relative workspace default survived, after Tung asked whether the e2e
+  message needed anything more:
+  - `tools/lock-holdout.sh <name>` (step 1b, the CHECKSUM enforcement the whole method
+    rests on) → *"không thấy holdout — hãy viết test holdout (từ spec) trước"*, while the
+    locked oracle sat in the real app directory.
+  - `tools/verify-holdout-intact.sh <name>` (step 2, "before and after each build
+    attempt") → the same.
+  - `tools/scaffold-app.sh <name>` (step 0) was worse still, because it **writes**: it
+    scaffolded the project into the repo while every later `area` command read from
+    AREA_WORKSPACE — a split brain where the spec docs and the app the engine builds live
+    in different trees.
+
+  All three now resolve the workspace through `area.paths`. The Python callers always
+  passed it explicitly, so the engine was never affected; it was the documented MANUAL
+  path that was broken. `tests/test_tools_find_the_real_workspace.py` pins the round-trip,
+  proves the lock still detects both an edited file and an ADDED one, and fails if the
+  literal `${2:-workspace}` default ever comes back — that guard is what found the third
+  script.
 - **M3 · FIXED — the showcase "gate evidence" was a pre-fix artifact** —
   `examples/taskboard/SPEC/provenance.json` is `area.slsa-like/v1`, `builder:
   "area/openhands-acp"` (the hardcoded literal the changelog says was fixed), and

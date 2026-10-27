@@ -7,7 +7,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="${1:?usage: scaffold-app.sh <app-name> [workspace-dir]}"
-WS="${2:-workspace}"
+# Resolve the workspace AREA actually uses (AREA_WORKSPACE-aware), not the literal
+# `workspace/` inside the repo. This one WRITES, so the old default was worse than the
+# read-only cases: step 0 scaffolded the app into the repo while every later `area`
+# command read from AREA_WORKSPACE — a split brain where the spec docs and the app the
+# engine builds live in different trees.
+_resolve_ws() {
+  if [ -x .venv/bin/python ]; then
+    .venv/bin/python -c 'from area.paths import WORKSPACE; print(WORKSPACE)' 2>/dev/null && return
+  fi
+  printf 'workspace\n'
+}
+WS="${2:-$(_resolve_ws)}"
 ROOT="$WS/apps/$APP"
 mkdir -p "$ROOT/docs" "$ROOT/tasks" "$ROOT/changelog" \
          "$ROOT/__tests__/_holdout" "$ROOT/tests/unit" "$ROOT/tests/integration" "$ROOT/tests/end-to-end"

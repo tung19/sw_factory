@@ -48,6 +48,14 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   AREA_WORKSPACE — so it printed "you haven't written Playwright specs" while 12 of them
   sat in the real app directory. `--chaos` was never parsed at all, `--perf` never ran, an
   unknown flag is now a hard error, and the script states that it covers 5 of the 9 gates.
+- **Three shell tools CLAUDE.md prescribes looked in the wrong place.** They defaulted to
+  a repo-relative `workspace/` while generated apps live in AREA_WORKSPACE, so running
+  them exactly as the rules say failed — and failed by blaming the operator:
+  `lock-holdout.sh` (the checksum enforcement the method rests on) said "hãy viết test
+  holdout trước" with the locked oracle sitting right there, `verify-holdout-intact.sh`
+  said the same, and `scaffold-app.sh` **wrote** the project into the repo while every
+  later `area` command read from AREA_WORKSPACE. All three now resolve through
+  `area.paths`; a test fails if that default ever returns.
 - **`perf` never measured an app whose `.next` came from `next dev`.** It treated the
   directory's existence as "a build exists", chose the production `start` script, and
   reported `next start`'s "Could not find a production build" as "booted but never became
