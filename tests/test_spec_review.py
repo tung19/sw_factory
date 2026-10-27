@@ -153,3 +153,57 @@ def test_jobs_flags_optouts():
     assert "--no-clarify" in off and "--no-spec-review" in off
     absent = J.JobManager._flags({})
     assert not {"--clarify", "--no-clarify", "--spec-review", "--no-spec-review"} & set(absent)
+
+
+# ---------- the reviewer must not be switched off by an unrelated flag ----------
+def test_reviewer_still_runs_with_no_clarify(monkeypatch, tmp_path):
+    """Regression: the guard was `clarify and spec_review`, so --no-clarify silently
+    disabled the INDEPENDENT reviewer as a side effect — and --no-clarify is exactly
+    what you pass for an unattended run, so the review was off precisely when nobody
+    was watching. Evidence it really never ran: 5 spec/intake runs happened after the
+    reviewer shipped and `obs` recorded ZERO `spec-review` runs, even though ask_cli
+    logs in a `finally` and so records failures too.
+
+    `clarify` decides whether the build STOPS. `spec_review` decides whether the
+    reviewer RUNS. Its findings still matter with clarify off: they land in
+    assumptions.yaml, which reality.py prints and provenance attests."""
+    spec = types.SimpleNamespace(features=[1], model_dump=lambda: {})
+    acc = types.SimpleNamespace(criteria=[1], model_dump=lambda: {})
+
+    def fake_extract(req, out, **kw):
+        Path(out).mkdir(parents=True, exist_ok=True)
+        (Path(out) / "assumptions.yaml").write_text("assumptions: []\n")
+        (Path(out) / "spec.yaml").write_text("name: x\n")
+        (Path(out) / "acceptance.yaml").write_text("criteria: []\n")
+        return spec, acc
+
+    monkeypatch.setattr(P, "extract_spec", fake_extract)
+    ran = []
+    monkeypatch.setattr(P, "review_spec", lambda req, sd, **kw: (ran.append(req), [
+        {"question": "who is the user?", "assumption": "admin", "material": True}])[1])
+    built = []
+    monkeypatch.setattr(P, "_build", lambda name, s, a, root, *a2, **k: (
+        built.append(1), P.PipelineResult(name, s, a, root, root, True))[1])
+
+    res = P.run_pipeline("vague thing", name="app", clarify=False, spec_review=True,
+                         workspace=tmp_path)
+    assert ran, "the independent reviewer must still run with --no-clarify"
+    assert built and res.passed, "--no-clarify must still build (not stop)"
+    assert not res.clarify_needed
+    # and the finding is recorded, so reality.py/provenance can surface it
+    txt = (tmp_path / "specs" / "app" / "assumptions.yaml").read_text()
+    assert "who is the user" in txt
+
+
+def test_no_spec_review_is_the_only_way_to_skip_the_reviewer(monkeypatch, tmp_path):
+    spec = types.SimpleNamespace(features=[1], model_dump=lambda: {})
+    acc = types.SimpleNamespace(criteria=[1], model_dump=lambda: {})
+    monkeypatch.setattr(P, "extract_spec", lambda req, out, **kw: (spec, acc))
+    monkeypatch.setattr(P, "review_spec", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("must NOT run when spec_review=False")))
+    monkeypatch.setattr(P, "_build", lambda name, s, a, root, *a2, **k:
+                        P.PipelineResult(name, s, a, root, root, True))
+    # both clarify settings, reviewer off → never runs
+    for clarify in (True, False):
+        assert P.run_pipeline("do x", name="app", clarify=clarify,
+                              spec_review=False, workspace=tmp_path).passed

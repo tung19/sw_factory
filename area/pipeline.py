@@ -211,7 +211,15 @@ def run_pipeline(
         model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
-    if clarify and spec_review:
+    # Deliberately NOT gated on `clarify`. It used to be `clarify and spec_review`,
+    # which meant --no-clarify silently switched OFF the independent reviewer as a
+    # side effect — and --no-clarify is exactly what you pass for an UNATTENDED run,
+    # so the review was disabled precisely when nobody was watching. Its findings are
+    # still worth having with clarify off: they land in assumptions.yaml, which
+    # `area/reality.py` prints after the build and `provenance._MATERIALS` attests.
+    # `clarify` controls whether the build STOPS; `spec_review` controls whether the
+    # reviewer RUNS. Opt out of the reviewer with --no-spec-review.
+    if spec_review:
         _spec_review_step(root, name, requirement, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
@@ -336,7 +344,7 @@ def intake_pipeline(
         max_iters=spec_iters, trace_id=trace_id,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
-    if clarify and spec_review:
+    if spec_review:
         _spec_review_step(root, name, artifacts, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
@@ -428,7 +436,7 @@ def clone_pipeline(
     else:
         print(f"[area]        ui-capture: none ({spec.ui.notes})")
     ui_dir = spec.ui.dir if spec.ui.captured else None
-    if clarify and spec_review:
+    if spec_review:
         _spec_review_step(root, name, source, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:

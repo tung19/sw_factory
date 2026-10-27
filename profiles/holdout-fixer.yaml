@@ -27,3 +27,8 @@ defaults:
 
 notes: |
   Deliberately a different profile from `holdout-author`: same module, opposite role.
+  WHY IT HAS NO MEASURED RUNS (triaged 2026-10-27): unreachable on the DEFAULT path,
+  by design. It only runs inside the non-TDD `verify` gate, and `--tdd` (the default)
+  removes that gate as redundant — the locked holdout is already the build oracle. So
+  this profile covers the non-TDD route, which is real but almost never taken. Not a
+  bug; it does mean the non-TDD path is unexercised in practice.

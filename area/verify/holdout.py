@@ -153,6 +153,15 @@ def _author_prompt(acc_yaml: str, *, tdd: bool, reference: Optional[str] = None)
     )
 
 
+def _app_has_source(app: Path) -> bool:
+    """Is there already an implementation for an author agent to read?"""
+    for sub in ("lib", "app", "src", "components", "server", "pages"):
+        d = app / sub
+        if d.is_dir() and any(d.rglob("*")):
+            return True
+    return False
+
+
 def _has_tests(holdout: Path) -> bool:
     return any(holdout.rglob("*.ts")) or any(holdout.rglob("*.js"))
 
@@ -224,6 +233,23 @@ def _authoring_oracle(
     return (not problems), " ".join(problems)
 
 
+def _locked_state(app: Path) -> str:
+    """"none" | "intact" | "tampered" — via the CANONICAL checker, so this cannot
+    drift from `tools/verify-holdout-intact.sh` or duplicate its hash format."""
+    lf = _lock_file(app)
+    if lf is None or not lf.exists():
+        return "none"
+    script = Path(__file__).resolve().parents[2] / "tools" / "verify-holdout-intact.sh"
+    if not script.exists():
+        return "none"
+    try:
+        r = subprocess.run(["bash", str(script), app.name, str(app.parent.parent)],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return "none"
+    return {0: "intact", 1: "tampered"}.get(r.returncode, "none")
+
+
 def author_until(
     app: Path, acc_yaml: str, *, backend: Backend, model: Optional[str], tdd: bool,
     reference: Optional[str] = None, attempts: int = 4, max_no_progress: int = 2,
@@ -238,6 +264,39 @@ def author_until(
     """
     holdout = app / HOLDOUT_DIR
     holdout.mkdir(parents=True, exist_ok=True)
+
+    # NEVER re-author over an already-locked oracle.
+    #
+    # This used to run unconditionally, and `run_once` fires BEFORE the authoring
+    # oracle is consulted — so `area verify <app>` on a --tdd-built app invoked an
+    # author agent in a directory that already held the locked holdout, let it rewrite
+    # those files, then `_persist_lock` rewrote the lock to match. A strong oracle
+    # authored pre-build FROM THE SPEC ONLY was silently replaced by one authored
+    # post-build against the implementation it could read — and because the lock was
+    # rewritten too, `tools/verify-holdout-intact.sh` then reported
+    # "✅ oracle độc lập được giữ". The tamper detector confirmed independence at the
+    # exact moment independence was lost. Proven with a stubbed agent.
+    #
+    # Replacing a locked oracle has exactly ONE sanctioned path: `readjudicate`, which
+    # clears the lock first after an independent verifier upholds a `_CHALLENGE.md`.
+    state = _locked_state(app)
+    if state == "intact":
+        print(f"[area] holdout: REUSING the locked oracle under {HOLDOUT_DIR}/ "
+              "(authored earlier and checksum-locked — not re-authoring it)")
+        return holdout, _lock(holdout)
+    if state == "tampered":
+        raise RuntimeError(
+            f"{HOLDOUT_DIR}/ no longer matches its lock — the oracle was modified. "
+            "Revert it to the locked version and fix the IMPLEMENTATION instead; if a "
+            f"test is genuinely wrong, write {CHALLENGE_FILE} so an independent "
+            "verifier can re-adjudicate and re-lock it."
+        )
+    if not tdd and _app_has_source(app):
+        print("[area] ⚠ holdout: authoring the oracle AFTER the implementation exists. "
+              "It must import the app's real modules, so it cannot be authored from "
+              "the spec ONLY — a weaker oracle than a --tdd build's pre-locked "
+              "holdout. Prefer `--tdd`.")
+
     label = "holdout:author" + (":tdd" if tdd else "") + (":parity" if reference else "")
     base = _author_prompt(acc_yaml, tdd=tdd, reference=reference)
 

@@ -25,3 +25,13 @@ defaults:
   agent_iters: null
   budget_usd: null
   max_iters: null
+
+notes: |
+  WHY IT HAD NO MEASURED RUNS (triaged 2026-10-27): a BUG, now fixed. The pipeline
+  guard was `clarify and spec_review`, so `--no-clarify` silently switched this
+  reviewer off as a side effect — and `--no-clarify` is what you pass for an
+  unattended run, so the independent review was disabled precisely when nobody was
+  watching. Proof it truly never ran: 5 spec/intake runs happened AFTER the reviewer
+  shipped (2026-10-20 15:20) and obs recorded zero `spec-review` runs, even though
+  `ask_cli` logs in a `finally` and therefore records failures too. Expect runs from
+  now on; `--no-spec-review` is the only way to skip it.
