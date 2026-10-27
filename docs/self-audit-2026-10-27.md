@@ -185,16 +185,49 @@ Either the profiles should record the inherited pack (which makes a skill edit i
 them too — arguably right, possibly over-broad, since the chaos author has no use for the
 CF skill), or the nuance belongs in each profile's notes. Deciding that is Tung's call.
 
-### H2 · `npm install` / build / test run with cloud tokens present
+### H2 · `npm install` / build / test run with cloud tokens present — FIXED
 `area/engine/adapter.py`: the scrub is inside `_send_and_run`, but `run_until` calls
 `verify()` at top level (`run_until+39`, `+60`). `verify()` is what runs the generated
 app's `npm install && build && test` — arbitrary postinstall scripts from an
 agent-authored `package.json`, with the parent environment intact.
 
-### H3 · `perf` fails open on a committed budget
+**Fix — two mechanisms, because there are two shapes.** `command_verifier` launches its
+own subprocess, so it now hands the child a filtered `env=scrubbed_env()`, which needs no
+global mutation: nothing else in this process ever observes the credentials missing, not
+even for the duration of a build. A `Verifier` is an *arbitrary callable* that may launch
+subprocesses inheriting `os.environ` (the holdout oracle does exactly that), so
+`run_until` wraps both `verify()` call sites in `_scrubbed_agent_env()`.
+
+Swept the rest of the same class while here: the holdout oracle's own `subprocess.run`,
+and the three per-module `_env()` helpers (`verify/nfr.py`, `verify/perf.py`,
+`build/cf_scaffold.py`) which were each `dict(os.environ)` and supplied the env for
+`npm run build`, `npm run <script>` and the app server. The two remaining
+`subprocess.run` calls in `holdout.py` run **AREA's own** `verify-holdout-intact.sh`, not
+generated code, and are left alone.
+
+Only the named keys are dropped, which is what makes this safe to apply to the build
+itself: `PATH`, `HOME` and the npm/node configuration survive, verified by a real
+subprocess that resolves `npm` and reports zero matching variables.
+
+**Also confirmed and fixed here: `ask_cli` was unscrubbed** — one of the subagent claims I
+had left in the unverified list. `area/engine/adapter.py:182` spawned `claude -p`, an
+agent session *with tool access*, prompted with content AREA did not write, and passed no
+`env=` at all. It authenticates from the Claude Code login in `HOME`, never from a key in
+the list, so the scrub costs it nothing.
+
+### H3 · `perf` fails open on a committed budget — FIXED
 `area/verify/perf.py`: `if not metrics: … return True` executes **before** `blocking` is
 consulted. `area/verify/nfr.py:173-176` does the same situation correctly (committed +
 unmeasured → `return False`, "not silently passing"). The repo's own rule is nfr's.
+
+**Fixed in the same change as H2, because the two are coupled, not because it was
+convenient.** Scrubbing `perf`'s environment makes an unstartable server *more* likely, and
+the commonest reason `perf` cannot measure is exactly that — so leaving the fail-open in
+place would have converted a server that fails to start into a silent pass on a committed
+budget. Both fail-open paths now respect `blocking`: an unmeasurable committed budget
+fails loudly, and so does a measurement that matched no budgeted metric. Without a
+committed `perf.yaml` and without `--strict` it still skips, so a default nobody asked for
+cannot block a build.
 
 ### H4 · `run_once` records every run as a pass — FIXED
 `area/engine/adapter.py:302` — `passed=True` is a literal. `area evals`, the group-4 gate
@@ -288,7 +321,6 @@ real.
 - Nothing re-verifies the locked oracle after `--tdd`: the `verify` gate is removed while
   `audit --fix` / `chaos` / `e2e` then run agents in the app directory.
 - `readjudicate` may re-lock tampering.
-- `ask_cli` is outside the env scrub.
 - `tools/verify-factory-intact.sh` lives in the tree it protects, with its lock in
   `TMPDIR`, writable by the agent.
 - `.area/provenance.json` is forgeable (already documented honestly in the module docstring).
@@ -333,8 +365,8 @@ that do not hold, and S3 ships a closed hole back open.
 
 ## Remaining order
 
-1. ~~S3, S1, S2, S4~~ — done. ~~H4~~ (+ H4b) and ~~H1~~ — done.
-2. **H2, H3** — one commit each, both small.
+1. ~~S3, S1, S2, S4~~ — done. ~~H1~~, ~~H2~~, ~~H3~~, ~~H4~~ (+ H4b) — done.
+2. **H5, H6** — a docs-truth line and an `esc()` call.
 3. **H5, M1–M5** — a docs-truth pass, same shape as the one in PR #34.
 4. The unverified list above — first-hand check before any is treated as real.
 

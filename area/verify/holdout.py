@@ -32,7 +32,9 @@ from typing import Optional
 import yaml
 
 from area._util import safe_name
-from area.engine import Backend, Verifier, VerifyResult, build_agent, run_once, run_until
+from area.engine import (
+    Backend, Verifier, VerifyResult, build_agent, run_once, run_until, scrubbed_env,
+)
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 from area.verify._runners import assert_locked_files_ran, assert_vitest_ran
 
@@ -392,8 +394,13 @@ def _holdout_oracle(
         try:
             # Capped: an unbounded oracle run can hang the whole build (same gap
             # closed in area.engine.adapter.command_verifier).
+            # `env=scrubbed_env()`: this runs the GENERATED app's test suite (and in
+            # TDD mode its `npm install` + production build), i.e. agent-authored code
+            # with arbitrary postinstall scripts. It must not inherit the deploy/cloud
+            # tokens this process holds.
             proc = subprocess.run(test_cmd, cwd=str(app), capture_output=True,
-                                  text=True, timeout=_TEST_TIMEOUT_S)
+                                  text=True, timeout=_TEST_TIMEOUT_S,
+                                  env=scrubbed_env())
         except subprocess.TimeoutExpired:
             # TimeoutExpired is a SubprocessError, NOT an OSError — without this it
             # would escape the oracle and crash the build loop.

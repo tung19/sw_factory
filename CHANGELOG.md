@@ -22,6 +22,15 @@ versioning: [SemVer](https://semver.org/). Pre-1.0 — the surface may still cha
   automation never reached the builder and the attestation digested the stale copy. The
   maintained text now ships, and a test enforces that any skill in both trees is identical.
 
+- **The build ran with the deploy tokens in its environment.** The scrub covered only
+  the agent exchange, so `verify()` — which runs `npm install` on an agent-authored
+  `package.json`, then its build and tests — inherited them. `command_verifier` now hands
+  the child a filtered `env=`, `run_until` scrubs around an arbitrary verifier, and the
+  holdout oracle, the three per-module `_env()` helpers and `ask_cli` are swept too.
+- **`perf` failed open on a committed budget.** `return True` ran before `blocking` was
+  consulted, so a server that never started passed a committed `perf.yaml`. Fixed in the
+  same change, because scrubbing perf's environment makes that failure more likely.
+
 ### Added
 - `evals/tasks.yaml` — the declared fixed A/B set for a factory change, plus
   `area evals --tasks` to print it and `--any-task` to compare on any shared task.

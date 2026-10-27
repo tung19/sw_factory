@@ -27,12 +27,13 @@ good-sibling-toolchain fallback (vinext-cf-build §2) needs a committed CF sibli
 from __future__ import annotations
 
 import json
-import os
 import re
 import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+
+from area.engine import scrubbed_env
 from typing import Any, Optional
 
 # the two overrides that clear `npm audit --audit-level=high` for a vinext app
@@ -58,7 +59,12 @@ _TOOLCHAIN_DIRS = ("vendor", "node_modules")
 
 
 def _env() -> dict[str, str]:
-    e = dict(os.environ)
+    # Built on `scrubbed_env()`, not `os.environ`: every command this module launches
+    # runs the GENERATED app — agent-authored package.json scripts, so arbitrary
+    # `postinstall`/build code — and must not inherit the deploy/cloud tokens this
+    # process holds. Only those named keys are dropped; npm/node configuration and PATH
+    # are preserved, which is what keeps the build working.
+    e = scrubbed_env()
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
 

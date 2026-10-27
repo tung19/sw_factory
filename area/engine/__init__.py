@@ -5,6 +5,7 @@ Keep all direct SDK imports inside this package so engine churn stays contained.
 from area.engine.adapter import (
     Backend,
     VerifyResult,
+    scrubbed_env,
     Verifier,
     ask_cli,
     build_agent,
@@ -19,6 +20,7 @@ from area.engine.adapter import (
 __all__ = [
     "Backend",
     "VerifyResult",
+    "scrubbed_env",
     "Verifier",
     "ask_cli",
     "build_agent",
