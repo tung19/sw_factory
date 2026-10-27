@@ -92,7 +92,11 @@ def assert_locked_files_ran(report: Path, app: Path,
     directory cannot stand in for a locked file. A missing report fails: the whole
     point is to stop trusting a green exit code.
     """
-    wanted = {p for p in locked if p.endswith((".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"))}
+    # Non-test files are legitimately in the lock (e.g. the holdout's CONTRACT.md), so
+    # only runnable test sources are required to have executed. Covers every extension
+    # vitest will collect, `.mts`/`.cts` included.
+    wanted = {p for p in locked
+              if p.endswith((".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"))}
     if not wanted:
         return True, "no runnable locked test files to confirm"
     ran = executed_test_files(report)
