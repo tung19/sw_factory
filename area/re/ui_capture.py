@@ -19,13 +19,12 @@ from __future__ import annotations
 
 import ipaddress
 import json
-import re
 import shutil
 import socket
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from http.client import HTTPMessage
 from html.parser import HTMLParser
 from pathlib import Path
@@ -34,6 +33,7 @@ from typing import IO, Optional
 import yaml
 
 from area.spec.models import UiEvidence
+from area.ui_tokens import extract_tokens, merge_tokens
 
 _UA = "area-ui-capture"
 _TIMEOUT = 15.0
@@ -124,53 +124,33 @@ def _http_get(url: str, *, max_bytes: int) -> Optional[bytes]:
 
 
 # --------------------------------------------------------------------------- #
-# Token extraction (deterministic, unit-testable)
-# --------------------------------------------------------------------------- #
-_RE_HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-_RE_FUNC_COLOR = re.compile(r"\b(?:rgba?|hsla?)\([^)]*\)", re.IGNORECASE)
-_RE_FONT = re.compile(r"font-family\s*:\s*([^;}{]+)", re.IGNORECASE)
-_RE_VAR = re.compile(r"(--[A-Za-z0-9_-]+)\s*:\s*([^;}{]+)")
-
-
-def extract_tokens(css: str) -> dict[str, list[str]]:
-    """Pull design tokens out of CSS text: colors, font families, CSS variables."""
-    colors: list[str] = _RE_HEX.findall(css) + _RE_FUNC_COLOR.findall(css)
-    fonts: list[str] = []
-    for decl in _RE_FONT.findall(css):
-        for fam in decl.split(","):
-            f = fam.strip().strip("'\"")
-            if f and not f.startswith("var("):
-                fonts.append(f)
-    variables = [f"{n.strip()}: {v.strip()}" for n, v in _RE_VAR.findall(css)]
-    return {
-        "colors": _dedup(c.lower() for c in colors),
-        "fonts": _dedup(fonts),
-        "vars": _dedup(variables),
-    }
-
-
-def _dedup(items: Iterable[str], cap: int = 80) -> list[str]:
-    seen: dict[str, None] = {}
-    for it in items:
-        s = it.strip()
-        if s and s not in seen:
-            seen[s] = None
-        if len(seen) >= cap:
-            break
-    return list(seen)
-
-
-def _merge_tokens(acc: dict[str, list[str]], more: dict[str, list[str]]) -> None:
-    for k, vs in more.items():
-        cur = acc.setdefault(k, [])
-        for v in vs:
-            if v not in cur and len(cur) < 80:
-                cur.append(v)
-
-
-# --------------------------------------------------------------------------- #
 # HTML asset collector (stdlib parser, no bs4 dependency)
 # --------------------------------------------------------------------------- #
+# Tags whose text content is NOT page copy. Without this, an SPA shell's inline
+# <script> bodies counted as "visible text" (found dogfooding: excalidraw.com has
+# `<div id="root"></div>` + 6 inline scripts and still measured 2615 chars of
+# "text", so spa_caveat never fired on the textbook case it exists for).
+_NON_TEXT_TAGS = {"script", "noscript", "template"}
+
+# Below this much server-rendered copy, a page that also ships script is a
+# client-rendered shell: what we captured is partial.
+_SPA_TEXT_FLOOR = 200
+
+
+def looks_like_spa(visible_text: int, scripts: int) -> bool:
+    """Does a plain fetch of this page look like a client-rendered shell?
+
+    Measured on real pages: excalidraw.com 31 chars / 6 scripts (a true SPA),
+    example.com 155 chars / 1 script (its visible content is injected by /s.js),
+    news.ycombinator.com 3609 chars (genuinely server-rendered). A `<div id=root>`
+    mount is a strong hint but NOT required — requiring it missed both real SPAs
+    above — and it must not be sufficient either, or every server-rendered Next.js
+    page (which ships `<div id="__next">` full of content) would be mislabelled.
+    So: little copy + any script.
+    """
+    return scripts > 0 and visible_text < _SPA_TEXT_FLOOR
+
+
 class _AssetCollector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -181,6 +161,7 @@ class _AssetCollector(HTMLParser):
         self.scripts = 0
         self.has_root_mount = False
         self._in_style = False
+        self._quiet = 0  # depth inside _NON_TEXT_TAGS
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         d = {k: (v or "") for k, v in attrs}
@@ -202,15 +183,19 @@ class _AssetCollector(HTMLParser):
                 self.assets.append(d["src"])
         elif tag == "div" and d.get("id", "") in ("root", "__next", "app"):
             self.has_root_mount = True
+        if tag in _NON_TEXT_TAGS:
+            self._quiet += 1
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "style":
             self._in_style = False
+        if tag in _NON_TEXT_TAGS:
+            self._quiet = max(0, self._quiet - 1)  # clamp: malformed markup
 
     def handle_data(self, data: str) -> None:
         if self._in_style:
             self.inline_styles.append(data)
-        else:
+        elif not self._quiet:
             self.visible_text += len(data.strip())
 
 
@@ -281,7 +266,7 @@ def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
             styles.append(_copy_rel(p, sample, ui_dir, "styles"))
             if p.suffix.lower() == ".css":
                 try:
-                    _merge_tokens(tokens, extract_tokens(p.read_text(errors="ignore")))
+                    merge_tokens(tokens, extract_tokens(p.read_text(errors="ignore")))
                 except OSError:
                     pass
 
@@ -336,7 +321,7 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
 
     tokens: dict[str, list[str]] = {}
     for block in parser.inline_styles:
-        _merge_tokens(tokens, extract_tokens(block))
+        merge_tokens(tokens, extract_tokens(block))
 
     base = source
     base_netloc = urllib.parse.urlsplit(source).netloc
@@ -352,7 +337,7 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
         (ui_dir / "styles").mkdir(parents=True, exist_ok=True)
         (ui_dir / "styles" / name).write_bytes(data)
         styles.append(f"styles/{name}")
-        _merge_tokens(tokens, extract_tokens(data.decode("utf-8", errors="replace")))
+        merge_tokens(tokens, extract_tokens(data.decode("utf-8", errors="replace")))
 
     assets: list[str] = []
     for i, src in enumerate(parser.assets[:_MAX_ASSETS]):
@@ -370,8 +355,7 @@ def _capture_from_url(source: str, ui_dir: Path) -> UiEvidence:
         (ui_dir / "assets" / name).write_bytes(data)
         assets.append(f"assets/{name}")
 
-    # SPA heuristic: almost no server-rendered text but a JS mount point + scripts
-    spa = parser.visible_text < 200 and parser.has_root_mount and parser.scripts > 0
+    spa = looks_like_spa(parser.visible_text, parser.scripts)
     return UiEvidence(
         captured=True,
         source_kind="url",

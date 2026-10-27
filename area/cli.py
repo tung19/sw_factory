@@ -28,7 +28,8 @@ if TYPE_CHECKING:
 # from this, so adding a gate can't drift one of them (a lesson from CONTRIBUTING's
 # "a gate change without a test silently drifts"). A test asserts _run_gate covers
 # every name here.
-_GATE_ORDER = ("verify", "audit", "e2e", "chaos", "nfr", "perf", "product", "cost")
+_GATE_ORDER = ("verify", "audit", "e2e", "chaos", "nfr", "perf", "visual",
+               "product", "cost")
 _ALL_GATES_HELP = "run all gates: " + " + ".join(_GATE_ORDER)
 
 
@@ -241,6 +242,15 @@ def _add_common(sp: argparse.ArgumentParser) -> None:
                     help="perf gate: total requests to fire (default 200)")
     sp.add_argument("--perf-concurrency", type=int, default=10,
                     help="perf gate: max requests in flight (default 10)")
+    sp.add_argument("--visual", action="store_true",
+                    help="visual-parity gate (clones): score the clone's LOOK against "
+                         "the reference UI captured in specs/<name>/_ui — design tokens "
+                         "+ DOM skeleton (+ screenshot diff with --visual-pixel) "
+                         "(specs/<name>/visual.yaml blocks; advisory unless --strict)")
+    sp.add_argument("--visual-pixel", action="store_true",
+                    help="visual gate: also boot the clone and screenshot-diff it "
+                         "against the LIVE reference URL (needs a url reference + "
+                         "playwright/chromium; skipped gracefully otherwise)")
     sp.add_argument("--product", action="store_true",
                     help="product-fit gate: an INDEPENDENT reviewer judges whether the "
                          "built app delivers the spec's product + UX/fit gaps "
@@ -361,7 +371,8 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
 
 def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
     from area.verify import (chaos_verify, cost_verify, e2e_verify, holdout_verify,
-                             nfr_verify, perf_verify, product_verify, static_audit)
+                             nfr_verify, perf_verify, product_verify, static_audit,
+                             visual_verify)
 
     kw = dict(backend=args.backend, model=args.model)
     strict = getattr(args, "strict", False)
@@ -380,6 +391,8 @@ def _run_gate(gate: str, name: str, args: argparse.Namespace) -> bool:
         "perf": lambda: perf_verify(name, strict=strict,
                                     total=getattr(args, "perf_requests", 200),
                                     concurrency=getattr(args, "perf_concurrency", 10), **kw),
+        "visual": lambda: visual_verify(
+            name, strict=strict, pixel=getattr(args, "visual_pixel", False), **kw),
         "product": lambda: product_verify(name, strict=strict, **kw),
         "cost": lambda: cost_verify(name, strict=strict,
                                     override=getattr(args, "cost_max", None),
@@ -602,6 +615,17 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="make a default-budget breach BLOCK (exit 1)")
     pf.add_argument("--backend", default="acp", choices=["acp", "llm"])
     pf.add_argument("--model", default=None)
+
+    vi = sub.add_parser("visual", help="Visual-parity gate (clones): score the "
+                                       "clone's look vs the captured reference UI")
+    vi.add_argument("name")
+    vi.add_argument("--pixel", dest="visual_pixel", action="store_true",
+                    help="also boot the clone + screenshot-diff it against the LIVE "
+                         "reference URL (needs playwright/chromium)")
+    vi.add_argument("--strict", action="store_true",
+                    help="make a below-threshold score BLOCK (exit 1)")
+    vi.add_argument("--backend", default="acp", choices=["acp", "llm"])
+    vi.add_argument("--model", default=None)
 
     co = sub.add_parser("cost", help="Hard cost-cap gate: total build spend vs "
                                      "budget (the most-recent build session)")
@@ -1106,6 +1130,21 @@ def _cmd_perf(args: argparse.Namespace, expected: str | None) -> int:
     return 0 if ok else 1
 
 
+def _cmd_visual(args: argparse.Namespace, expected: str | None) -> int:
+    from area.verify import visual_verify
+
+    ok = visual_verify(
+        args.name, backend=args.backend, model=args.model,
+        strict=getattr(args, "strict", False),
+        pixel=getattr(args, "visual_pixel", False),
+    )
+    # "not blocking" rather than "PASS": an advisory breach also returns True, and
+    # claiming PASS right under a "below threshold" line would be a lie.
+    print(f"\n[area] visual gate: {'✅ not blocking' if ok else '❌ BLOCKING'} "
+          f"— {args.name}")
+    return 0 if ok else 1
+
+
 def _cmd_cost(args: argparse.Namespace, expected: str | None) -> int:
     from area.verify import cost_verify
 
@@ -1250,7 +1289,8 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
-    "perf": _cmd_perf, "cost": _cmd_cost, "cf-fix": _cmd_cf_fix,
+    "perf": _cmd_perf, "visual": _cmd_visual, "cost": _cmd_cost,
+    "cf-fix": _cmd_cf_fix,
     "cf-clone": _cmd_cf_clone, "research": _cmd_research, "adapt": _cmd_adapt,
     "monitor": _cmd_monitor, "status": _cmd_status, "watch": _cmd_watch,
 }
