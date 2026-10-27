@@ -466,6 +466,23 @@ def _finish(res: "PipelineResult", args: argparse.Namespace) -> int:
         except Exception as e:  # noqa: BLE001 — a safety net must not break a build
             print(f"[area] cf-fix (pre-gate) skipped (warn): {e}")
 
+    # A clone has a REFERENCE, so "does it look like the original?" has a ground truth
+    # — and leaving that unmeasured is what made a clone's UI "always missing". Gates
+    # are opt-in, so without this the visual gate simply never ran: AREA captured the
+    # reference UI, vendored it, built a gate to score it, and then by default never
+    # scored anything. Forced here (same shape as the e2e rule above), still ADVISORY
+    # unless specs/<name>/visual.yaml commits a floor.
+    if "visual" not in gates:
+        try:
+            from area.verify.visual import has_reference_ui
+
+            if has_reference_ui(res.name):
+                gates.append("visual")
+                print("[area] 🎨 reference UI captured → visual-parity gate added "
+                      "(advisory; commit specs/<name>/visual.yaml to enforce a floor)")
+        except Exception as e:  # noqa: BLE001 — never block a build on gate selection
+            print(f"[area] visual gate auto-select skipped (warn): {e}")
+
     for g in gates:
         print(f"\n[area] === gate: {g} ===")
         ok = _run_gate(g, res.name, args)

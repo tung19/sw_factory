@@ -81,16 +81,29 @@ build to match it.
    holdout test is genuinely wrong, write `__tests__/_holdout/_CHALLENGE.md` and ask Tung;
    never silently change it. "Done" = the reference-grounded suite passes for real.
 
-5. **Grade the LOOK too — the visual-parity gate.** Behavioral green says nothing about
-   whether the clone looks like the original, and what isn't graded isn't guaranteed. Run
-   `area visual <name>` (or `area clone --visual`, `tools/gate.sh` runs it advisory).
+5. **Grade the LOOK too — and the build loop now CONVERGES on it.** Behavioral green
+   says nothing about whether the clone looks like the original, and what isn't graded
+   isn't guaranteed. Two things happen automatically for a clone whose UI was captured:
+   - **The build oracle gains a UI term.** The loop used to converge on
+     `npm install && build && test` alone, so the builder got the vendored reference in
+     `.area-ui/` and a prompt asking it to reproduce — and then no signal at all about
+     the result. Now, once the tests are green, parity is measured and a score below
+     `visual.UI_ORACLE_FLOOR` (0.45) sends the builder back with the missing
+     colors/fonts named. Behaviour stays the hard requirement: a red suite is returned
+     untouched and the look is not even measured. An UNMEASURABLE score never blocks.
+     0.45 answers "did you use the vendored reference at all?", not "is it faithful" —
+     measured: a clone that ignored it scores 0.00, a faithful one 1.00.
+   - **The gate is auto-selected.** Gates are opt-in, so a plain `area clone` used to
+     run no visual gate at all. It is now added whenever `_ui/` was captured.
+
+   Run it standalone with `area visual <name>` (`tools/gate.sh` runs it advisory).
    Three layers, degrading by what the reference allows:
    - **tokens** — reference colors/fonts present in the clone's CSS (any reference kind);
    - **dom** — normalized tag+class skeleton similarity (any reference kind);
    - **pixel** — screenshot diff, **live-URL references only** (we may not boot an
      untrusted repo) and opt-in via `--visual-pixel` / `pixel: true`; needs
      playwright+chromium, and skips with a recorded reason otherwise.
-   It is **ADVISORY by default** — it prints a score and writes `apps/<name>/.visual/`
+   The GATE is **ADVISORY by default** — it prints a score and writes `apps/<name>/.visual/`
    (`score.json` + diff images) without blocking. To make it BLOCK, commit
    `workspace/specs/<name>/visual.yaml` (`min_similarity: 0.85`) or pass `--strict`; a
    committed floor that could NOT be measured fails loudly rather than silently passing.
