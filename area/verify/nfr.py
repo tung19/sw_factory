@@ -18,13 +18,13 @@ nfr.yaml is a flat `metric: number` map, e.g.:
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 from pathlib import Path
 from typing import Any, Optional
 
 from area._util import safe_name
+from area.engine import scrubbed_env
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
 # Shipped build-output dirs to measure (first existing wins). Cache subdirs are
@@ -42,7 +42,12 @@ DEFAULT_BUDGET: dict[str, int] = {
 
 
 def _env() -> dict[str, str]:
-    e = dict(os.environ)
+    # Built on `scrubbed_env()`, not `os.environ`: every command this module launches
+    # runs the GENERATED app — agent-authored package.json scripts, so arbitrary
+    # `postinstall`/build code — and must not inherit the deploy/cloud tokens this
+    # process holds. Only those named keys are dropped; npm/node configuration and PATH
+    # are preserved, which is what keeps the build working.
+    e = scrubbed_env()
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
 

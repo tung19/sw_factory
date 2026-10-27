@@ -179,8 +179,12 @@ def ask_cli(prompt: str, *, model: Optional[str] = None, timeout: float = 180.0,
     ok = False
     try:
         with tempfile.TemporaryDirectory() as d:
+            # env=scrubbed_env(): `claude -p` is an AGENT session with tool access,
+            # prompted with content AREA did not write. It authenticates from the Claude
+            # Code login in HOME, never from a key in this list, so removing the
+            # deploy/cloud tokens costs it nothing.
             proc = subprocess.run(cmd, cwd=d, capture_output=True, text=True,
-                                  timeout=timeout)
+                                  timeout=timeout, env=scrubbed_env())
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip()[:200] or "claude -p failed")
         ok = True
@@ -212,6 +216,24 @@ _AGENT_SECRET_ENV = (
     "VERCEL_TOKEN", "AREA_POSTGRES_URL", "POSTGRES_URL", "DATABASE_URL",
     "KV_REST_API_URL", "KV_REST_API_TOKEN", "AREA_GUI_TOKEN", "GITHUB_TOKEN", "GH_TOKEN",
 )
+
+
+def scrubbed_env(base: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """A copy of the environment with the deploy/cloud secrets removed, for passing as
+    `env=` to a subprocess that runs AGENT-AUTHORED code.
+
+    Preferred over `_scrubbed_agent_env()` wherever a subprocess is being launched: it
+    hands the child a filtered environment instead of mutating `os.environ` in the
+    parent, so there is no window in which this process is missing its own credentials
+    and nothing else in it can observe the removal.
+
+    Only the named keys are dropped — PATH, HOME, npm/node configuration and everything
+    else a build needs are preserved, which is what makes this safe to apply to the
+    build and test commands themselves."""
+    env = dict(os.environ if base is None else base)
+    for k in _AGENT_SECRET_ENV:
+        env.pop(k, None)
+    return env
 
 
 @contextlib.contextmanager
@@ -352,7 +374,15 @@ def run_until(
     first_fail = None
     wall = _wall_timeout()
     for attempt in range(1, max_iters + 1):
-        result = verify()
+        # The verifier runs the GENERATED app: `npm install` executes whatever
+        # `postinstall` the agent wrote, then its build and its tests. The scrub used to
+        # cover only the agent exchange (`_send_and_run`), so those commands inherited
+        # the full environment — cloud tokens included — from this process. A Verifier is
+        # an arbitrary callable and may launch subprocesses that inherit `os.environ`
+        # (the holdout oracle does), so this needs the context manager and not just
+        # `command_verifier`'s `env=`.
+        with _scrubbed_agent_env():
+            result = verify()
         if result.ok:
             passed, used = True, attempt
             break
@@ -373,7 +403,8 @@ def run_until(
             f"--- check output (attempt {attempt}/{max_iters}) ---\n{result.feedback}"
         )
     else:
-        passed = verify().ok
+        with _scrubbed_agent_env():
+            passed = verify().ok
 
     try:
         from area import obs
@@ -434,7 +465,14 @@ def command_verifier(cmd: Sequence[str], *, cwd: str | Path | None = None,
     whole run — with the cost gate unable to help, since it only measures after the
     fact. A timeout is reported as an ordinary failure so `run_until` can feed it back
     to the agent instead of crashing, and the whole process GROUP is killed: the
-    command forks children, and signalling one pid leaves them running."""
+    command forks children, and signalling one pid leaves them running.
+
+    The command runs with the deploy/cloud secrets REMOVED. Every caller of this runs a
+    command out of an AGENT-AUTHORED `package.json` in the generated app — `npm install`
+    (which executes arbitrary `postinstall` scripts), `npm run build`, `npx vitest`,
+    `npx playwright`, `npm audit` — so these subprocesses must not inherit the tokens
+    that can deploy or reach a database. No deploy path uses this function; `area.deploy`
+    makes its own calls and keeps its credentials."""
 
     def _run() -> VerifyResult:
         cap = _cmd_timeout() if timeout is None else timeout
@@ -445,6 +483,7 @@ def command_verifier(cmd: Sequence[str], *, cwd: str | Path | None = None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=scrubbed_env(),
                 start_new_session=True,  # required for the group kill below
             )
         except OSError as e:  # missing binary, bad cwd, etc. — never crash the loop

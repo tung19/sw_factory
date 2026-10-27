@@ -29,7 +29,6 @@ limit); throughput is a floor (ok = value ≥ limit).
 from __future__ import annotations
 
 import json
-import os
 import re
 import socket
 import subprocess
@@ -42,6 +41,7 @@ from threading import Thread
 from typing import Any, Optional
 
 from area._util import kill_process_group, safe_name
+from area.engine import scrubbed_env
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 from area.verify.nfr import parse_budget_yaml  # shared flat-budget parser
 
@@ -63,7 +63,12 @@ _URL_RE = re.compile(r"https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\
 
 
 def _env() -> dict[str, str]:
-    e = dict(os.environ)
+    # Built on `scrubbed_env()`, not `os.environ`: every command this module launches
+    # runs the GENERATED app — agent-authored package.json scripts, so arbitrary
+    # `postinstall`/build code — and must not inherit the deploy/cloud tokens this
+    # process holds. Only those named keys are dropped; npm/node configuration and PATH
+    # are preserved, which is what keeps the build working.
+    e = scrubbed_env()
     e.setdefault("npm_config_cache", str(Path.home() / ".cache" / "npm-area"))
     return e
 
@@ -292,8 +297,17 @@ def perf_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
     budget, blocking = load_budget(name, strict=strict, root=root)
     metrics, skip = measure(app, path=path, total=total, concurrency=concurrency,
                             start_timeout=start_timeout)
+    # A COMMITTED budget (specs/<name>/perf.yaml, or --strict) that could NOT be
+    # measured must not silently pass — it is a guarantee we failed to verify, and the
+    # commonest reason is that the app's server never came up, which is exactly what a
+    # perf gate is supposed to notice. `nfr` already does this; `perf` returned True
+    # before it ever consulted `blocking`.
     if not metrics:
-        print(f"[area] perf: could not measure ({skip}) — skipped")
+        if blocking:
+            print(f"[area] perf: FAIL — a committed budget could not be measured "
+                  f"({skip}) — not silently passing")
+            return False
+        print(f"[area] perf: could not measure ({skip}) — skipped (advisory)")
         return True
 
     server = metrics.get("_server", "?")
@@ -302,7 +316,11 @@ def perf_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
     print(f"[area] perf: {total} reqs @ concurrency {concurrency} via "
           f"`npm run {server}`")
     if not results:
-        print("[area] perf: no budgeted metrics measured — skipped")
+        if blocking:
+            print("[area] perf: FAIL — committed budget(s) "
+                  f"{sorted(budget)} matched no measured metric — not silently passing")
+            return False
+        print("[area] perf: no budgeted metrics measured — skipped (advisory)")
         return True
     for r in results:
         arrow = "≥" if r["floor"] else "≤"
