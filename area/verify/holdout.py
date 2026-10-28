@@ -31,6 +31,8 @@ from typing import Optional
 
 import yaml
 
+from area.paths import TEST_SUFFIXES
+
 from area._util import safe_name
 from area.engine import (
     Backend, Verifier, VerifyResult, build_agent, run_once, run_until, scrubbed_env,
@@ -60,7 +62,7 @@ def _expected_ac_count(holdout: Path) -> int:
     exit that actually ran too few / zero tests."""
     ids: set[str] = set()
     for f in holdout.rglob("*"):
-        if f.is_file() and f.suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs"}:
+        if f.is_file() and f.suffix in TEST_SUFFIXES:
             ids |= set(re.findall(r"\bAC-\d+\b", f.read_text(errors="ignore")))
     return len(ids)
 
@@ -168,7 +170,7 @@ def _app_has_source(app: Path) -> bool:
 
 
 def _has_tests(holdout: Path) -> bool:
-    return any(holdout.rglob("*.ts")) or any(holdout.rglob("*.js"))
+    return any(p.suffix in TEST_SUFFIXES for p in holdout.rglob("*") if p.is_file())
 
 
 def _ac_ids(acc_yaml: str) -> list[str]:
@@ -182,7 +184,7 @@ def _ac_ids(acc_yaml: str) -> list[str]:
 def _test_text(holdout: Path) -> str:
     out = []
     for f in sorted(holdout.rglob("*")):
-        if f.is_file() and f.suffix.lower() in (".ts", ".tsx", ".js", ".jsx"):
+        if f.is_file() and f.suffix.lower() in TEST_SUFFIXES:
             try:
                 out.append(f.read_text(errors="ignore"))
             except OSError:

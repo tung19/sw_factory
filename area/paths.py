@@ -26,6 +26,14 @@ def workspace() -> Path:
 WORKSPACE = workspace()
 
 
+# The test-file extensions the holdout RUNNER accepts. The authoring gate, the AC
+# counter and the provenance oracle-strength field must all agree with it, or a valid
+# `.mjs`/`.tsx` holdout is invisible to one of them (findings B8/B10). One definition.
+TEST_SUFFIXES = frozenset(
+    {".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"}
+)
+
+
 # ---------------------------------------------------------------------------
 # What is NOT a built app's authored source: dependency trees, VCS metadata, and
 # anything a tool or a gate GENERATES. One set, because there were five.
