@@ -210,12 +210,14 @@ def test_adapt_seed_opt_in(tmp_path):
     res = AD.adapt_pipeline(
         "https://ref", "build X", name="app5", requirement_features=[_f("x")],
         reference_features=[], researcher=_researcher(_BRIEF_D), clarify=False,
-        seed_policy=SeedPolicy(attested=True), seed_records=recs, workspace=tmp_path)
+        seed_policy=SeedPolicy(), seed_records=recs, workspace=tmp_path)
     assert res.seed is not None and res.seed.ok and res.seed.seeded == 1
     assert res.seed.records[0] == {"id": 1, "title": "t"}   # PII stripped
 
+    # The authorization attestation gate was removed — seeding (opt-in via a passed
+    # seed_policy) proceeds on the remaining safeguards without an attestation flag.
     res2 = AD.adapt_pipeline(
         "https://ref", "build X", name="app6", requirement_features=[_f("x")],
         reference_features=[], researcher=_researcher(_BRIEF_D), clarify=False,
-        seed_policy=SeedPolicy(), seed_records=recs, workspace=tmp_path)  # not attested
-    assert res2.seed is not None and res2.seed.ok is False   # blocked
+        seed_policy=SeedPolicy(), seed_records=recs, workspace=tmp_path)
+    assert res2.seed is not None and res2.seed.ok and res2.seed.seeded == 1

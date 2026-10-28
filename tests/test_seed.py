@@ -1,26 +1,13 @@
 """area.seed — P4 of `area adapt`: opt-in seed-from-reference safeguards. Pure logic
-(the fetch is upstream/agent) — attestation gate, robots.txt, PII stripping, cap."""
+(the fetch is upstream/agent) — robots.txt, PII stripping, cap."""
 import area.seed as S
-
-
-# ---- attestation gate (opt-in, default OFF) -----------------------------------
-
-def test_seed_blocked_without_attestation():
-    r = S.seed_from_reference("https://ref", [{"a": 1}], S.SeedPolicy())
-    assert r.ok is False and r.seeded == 0
-    assert "attestation" in r.blocked_reason and r.records == []
-
-
-def test_seed_allowed_only_when_attested():
-    assert S.seed_allowed(S.SeedPolicy())[0] is False
-    assert S.seed_allowed(S.SeedPolicy(attested=True))[0] is True
 
 
 # ---- PII stripping + record cap -----------------------------------------------
 
 def test_seed_strips_pii_by_default():
     recs = [{"id": 1, "title": "x", "email": "a@b.c", "name": "Bob"}]
-    r = S.seed_from_reference("ref", recs, S.SeedPolicy(attested=True))
+    r = S.seed_from_reference("ref", recs, S.SeedPolicy())
     assert r.ok and r.seeded == 1
     assert r.records[0] == {"id": 1, "title": "x"}      # email + name dropped
     assert r.skipped_pii_fields == 2
@@ -28,13 +15,13 @@ def test_seed_strips_pii_by_default():
 
 def test_seed_keeps_pii_when_opted_in():
     recs = [{"id": 1, "email": "a@b.c"}]
-    r = S.seed_from_reference("ref", recs, S.SeedPolicy(attested=True, include_pii=True))
+    r = S.seed_from_reference("ref", recs, S.SeedPolicy(include_pii=True))
     assert r.records[0] == {"id": 1, "email": "a@b.c"} and r.skipped_pii_fields == 0
 
 
 def test_seed_caps_record_count():
     recs = [{"id": i} for i in range(50)]
-    r = S.seed_from_reference("ref", recs, S.SeedPolicy(attested=True, max_records=10))
+    r = S.seed_from_reference("ref", recs, S.SeedPolicy(max_records=10))
     assert r.seeded == 10
 
 
@@ -69,6 +56,13 @@ def test_robots_specific_user_agent_group():
 
 
 def test_seed_blocked_by_robots():
-    r = S.seed_from_reference("ref", [{"id": 1}], S.SeedPolicy(attested=True),
+    r = S.seed_from_reference("ref", [{"id": 1}], S.SeedPolicy(),
                               robots_txt="User-agent: *\nDisallow: /\n", path="/data")
     assert r.ok is False and "robots.txt" in r.blocked_reason
+
+
+def test_seed_proceeds_without_attestation():
+    """The authorization attestation gate was removed by request — seeding runs on the
+    remaining safeguards (robots/PII/cap) without a separate 'I have the right' step."""
+    r = S.seed_from_reference("https://ref", [{"id": 1, "title": "x"}], S.SeedPolicy())
+    assert r.ok and r.seeded == 1 and r.records[0] == {"id": 1, "title": "x"}
