@@ -6,6 +6,7 @@ NOT reason. Each reuses logic already in the `area` package where possible.
 
 | Script | Does | Status |
 |---|---|---|
+| `validate-spec.sh <name\|dir> [--strict]` | Check a spec/acceptance pair against the factory's own contract (`validate_cross`) before `--use-spec` — the spec-engine seam | ✅ |
 | `lock-holdout.sh <name>` | Checksum + freeze the holdout oracle (independence) | ✅ |
 | `verify-holdout-intact.sh <name>` | Fail if the holdout changed since locking | ✅ |
 | `gate.sh <name> [--audit --nfr --e2e --chaos]` | Run the verification gates (wraps `area.verify`) | ▶ next |
