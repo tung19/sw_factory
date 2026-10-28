@@ -35,6 +35,16 @@ Write these YAML files in the current working directory, nothing else:
      - id: <kebab-case-id>
        title: <short>
        description: <what the user can do>
+   routes:                # EVERY path the app serves (pages first, then api/actions)
+     - {path: "/", purpose: <what a visitor does here>, kind: page}
+     - {path: "/boards/[id]", purpose: <…>, kind: page}
+     # Required whenever any acceptance criterion visits, requests or redirects to a
+     # page. The independent holdout author NEVER sees spec.yaml — it is given
+     # acceptance.yaml alone — so any path that is not written into a criterion's
+     # given/when/then gets INVENTED by it, and the frozen oracle then asserts against
+     # a URL the app may not serve. So: list the paths here AND quote the literal path
+     # in every criterion that navigates ("when they request /boards/7", not "when they
+     # request a board URL").
    ui:                    # OPTIONAL — the app's intended/observed LOOK (helps parity)
      description: <one line on the visual style / layout, if evident>
      palette: [<notable colors you saw/intend, e.g. "#1e293b", "indigo-600">]

@@ -140,6 +140,14 @@ def spec_from_source(
         "Work out the app's observable FEATURES and DATA MODEL. Capture ONLY what "
         "you can evidence; do not invent scope. Target stack for the clone is "
         "Next.js, so describe features in a framework-neutral way.\n\n"
+        "ROUTES ARE NOT OPTIONAL HERE. Enumerate the paths the reference actually "
+        "serves and put them in `spec.routes` — for a Next.js app they are visible in "
+        "its app/ or pages/ tree, so this is discovery, not invention. Then QUOTE the "
+        "literal path in every acceptance criterion that visits, requests or redirects "
+        "to one. A clone must serve the SAME paths as its reference: a holdout author "
+        "is given acceptance.yaml alone and never sees spec.yaml, so a path you leave "
+        "unwritten is a path it invents, and the frozen oracle will then assert "
+        "parity against a URL neither app serves.\n\n"
         f"{expected_block(expected)}=== OUTPUT FORMAT ===\n{_SCHEMA_GUIDE}"
     )
 

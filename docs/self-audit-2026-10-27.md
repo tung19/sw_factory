@@ -872,6 +872,55 @@ affordability is a direct consequence of M14's single `GENERATED_DIRS` set.
 the real `spec_from_source` with only the agent stubbed, asserts `_sample/` exists *when
 the agent is invoked*, and goes red without the call.
 
+### M16 · the spec had nowhere to record a route map, so clone parity was undetermined — FIXED (2026-10-28)
+
+Found by running Flow B for real — the first time it has been run on this code. It cost
+**$1.76** (one `re` run; the `spec-review` beside it was unpriced, per M7) and it is the
+finding reading could not reach: `Spec`'s field list was read twice today without the
+absence meaning anything, until the clone's own reviewer pointed at the consequence.
+
+The reverse-engineer stage read `taskboard` *well*. It recovered `node:sqlite` with
+`TASKBOARD_DB`, the `scrypt$<saltHex>$<hashHex>` format with a 16-byte salt, and the
+stateless HMAC-SHA256 `sid` cookie with its 7-day max-age. And it recorded **no routes**,
+because `Spec` was `name, summary, stack, entities, features, ui` — there was nowhere to
+put them. Its independent reviewer caught it:
+
+> *"What are the actual URLs? No document states the path of the login page, the
+> boards-list page, or a board-detail page — yet AC-8 and AC-22 require requesting a
+> board URL directly."* → assumption on file: **"Invent a plausible map."**
+
+Measured: the real routes (`/`, `/login`, `/boards`, `/boards/[id]`) were readable from
+`_sample/app/` in a second, and the generated `acceptance.yaml` quoted **zero** paths —
+**15 of its 24 criteria navigate somewhere without naming where.**
+
+**Why this is an oracle defect, not a documentation gap.** `author_until` is handed
+`acc_yaml` **alone** and never sees `spec.yaml`. A path absent from the criteria is a path
+the holdout author invents — and then the suite is checksum-frozen, the clone is built to
+satisfy it, `verify-holdout-intact.sh` reports the oracle intact, and the whole apparatus
+asserts parity against a URL neither app serves. Independent, frozen, and measuring
+something that does not exist: M11's class, reached by a different road.
+
+Same shape as the missing `ui` field that #27/#28 added after "the clone's UI is wrong" —
+RE was capturing features and the data model, and everything else had no home.
+
+The fix has two halves, because one would not work:
+
+1. **`Route` + `Spec.routes`** — the structured record of what the app serves. Optional,
+   so the four existing apps still load.
+2. **The criteria must quote the literal path**, since that is the only thing the holdout
+   author reads. Both the shared `_SCHEMA_GUIDE` and the RE prompt now say so, and the RE
+   prompt adds that for a clone this is *discovery, not invention* — a Next.js app's paths
+   are visible in its `app/` tree.
+
+`validate_cross` enforces the fatal case: a spec whose criteria navigate while declaring
+**no** routes is rejected, so the spec stage iterates instead of handing the oracle a
+guess. A single prose-only criterion is reported by `routes_unquoted` but not fatal —
+blocking each one would be a false block, as a sibling criterion often pins the path.
+
+15 tests, including the navigation verbs (a missed phrasing brings the hole straight
+back) and the four real routes as a fixture, so the test is the measurement rather than an
+invention. Run against the live clone spec, the new verdict fires exactly as described.
+
 ## Scores
 
 | Dimension | Score | Why |
