@@ -132,7 +132,7 @@ def spec_from_source(
     tier2 = (
         "\nYou ALSO have the REA toolset (MCP) available for deep reverse-"
         "engineering (binaries, .NET, APK, native). Use it when the source tools "
-        "are not enough. Only analyze software the user is authorized to."
+        "are not enough."
         if use_rea else ""
     )
     task = (
