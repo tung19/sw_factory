@@ -172,6 +172,20 @@ def deploy_with_gate(
             print(f"[area] ❌ provenance MISMATCH — artifact changed after gating:\n{detail}")
             print("[area] refusing deploy — re-run the build+gates to re-attest, then deploy.")
             return False, None
+        elif status == "stale-digest":
+            # NOT drift: the attestation is intact, but this AREA computes the digest
+            # over a different set of files, so the two numbers answer different
+            # questions. Refusing absolutely would let an AREA upgrade brick every
+            # existing app's deploy with no way out, so it takes the same override as
+            # an unattested build — and an explicit branch, because leaning on `else`
+            # for a status nobody anticipated is how fail-open creeps back in.
+            print(f"[area] ⚠ provenance UNVERIFIABLE — {detail}")
+            if require_provenance:
+                print("[area] refusing deploy — re-run the build+gates to re-attest "
+                      "under the current digest definition, or pass "
+                      "--no-require-provenance to ship an unverified build "
+                      "deliberately. This is NOT evidence of tampering.")
+                return False, None
         else:  # absent
             print(f"[area] ⚠ provenance: {detail}")
             if require_provenance:

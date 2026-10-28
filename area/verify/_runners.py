@@ -79,6 +79,20 @@ def executed_test_files(report: Path) -> Optional[set[str]]:
     return out
 
 
+
+# `it(` / `test(` / `describe(` is how vitest learns a file has tests. A file holding
+# none is a helper, and a runner that collects it reports "no test suite found" — a
+# failure for having obeyed the lock. Unreadable reads as "registers tests", so a file
+# we cannot inspect is still REQUIRED to run: the safe direction.
+_REGISTERS = re.compile(r"\b(it|test|describe)\s*(\.\w+)?\s*\(")
+
+
+def _registers_tests(path: Path) -> bool:
+    try:
+        return bool(_REGISTERS.search(path.read_text(errors="ignore")))
+    except OSError:
+        return True
+
 def assert_locked_files_ran(report: Path, app: Path,
                             locked: Iterable[str]) -> tuple[bool, str]:
     """(ok, why): every locked test file must appear in the runner's own report of
@@ -95,8 +109,23 @@ def assert_locked_files_ran(report: Path, app: Path,
     # Non-test files are legitimately in the lock (e.g. the holdout's CONTRACT.md), so
     # only runnable test sources are required to have executed. Covers every extension
     # vitest will collect, `.mts`/`.cts` included.
-    wanted = {p for p in locked
-              if p.endswith((".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"))}
+    #
+    # And a locked module that REGISTERS NO TESTS cannot be required to have executed.
+    # Holdout authors write shared helpers (`_source-scan.ts`), and demanding those
+    # appear in the runner's report cost a real build an entire extra attempt: the
+    # builder had to widen `include` to `__tests__/**/*.ts` and add
+    # `passWithNoTests: true` just to satisfy it. That tax is paid by every `--tdd`
+    # build, and it was the first lesson the experience store ever harvested
+    # (2026-10-28).
+    #
+    # This does not weaken the guard it exists for. The attack is a builder EXCLUDING
+    # or shadowing locked test files so a green exit code hides an oracle that never
+    # ran; a file's test registrations are part of its checksum-locked bytes, so a
+    # locked test file cannot be made to look test-free without breaking the lock.
+    runnable = {p for p in locked
+                if p.endswith((".ts", ".tsx", ".mts", ".cts",
+                               ".js", ".jsx", ".mjs", ".cjs"))}
+    wanted = {p for p in runnable if _registers_tests(app / p)}
     if not wanted:
         return True, "no runnable locked test files to confirm"
     ran = executed_test_files(report)

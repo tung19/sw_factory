@@ -723,7 +723,7 @@ field, and that is stated rather than papered over.
 
 16 tests, 4 shown to go red when reverted.
 
-### M12 · the preview step mutates the app AFTER provenance attests it — OPEN
+### M12 · the preview step mutates the app AFTER provenance attests it — FIXED (2026-10-28)
 
 Same build, same minute. `provenance.json` was written at **09:13:39**; AREA then ran
 `npm run dev` to open a preview, which regenerated `next-env.d.ts` at **09:13:40**. The
@@ -736,10 +736,68 @@ to fail on re-run, which is how M11 was found at all.
 
 This is the class #34 already fixed once (`harden_cf_app` mutated the app after
 `verify_provenance`), recurring through a path nobody considered: the **post-build
-preview**. The narrow fix is to run the preview before provenance is written, or outside
-the build path entirely. Left open deliberately — the right answer may be that nothing in
-the build path may touch the app after the digest is taken, which is a rule rather than a
-patch.
+preview**.
+
+**Fixed as a rule, not as a patch about the preview: an attestation describes an
+ARTIFACT, not a moment.** `#34`'s answer was "mutate before the gates, and keep a
+tripwire that refuses if anything changed" (`deploy._settle_before_attesting`). That is
+right for `harden_cf_app`, whose bytes SHIP — but wrong here, because it would refuse
+every app whose preview was ever opened. The preview's writes are toolchain-generated or
+runtime state and ship nowhere, so they are out of the digest:
+`_SKIP_FILES` + `_SKIP_SUFFIXES` exclude `next-env.d.ts`, `*.tsbuildinfo`,
+`.eslintcache`, `*.log` and the SQLite family (`*.db`, `-wal`, `-shm`, `*.sqlite*`).
+Every authored file is still digested, including a hand-written `types.d.ts` — only
+`next-env.d.ts` is excluded by name, so "any `.d.ts`" never becomes a blind spot.
+
+The wider case this closes was not in the original finding and is worse: **`expenses`
+persists to `./data/expenses.db`, so a human clicking through the preview AREA itself
+opens and saving one row would have made the build undeployable.** Every app that stores
+data had that.
+
+**And fixing it exposed a defect in the fix.** Widening the exclusions changes what the
+digest asks, so every attestation recorded under the old rules stopped comparing — and
+`verify_provenance` reported that as *"artifact digest CHANGED since it was gated"*,
+i.e. accused the operator of drift for an upgrade AREA performed. Measured honestly: of
+the four attested apps, three had already drifted for their own reasons and **only
+`fb_incept` was validly attested and invalidated by this change** — but the wrong-reason
+bug would recur on every future edit of the list. So the algorithm is versioned
+(`DIGEST_VERSION`, recorded as `product.digestVersion`), and a version mismatch returns
+a distinct **`stale-digest`** status that still fails closed while saying what actually
+happened. `deploy_with_gate` gets an explicit branch for it rather than inheriting the
+`absent` one, because leaning on `else` for a status nobody anticipated is how fail-open
+creeps back. A v1 record whose number still MATCHES is reported `ok` — the bytes are
+provably unchanged whatever the definition, and refusing would be a false alarm. That
+last case was found by a test of mine failing.
+
+`expenses` itself is NOT repaired by this: its AC-14 test greps the app's own files, and
+`next-env.d.ts` is still on disk. That criterion is a genuinely invalid locked oracle, so
+per CLAUDE.md it is not edited — `__tests__/_holdout/_CHALLENGE.md` states the case in
+both directions and **awaits Tung**. Writing it does not disturb the lock
+(`verify-holdout-intact.sh`: intact), which is the first real use of that escape hatch.
+
+### M13 · the oracle required files that register no tests to have "run" — FIXED (2026-10-28)
+
+`assert_locked_files_ran` (the S4 fix) required **every** locked `.ts` file to appear in
+the runner's report. Holdout authors legitimately lock shared helpers — `expenses` has
+`_source-scan.ts` — and a runner that collects one reports "no test suite found in
+file": a failure for having obeyed the lock. Satisfying it cost a real build **an entire
+extra attempt**, which is real money, and every `--tdd` build paid it.
+
+Now only locked files that **register** a test (`it(`/`test(`/`describe(`) must have
+executed. This does not weaken the guard S4 exists for: the attack is a builder
+excluding or shadowing locked test files so a green exit code hides an oracle that never
+ran, and a file's registrations are part of its checksum-locked bytes — tests cannot be
+hidden in an `_`-prefixed module to escape the requirement, and there is a test for that.
+An unreadable file still counts as "has tests", the safe direction. A lock containing
+only helpers now says "no runnable locked test files to confirm" instead of implying a
+suite executed.
+
+**How it was found is the point: this is the first lesson the experience store ever
+harvested** (F1b, shipped hours earlier). The builder wrote it while fixing the build,
+AREA stored it, and reading it surfaced a defect in AREA itself — the memory mechanism
+working as designed rather than merely passing its tests.
+
+
 
 ## Scores
 

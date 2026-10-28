@@ -55,6 +55,34 @@ _SKIP_ANYWHERE = {
     ".openhands", ".git", ".vercel", ".area", ".claude",
 }
 _SKIP_TOPLEVEL = {"dist", "build", "test-results", "playwright-report"}
+# FILES that the toolchain generates or the running app writes. They are not authored
+# source, so digesting them makes the attestation describe a moment rather than an
+# artifact — and it broke for real: on 2026-10-28 provenance for `expenses` was written
+# at 09:13:39 and AREA's own `npm run dev` preview regenerated `next-env.d.ts` at
+# 09:13:40, so the attested digest no longer matched the app one second after it was
+# taken, and `area deploy` would have refused a build nothing had tampered with. The
+# same would happen to ANY app that persists data the moment a human clicked through
+# the preview and saved a row.
+#
+# Excluding them does not weaken tamper detection: every authored file is still
+# digested, and these are regenerated from the authored ones (or are runtime state
+# that no deploy should carry). The list is explicit rather than a pattern like
+# "anything .d.ts", so adding to it stays a reviewable decision.
+# Bumped whenever the set of digested files changes. Without it, widening the
+# exclusions above turns every previously VALID attestation into "the artifact digest
+# CHANGED since it was gated" — which reads as tampering when the truth is that the
+# question changed. A verifier that reports the wrong reason is the defect class this
+# audit keeps finding, so the version is recorded and compared.
+#   1 — directories only (node_modules, .next, dist, …)
+#   2 — also excludes toolchain-generated and runtime-written FILES (M12)
+DIGEST_VERSION = 2
+
+_SKIP_FILES = {"next-env.d.ts", ".eslintcache", ".DS_Store", "Thumbs.db"}
+_SKIP_SUFFIXES = (
+    ".tsbuildinfo", ".log",
+    ".db", ".db-journal", ".db-wal", ".db-shm",
+    ".sqlite", ".sqlite3",
+)
 
 
 def _iter_source_files(app: Path) -> Iterator[tuple[Path, Path]]:
@@ -65,6 +93,8 @@ def _iter_source_files(app: Path) -> Iterator[tuple[Path, Path]]:
         if any(part in _SKIP_ANYWHERE for part in rel.parts):
             continue
         if rel.parts and rel.parts[0] in _SKIP_TOPLEVEL:
+            continue
+        if p.name in _SKIP_FILES or p.name.endswith(_SKIP_SUFFIXES):
             continue
         yield rel, p
 
@@ -228,7 +258,8 @@ def write_provenance(
         "gatesNotRun": sorted(gates_not_run or []),
         "policy": pol,
         "oracle": _oracle_strength(app, spec_dir),
-        "product": {"artifactDigest": artifact_digest(app)},
+        "product": {"artifactDigest": artifact_digest(app),
+                    "digestVersion": DIGEST_VERSION},
     }
     out = app / PROV_REL
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -270,7 +301,10 @@ def verify_provenance(app_dir: str | Path) -> tuple[str, str]:
     Returns (status, detail) where status is:
       * "ok"       — digest matches the gated artifact,
       * "mismatch" — the source changed since gating (tamper/drift) → block deploy,
-      * "absent"   — no provenance recorded (app never gated through AREA).
+      * "absent"   — no provenance recorded (app never gated through AREA),
+      * "stale-digest" — recorded under an older digest DEFINITION, so the
+        two numbers answer different questions. Fails closed like a mismatch,
+        but must not be reported as drift.
     """
     prov = read_provenance(app_dir)
     if not prov:
@@ -286,6 +320,18 @@ def verify_provenance(app_dir: str | Path) -> tuple[str, str]:
         if not_run:
             bits.append(f"not run: {', '.join(not_run)}")
         return "ok", f"artifact matches provenance ({current[:23]}…); " + "; ".join(bits)
+    ver = (prov.get("product") or {}).get("digestVersion", 1)
+    if ver != DIGEST_VERSION:
+        # Still fails closed — an unverifiable attestation is not a pass — but the
+        # operator is told what actually happened instead of being accused of drift.
+        return "stale-digest", (
+            f"provenance was recorded under digest definition v{ver}; this AREA "
+            f"computes v{DIGEST_VERSION}, so the two numbers are not comparable and "
+            "this cannot be treated as gated. Re-gate the app to attest it under the "
+            "current definition.\n"
+            f"  recorded (v{ver}): {recorded}\n"
+            f"  current  (v{DIGEST_VERSION}): {current}"
+        )
     return "mismatch", (
         "artifact digest CHANGED since it was gated — refusing to treat it as gated.\n"
         f"  recorded: {recorded}\n  current : {current}"
