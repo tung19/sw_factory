@@ -22,10 +22,13 @@ def test_remember_then_recall_by_tag(monkeypatch, tmp_path):
     assert hits and "frobnicator" in hits[0]["symptom"]
 
 
+# These exercise dedup and recall SCORING, not the storage policy. They now pass a
+# `fix` because a symptom with no resolution is refused outright — see
+# tests/test_a_symptom_is_not_a_lesson.py and docs/harness2-gap-assessment.md F1.
 def test_remember_dedupes_identical(monkeypatch, tmp_path):
     _use_tmp(monkeypatch, tmp_path)
     for _ in range(3):
-        store.remember("same symptom", tags=["t"])
+        store.remember("same symptom", fix="the same fix", tags=["t"])
     same = [e for e in store.lessons() if e.get("symptom") == "same symptom"]
     assert len(same) == 1
 
@@ -39,7 +42,8 @@ def test_empty_symptom_is_ignored(monkeypatch, tmp_path):
 
 def test_recall_by_text_overlap(monkeypatch, tmp_path):
     _use_tmp(monkeypatch, tmp_path)
-    store.remember("compat-date must not exceed workerd release", tags=["cf"])
+    store.remember("compat-date must not exceed workerd release",
+                   fix="pin it to `npm ls workerd`", tags=["cf"])
     hits = store.recall(text="our build broke on compat-date again")
     assert any("compat-date" in e["symptom"] for e in hits)
 

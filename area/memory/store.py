@@ -53,6 +53,25 @@ def lessons() -> list[dict[str, Any]]:
 
 
 def remember(symptom: str, fix: str = "", tags: Iterable[str] = ()) -> None:
+    """Store a lesson. BOTH halves are required: a symptom with no resolution is
+    not a lesson, and this store is injected into prompts (see `as_prompt`).
+
+    The `fix` guard is the whole point. `run_until` used to call this with only
+    `first_fail` and no `fix`, on any build that passed after a retry — so what
+    reached the top of every later build prompt, under a header reading "avoid
+    these", was four entries that were: a `No such file or directory` on a stale
+    path, raw `npm audit` output truncated mid-table, `No test files found,
+    exiting with code 1`, and the acceptance oracle's own `FORBIDDEN: files under
+    __tests__/_holdout/ were modified` rejection — i.e. the message that proves
+    the oracle WORKED, recycled as a pitfall to avoid.
+
+    Harness2 (arXiv:2610.14224) states the rule this restores: keep a lesson only
+    when the evidence supports it, otherwise add no entry. Note the gate used by
+    `evals.record_experience` cannot be reused here — that one needs a verdict
+    over >=5 matched-pair runs, and this writes mid-build where none exists. The
+    available evidence at that moment is whether we know what FIXED the failure,
+    so that is what is required. See docs/harness2-gap-assessment.md F1.
+    """
     _ensure_seed()
     rec: dict[str, Any] = {
         "ts": time.time(),
@@ -60,7 +79,7 @@ def remember(symptom: str, fix: str = "", tags: Iterable[str] = ()) -> None:
         "symptom": symptom.strip()[:500],
         "fix": fix.strip()[:500],
     }
-    if not rec["symptom"]:
+    if not rec["symptom"] or not rec["fix"]:
         return
     for e in _load():  # de-dup identical symptom+tags
         if e.get("symptom") == rec["symptom"] and set(e.get("tags", [])) == set(rec["tags"]):

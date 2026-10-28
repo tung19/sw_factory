@@ -262,12 +262,21 @@ def build_app(
 
     # Ship AREA's skill pack into the app dir so the ACP Claude Code agent (cwd =
     # app dir) discovers them as project skills, and nudge it to use them.
-    from area.skills import install_skills, skills_preamble
+    from area.skills import install_guardrail, install_skills, skills_preamble
 
     installed = install_skills(app)
     if installed:
         prompt = skills_preamble(target) + prompt
         print(f"[area] skills: {', '.join('/' + n for n in installed)}")
+
+    # And the guardrail that makes a locked holdout UNWRITABLE for this agent. The
+    # prompt and the skill both say "never edit the locked oracle"; this is what
+    # turns that into "cannot". Without it the builder's protection was detection
+    # after the fact -- which is how `author_until` once re-authored a locked
+    # holdout and rewrote its lock to match (fixed in #33).
+    if not install_guardrail(app):
+        print("[area] WARNING: holdout guardrail NOT installed — the locked oracle "
+              "is protected by detection only (the oracle re-checks its checksums)")
 
     # Vendor the captured reference UI (Flow B parity) and nudge the builder to
     # reproduce it, so the clone matches the original's look instead of re-inventing.

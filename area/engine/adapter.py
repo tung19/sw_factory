@@ -372,7 +372,7 @@ def run_until(
 
     passed = False
     used = max_iters
-    first_fail = None
+    first_fail = None   # kept, unconsumed: half of the lesson F1b will extract
     wall = _wall_timeout()
     for attempt in range(1, max_iters + 1):
         # The verifier runs the GENERATED app: `npm install` executes whatever
@@ -414,17 +414,17 @@ def run_until(
                     outer_iters=used, passed=passed, backend=type(agent).__name__)
     except Exception:
         pass
-    # P6 memory: a failure we had to overcome is a pitfall worth remembering.
-    if passed and used > 1 and first_fail:
-        try:
-            from area import memory
-
-            memory.remember(
-                symptom=f"[{label}] {first_fail[:280]}",
-                tags=[label.split(':')[0], label],
-            )
-        except Exception:
-            pass
+    # P6 memory: deliberately NOT written here. This used to call
+    # `memory.remember(symptom=first_fail, ...)` on any build that passed after a
+    # retry — but the loop knows only what BROKE, never what fixed it, and
+    # `memory` is injected into the top of later build prompts. The result was
+    # four stored "pitfalls" that were an environment error, raw npm audit output,
+    # a harness misconfiguration, and the oracle's own tamper rejection.
+    # `remember()` now requires a `fix`, so this call would be a silent no-op;
+    # leaving it would only suggest that lessons are being collected.
+    # Extracting a real lesson means asking, at this exact moment, what the
+    # resolution was — one cheap extra turn. That is the next step, not this one.
+    # docs/harness2-gap-assessment.md F1 (F1a here, F1b is the extraction).
     return passed, conv
 
 
