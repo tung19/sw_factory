@@ -230,7 +230,10 @@ def run_pipeline(
     # `area/reality.py` prints after the build and `provenance._MATERIALS` attests.
     # `clarify` controls whether the build STOPS; `spec_review` controls whether the
     # reviewer RUNS. Opt out of the reviewer with --no-spec-review.
-    if spec_review:
+    # Not on a --use-spec resume: the reviewer mutates assumptions.yaml, which is
+    # in spec_digest, which the clarify confirmation is anchored on — re-reviewing
+    # a reused (confirmed) spec would void that confirmation and re-wall the gate.
+    if spec_review and not use_spec:
         _spec_review_step(root, name, requirement, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
@@ -361,7 +364,10 @@ def intake_pipeline(
         max_iters=spec_iters, trace_id=trace_id, reuse=use_spec,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
-    if spec_review:
+    # Not on a --use-spec resume: the reviewer mutates assumptions.yaml, which is
+    # in spec_digest, which the clarify confirmation is anchored on — re-reviewing
+    # a reused (confirmed) spec would void that confirmation and re-wall the gate.
+    if spec_review and not use_spec:
         _spec_review_step(root, name, artifacts, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
@@ -456,7 +462,10 @@ def clone_pipeline(
     else:
         print(f"[area]        ui-capture: none ({spec.ui.notes})")
     ui_dir = spec.ui.dir if spec.ui.captured else None
-    if spec_review:
+    # Not on a --use-spec resume: the reviewer mutates assumptions.yaml, which is
+    # in spec_digest, which the clarify confirmation is anchored on — re-reviewing
+    # a reused (confirmed) spec would void that confirmation and re-wall the gate.
+    if spec_review and not use_spec:
         _spec_review_step(root, name, source, backend, model)
     qs = _clarify_gate(root, name, clarify)
     if qs:
