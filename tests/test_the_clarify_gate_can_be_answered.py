@@ -151,3 +151,26 @@ def test_reuse_refuses_when_there_is_nothing_to_reuse(tmp_path):
 
     with pytest.raises(RuntimeError, match="no spec to reuse"):
         extract_spec("req", tmp_path / "specs" / "nope", reuse=True)
+
+
+def test_the_resume_hint_names_the_right_command_for_a_clone(tmp_path):
+    """A hint that loses parity is worse than no hint.
+
+    `area run` has no `reference`, so building a clone's confirmed spec with it yields a
+    plain app from that spec — no parity oracle, no UI term in the build oracle, and
+    GREEN. The hint printed after `--confirm-all` said exactly that for every flow,
+    which recreates M17's failure as advice. Caught by reading what the command actually
+    printed on a real clone, not by a test.
+    """
+    from area.cli import _resume_hint
+
+    plain = tmp_path / "specs" / "a"
+    plain.mkdir(parents=True)
+    assert _resume_hint(plain, "a") == "area run --name a --use-spec"
+
+    clone = tmp_path / "specs" / "b"
+    (clone / "_sample").mkdir(parents=True)     # what makes a spec dir a clone's
+    hint = _resume_hint(clone, "b")
+    assert hint.startswith("area clone "), hint
+    assert "--use-spec" in hint and "--tdd" in hint
+    assert "area run" not in hint, "a clone was pointed at the non-parity command"

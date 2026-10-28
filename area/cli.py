@@ -1414,6 +1414,21 @@ def _cmd_mem(args: argparse.Namespace, expected: str | None) -> int:
     return 0
 
 
+def _resume_hint(spec_dir: Path, name: str) -> str:
+    """The command that builds THIS confirmed spec without losing what it is.
+
+    A clone's spec dir holds `_sample/` (the isolated reference). `area run` has no
+    `reference` parameter, so pointing a clone's operator at it would build a plain app
+    from the clone's spec — no parity oracle, no UI term in the build oracle, and GREEN.
+    The hint has to know which flow it is talking about, or it recreates M17's failure
+    as advice.
+    """
+    if (spec_dir / "_sample").is_dir():
+        return (f"area clone <the same reference> --kind path --name {name} "
+                f"--target <target> --tdd --use-spec")
+    return f"area run --name {name} --use-spec"
+
+
 def _cmd_clarify(args: argparse.Namespace, expected: str | None) -> int:
     """Answer the --clarify gate, which could previously only ever say no.
 
@@ -1444,8 +1459,8 @@ def _cmd_clarify(args: argparse.Namespace, expected: str | None) -> int:
     if not (args.confirm_all or answers):
         if is_current(spec_dir):
             print(f"[clarify] {args.name}: confirmed for this spec "
-                  f"({spec_dir / CLARIFIED}) — `area run --name "
-                  f"{args.name} --use-spec` will build it")
+                  f"({spec_dir / CLARIFIED}) — build it with:\n"
+                  f"  {_resume_hint(spec_dir, args.name)}")
             return 0
         print(f"[clarify] {args.name}: {len(open_qs)} open material question(s)")
         for i, q in enumerate(open_qs):
@@ -1453,8 +1468,8 @@ def _cmd_clarify(args: argparse.Namespace, expected: str | None) -> int:
             print(f"      assumed -> {q.get('assumption') or q.get('assumed') or ''}")
         if open_qs:
             print(f"\n[clarify] confirm the assumptions with `area clarify {args.name} "
-                  f"--confirm-all`, or answer one with `--answer N=\"...\"`, then "
-                  f"`area run --name {args.name} --use-spec`")
+                  f"--confirm-all`, or answer one with `--answer N=\"...\"`, then:\n"
+                  f"  {_resume_hint(spec_dir, args.name)}")
         return 0
 
     # A confirmation must name what it covered, so record the questions as shown.
@@ -1470,7 +1485,7 @@ def _cmd_clarify(args: argparse.Namespace, expected: str | None) -> int:
     if answers:
         print("[clarify] your typed answers become authoritative input to the next "
               "extraction; omit --use-spec to re-extract with them")
-    print(f"[clarify] now: area run --name {args.name} --use-spec")
+    print(f"[clarify] now: {_resume_hint(spec_dir, args.name)}")
     return 0
 
 
