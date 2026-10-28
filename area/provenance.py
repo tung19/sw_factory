@@ -41,6 +41,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS, TEST_SUFFIXES
+from area.memory import LESSON_FILE
 from typing import Any, Optional
 
 PROV_REL = ".area/provenance.json"
@@ -80,7 +81,8 @@ _SKIP_TOPLEVEL = set(GENERATED_AT_ROOT)
 #   2 — also excludes toolchain-generated and runtime-written FILES (M12)
 DIGEST_VERSION = 2
 
-_SKIP_FILES = {"next-env.d.ts", ".eslintcache", ".DS_Store", "Thumbs.db"}
+_SKIP_FILES = {"next-env.d.ts", ".eslintcache", ".DS_Store", "Thumbs.db",
+               LESSON_FILE}  # agent scratch note — must never enter the digest (B9)
 _SKIP_SUFFIXES = (
     ".tsbuildinfo", ".log",
     ".db", ".db-journal", ".db-wal", ".db-shm",

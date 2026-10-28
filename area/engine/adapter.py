@@ -498,6 +498,12 @@ def run_until(
     # evidence that the loop had something to overcome.
     if passed and used > 1 and first_fail:
         _harvest_lesson(workspace, label)
+    # B9: the lesson file must never reach the artifact digest. _harvest_lesson deletes
+    # it when it runs (failed-then-passed only); delete it here unconditionally so a
+    # failed or first-try-green run cannot leave it behind for provenance to hash.
+    from area import memory
+
+    (Path(workspace) / memory.LESSON_FILE).unlink(missing_ok=True)
     return passed, conv
 
 
