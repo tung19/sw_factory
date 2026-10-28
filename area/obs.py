@@ -113,7 +113,11 @@ def installed_skills(name: Optional[str]) -> tuple[Optional[str], tuple[str, ...
                 out = ("sha256:" + h.hexdigest()[:16], tuple(names))
     except OSError:
         pass
-    _skills_cache[name] = out
+    # Only memoize a REAL pack. A `spec` run calls this before the build stage
+    # installs `.claude/skills/`; caching that (None, ()) miss poisoned every
+    # later build-stage run's attribution (B5). A miss re-stats next time.
+    if out[0] is not None:
+        _skills_cache[name] = out
     return out
 
 def log_run(
