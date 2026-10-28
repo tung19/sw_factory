@@ -106,6 +106,7 @@ def spec_from_source(
     model: Optional[str] = None,
     max_iters: int = 3,
     reuse: bool = False,
+    strict: bool = False,
 ) -> tuple[Spec, Acceptance]:
     """Reverse-engineer a sample app into a validated spec artifact.
 
@@ -115,12 +116,6 @@ def spec_from_source(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    if kind in ("path", "auto") and Path(source).expanduser().is_dir():
-        files, size = isolate_local_path(source, out)
-        if files:
-            print(f"[area] re-spec: isolated {files} file(s) ({size / 1e6:.1f} MB) "
-                  f"into {out / '_sample'} (generated trees skipped)")
-
     if reuse:
         sp, ac = out / "spec.yaml", out / "acceptance.yaml"
         if not (sp.exists() and ac.exists()):
@@ -129,22 +124,64 @@ def spec_from_source(
         print(f"[area] re-spec: reusing {sp} (not re-investigating the reference)")
         return load_spec(sp), load_acceptance(ac)
 
+    # B4: for a LOCAL path the reference is already on disk; isolate it into _sample/
+    # (byte-exact evidence) then hand the agent a credential-REDACTED copy (_sample_safe/),
+    # so a token in the reference never enters the agent's context. git/URL kinds are
+    # still fetched by the agent (closing those needs the pipeline to do the fetch — a
+    # funded live run; the B4 residual).
+    agent_ref = "_sample"
+    if kind in ("path", "auto") and Path(source).expanduser().is_dir():
+        files, size = isolate_local_path(source, out)
+        if files:
+            print(f"[area] re-spec: isolated {files} file(s) ({size / 1e6:.1f} MB) "
+                  f"into {out / '_sample'} (generated trees skipped)")
+        sample = out / "_sample"
+        if sample.is_dir():
+            import shutil
+
+            from area import screen
+
+            safe = out / "_sample_safe"
+            if safe.is_dir():
+                shutil.rmtree(safe)
+            hits = screen.redact_tree(sample, safe)
+            if hits:
+                print(f"[area] re-spec: {len(hits)} credential-shaped value(s) in the "
+                      "reference — the agent reads a redacted copy (_sample_safe/); "
+                      "_sample/ kept byte-exact for provenance")
+                if strict:
+                    raise RuntimeError(
+                        f"--strict: refusing — {len(hits)} credential finding(s) in the "
+                        "reference _sample/. Re-run without --strict to build against the "
+                        "redacted copy.")
+            agent_ref = "_sample_safe"
+
     tier2 = (
         "\nYou ALSO have the REA toolset (MCP) available for deep reverse-"
         "engineering (binaries, .NET, APK, native). Use it when the source tools "
         "are not enough."
         if use_rea else ""
     )
+    if agent_ref == "_sample_safe":
+        investigate = (
+            f"The LOCAL reference is already isolated and credential-redacted at "
+            f"./{agent_ref} (generated trees skipped). Read it THERE; never run it, "
+            f"never `npm install`, never fetch over the network."
+        )
+    else:
+        investigate = (
+            "Investigate with your own tools (keyless):\n"
+            "- git URL  -> `git clone` into ./_sample and read the source.\n"
+            "- local path -> ALREADY ISOLATED at ./_sample (generated trees "
+            "skipped). Read it there; never run it, never `npm install`.\n"
+            "- http(s) URL -> `curl` it and inspect the HTML / visible behavior."
+        )
     task = (
         "You are the reverse-engineer stage of a software factory. "
         "Investigate the SAMPLE APP below and produce a faithful RE-SPEC so we "
         "can build a clone of its features.\n\n"
         f"=== SAMPLE APP (kind={kind}) ===\n{source}\n\n"
-        "Investigate with your own tools (keyless):\n"
-        "- git URL  -> `git clone` into ./_sample and read the source.\n"
-        "- local path -> ALREADY ISOLATED at ./_sample (generated trees "
-        "skipped). Read it there; never run it, never `npm install`.\n"
-        "- http(s) URL -> `curl` it and inspect the HTML / visible behavior."
+        f"{investigate}"
         f"{tier2}\n"
         "Work out the app's observable FEATURES and DATA MODEL. Capture ONLY what "
         "you can evidence; do not invent scope. Target stack for the clone is "
