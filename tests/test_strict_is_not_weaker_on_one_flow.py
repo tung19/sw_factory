@@ -77,3 +77,36 @@ def test_every_pipeline_hands_strict_to_the_build(fn, monkeypatch, tmp_path):
     assert seen.get("strict") is True, (
         f"{fn} did not pass strict to the build — `--strict` is inert on this flow"
     )
+
+
+# ---- the same asymmetry, found again: the clarify RESUME ----------------------
+
+@pytest.mark.parametrize("fn", _ENTRYPOINTS)
+def test_every_pipeline_can_build_a_confirmed_spec(fn):
+    """M10 gave the clarify gate a resume — on `area run` only.
+
+    So a clone that stopped at the gate could record a confirmation
+    (`area clarify <name> --confirm-all`) and then had no way to BUILD it: `area clone`
+    would re-investigate the reference, producing a different spec with a different
+    digest and expiring the confirmation it had just been given, while
+    `area run --use-spec` has no `reference` parameter and so cannot build in parity
+    mode at all. The gate was answerable on one flow in three — the identical shape to
+    `--strict` being inert on two, and found the same way.
+    """
+    assert "use_spec" in inspect.signature(getattr(P, fn)).parameters, (
+        f"{fn} cannot build an already-confirmed spec, so the clarify gate has no "
+        "resume on this flow"
+    )
+
+
+@pytest.mark.parametrize("cmd", ["run", "clone", "intake"])
+def test_every_command_with_a_clarify_gate_offers_the_resume(cmd):
+    """The CLI half: a flag the operator cannot type is not a resume."""
+    from area.cli import _build_parser
+
+    parser = _build_parser()
+    sub = next(a for a in parser._actions if getattr(a, "choices", None)
+               and cmd in a.choices)
+    opts = {o for action in sub.choices[cmd]._actions for o in action.option_strings}
+    assert "--use-spec" in opts, f"`area {cmd}` has no --use-spec"
+    assert "--strict" in opts, f"`area {cmd}` has no --strict"

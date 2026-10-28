@@ -6,6 +6,7 @@ Acceptance criteria are the testable "oracle" the build loop runs against.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -92,6 +93,29 @@ class UiEvidence(BaseModel):
     notes: str = ""                    # capture reason / caveats
 
 
+class Route(BaseModel):
+    """A path the app serves. Flow B's reason for existing, but useful to every flow.
+
+    A clone of `taskboard` reverse-engineered its features, entities, scrypt hash
+    format and `sid` cookie correctly — and recorded NO route map, because `Spec` had
+    nowhere to put one. Its own independent reviewer caught the consequence: AC-8 and
+    AC-22 required "requesting a board URL directly" while no document said what that
+    URL was, so the assumption on file was *"invent a plausible map"*. A parity holdout
+    authored from that spec asserts against invented paths, the clone passes, and
+    `verify-holdout-intact.sh` still reports the oracle intact — independent, frozen,
+    and measuring something that does not exist.
+
+    The real routes were readable from `_sample/app/` in a second: `/`, `/login`,
+    `/boards`, `/boards/[id]`. Nothing was hard about discovering them; there was no
+    field to write them in. Same shape as the missing `ui` field that #27/#28 added
+    after "the clone's UI is wrong".
+    """
+
+    path: str                     # "/boards/[id]" — as served, params included
+    purpose: str = ""             # what a visitor does there
+    kind: str = "page"            # page | api | action
+
+
 class Spec(BaseModel):
     name: str
     summary: str
@@ -99,6 +123,10 @@ class Spec(BaseModel):
     entities: List[Entity] = Field(default_factory=list)
     features: List[Feature] = Field(default_factory=list)
     ui: Optional[UiEvidence] = None    # Flow B: captured reference-UI evidence (see above)
+    # The paths the app serves. For a clone these are the REFERENCE's paths and
+    # the clone must serve the same ones; `routes_unquoted` reports any criterion
+    # that navigates without naming one. See Route for what went wrong without it.
+    routes: List[Route] = Field(default_factory=list)
 
 
 class Acceptance(BaseModel):
@@ -112,6 +140,34 @@ def load_spec(path: str | Path) -> Spec:
 def load_acceptance(path: str | Path) -> Acceptance:
     return Acceptance.model_validate(yaml.safe_load(Path(path).read_text()))
 
+
+
+# Words that mean "the visitor went somewhere". A criterion containing one is making a
+# claim about a PATH, so it has to say which — otherwise the holdout author (which sees
+# only acceptance.yaml, never spec.yaml) invents one, and the frozen oracle then asserts
+# against a route the app may not serve.
+_NAVIGATES = re.compile(
+    r"\b(visit|visits|visiting|navigat\w*|request\w*|open\w*|go(es)? to|redirect\w*|"
+    r"lands? on|page at|url)\b", re.I)
+
+
+def routes_unquoted(spec: Spec, acc: Acceptance) -> list[str]:
+    """Criteria that navigate somewhere without naming a declared route.
+
+    Reported, not fatal: plenty of criteria legitimately say "lands on the boards page"
+    in prose while a sibling criterion pins the path. Blocking every one of them would
+    be a false block. What must not happen silently is a whole spec that navigates and
+    declares no paths at all — which is exactly what the `taskboard` clone produced.
+    """
+    paths = [r.path for r in spec.routes if r.path.startswith("/")]
+    out: list[str] = []
+    for c in acc.criteria:
+        text = " ".join((c.given, c.when, c.then))
+        if not _NAVIGATES.search(text):
+            continue
+        if not any(pp in text for pp in paths):
+            out.append(c.id)
+    return out
 
 def validate_cross(spec: Spec, acc: Acceptance) -> list[str]:
     """Return a list of cross-reference problems (empty == valid)."""
@@ -130,4 +186,19 @@ def validate_cross(spec: Spec, acc: Acceptance) -> list[str]:
     covered = {c.feature for c in acc.criteria}
     for fid in feature_ids - covered:
         problems.append(f"feature '{fid}' has no acceptance criterion")
+    for r in spec.routes:
+        if not r.path.startswith("/"):
+            problems.append(
+                f"spec.routes: {r.path!r} is not an absolute path (start it with '/')")
+    # A spec whose criteria navigate while declaring NO routes is the taskboard-clone
+    # failure: the oracle gets authored against invented paths. That one is fatal; a
+    # single prose-only criterion is not (see routes_unquoted).
+    if not spec.routes and routes_unquoted(spec, acc):
+        problems.append(
+            "spec.routes is empty but acceptance criteria navigate to pages "
+            f"({', '.join(routes_unquoted(spec, acc)[:5])}…) — list the paths the app "
+            "serves in spec.routes, and quote the literal path in any criterion that "
+            "requests or redirects to one. Otherwise the independent holdout author, "
+            "which never sees spec.yaml, invents the URLs and the frozen oracle asserts "
+            "against routes the app may not serve.")
     return problems

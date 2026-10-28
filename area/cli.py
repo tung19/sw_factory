@@ -612,6 +612,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("clone", help="Flow B: reverse-engineer a sample app -> spec -> app")
     c.add_argument("source", help="git URL | local path | http(s) URL of the sample app")
+    c.add_argument("--use-spec", action="store_true",
+                   help="build the EXISTING specs/<name>/ instead of producing "
+                        "a new one — what an `area clarify` confirmation applies to")
     c.add_argument("--kind", default="auto", choices=["auto", "repo", "path", "url"])
     c.add_argument("--rea", action="store_true",
                    help="Tier 2: use REA MCP for deep RE (authorized targets only)")
@@ -621,6 +624,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "intake",
         help="Hybrid: ingest AI-DLC Inception artifacts -> spec -> app",
     )
+    ig.add_argument("--use-spec", action="store_true",
+                   help="build the EXISTING specs/<name>/ instead of producing "
+                        "a new one — what an `area clarify` confirmation applies to")
     ig.add_argument("artifacts", help="path to AI-DLC artifact file or directory")
     _add_common(ig)
 
@@ -1012,6 +1018,7 @@ def _cmd_clone(args: argparse.Namespace, expected: str | None) -> int:
         spec_iters=args.spec_iters, build_iters=args.build_iters,
         design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
         strict=args.strict,
+        use_spec=getattr(args, "use_spec", False),
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
@@ -1075,6 +1082,7 @@ def _cmd_intake(args: argparse.Namespace, expected: str | None) -> int:
         spec_iters=args.spec_iters, build_iters=args.build_iters,
         design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
         strict=args.strict,
+        use_spec=getattr(args, "use_spec", False),
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
