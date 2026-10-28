@@ -598,11 +598,26 @@ with the thing being graded. The options, cheapest first:
    **1 of 16** kinds (`builder`) instead of 7, while editing the universal
    `area-oracle-loop` still re-versions all 7. 824 tests.
 
-   **Residual, stated rather than buried:** an `inherited` kind's behaviour change that
-   is specific to a domain target is not separately versioned. The complete fix is to
-   stamp the ACTUALLY INSTALLED skill set on each run instead of deriving it from the
-   profile, which changes how `evals` pairs runs — a separate step, not folded in
-   quietly.
+   **Residual — CLOSED 2026-10-28.** An `inherited` kind's behaviour change specific to
+   a domain target was not separately versioned: the digest comes from the PROFILE, so
+   the same kind in a Cloudflare app and in a plain app carried the same version while
+   seeing different packs. Measured on this machine, which is what made it concrete:
+   `apps/taskboard/.claude/skills/` holds `area-oracle-loop` + `vinext-cf-build` (built
+   before target scoping) while `apps/expenses/` holds `area-oracle-loop` alone — two
+   packs, indistinguishable in the ledger.
+
+   `obs.installed_skills()` now reads `<app>/.claude/skills/` and stamps
+   `(skills_digest, skills)` on every run, and `compare` returns a new
+   **`confounded-skills`** verdict when the two sides ran with different packs: ranked
+   with `unpaired` because more runs cannot separate a difference in KNOWLEDGE from the
+   change under test, and **not** strict-only, because that is a comparison which cannot
+   be made rather than one with too little data. Absence of a digest (legacy runs, and
+   every `spec` run, which happens before the app exists) must not read as disagreement,
+   or every old ledger would become permanently unusable — there is a test for that.
+
+   Done now rather than later because `evals` is what F4 would be graded by: comparing
+   across packs would have spent F4's ~$40–50 of builds on a measurement that attributes
+   a change in domain knowledge to the thing under test.
 2. **Let `MIN_RUNS` fall for a matched-pairs design** — defensible statistically, since
    pairing removes the between-task variance the threshold is guarding against, but it
    is also the option that fits the measurement to the budget, so it needs saying out

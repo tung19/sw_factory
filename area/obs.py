@@ -64,6 +64,58 @@ def cost_of(conv: Any) -> Optional[float]:
         return None
 
 
+
+# What the run ACTUALLY had, not what its profile implies.
+#
+# M9-1b scoped the profile digest so a Cloudflare skill stops re-versioning the kinds a
+# Cloudflare build never involves. That left a residual, recorded at the time: the digest
+# is derived from the PROFILE, so an `inherited` kind running in a Cloudflare app and the
+# same kind running in a plain app now carry the SAME version while seeing different
+# packs. Measured on this machine: `apps/taskboard/.claude/skills/` holds
+# area-oracle-loop + vinext-cf-build (built before target scoping) and
+# `apps/expenses/` holds area-oracle-loop alone — two different packs, indistinguishable
+# in the ledger.
+#
+# `area evals` would then compare runs that had different domain knowledge as if the only
+# difference were the thing under test. Closing this is a prerequisite for F4 being worth
+# its ~$40-50 of builds, not a tidy-up.
+_skills_cache: dict[str, tuple[Optional[str], tuple[str, ...]]] = {}
+
+
+def installed_skills(name: Optional[str]) -> tuple[Optional[str], tuple[str, ...]]:
+    """(digest, names) of the skill pack present in this app, or (None, ()).
+
+    Reads `<app>/.claude/skills/`, which is where `area.skills.install_skills` puts it.
+    None means there is nothing to read — a `spec` run happens before the app exists,
+    and that is information, not a gap. Memoised per process: one shallow walk of two
+    small directories, but `log_run` is called on every agent run.
+    """
+    if not name:
+        return (None, ())
+    if name in _skills_cache:
+        return _skills_cache[name]
+    import hashlib
+
+    d = WORKSPACE / "apps" / name / ".claude" / "skills"
+    out: tuple[Optional[str], tuple[str, ...]] = (None, ())
+    try:
+        if d.is_dir():
+            names = sorted(p.name for p in d.iterdir() if (p / "SKILL.md").is_file())
+            if names:
+                h = hashlib.sha256()
+                for n in names:
+                    h.update(n.encode())
+                    h.update(b"\0")
+                    try:
+                        h.update((d / n / "SKILL.md").read_bytes())
+                    except OSError:
+                        h.update(b"<unreadable>")
+                out = ("sha256:" + h.hexdigest()[:16], tuple(names))
+    except OSError:
+        pass
+    _skills_cache[name] = out
+    return out
+
 def log_run(
     label: str,
     *,
@@ -76,6 +128,7 @@ def log_run(
 ) -> None:
     RUNS.parent.mkdir(parents=True, exist_ok=True)
     prof_kind, prof_digest = profile_of(label)
+    skills_d, skills_n = installed_skills(name if name is not None else _current_app)
     rec = {
         "ts": time.time(),
         "label": label,
@@ -88,6 +141,9 @@ def log_run(
         # which version of this kind's configuration produced the run (area.profile)
         "profile": prof_kind,
         "profile_digest": prof_digest,
+        # and which domain knowledge it ACTUALLY had — see installed_skills
+        "skills_digest": skills_d,
+        "skills": list(skills_n),
     }
     try:
         with RUNS.open("a") as f:
