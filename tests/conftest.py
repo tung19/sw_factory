@@ -33,3 +33,12 @@ def _ledger_is_never_the_users(tmp_path, monkeypatch):
 
     monkeypatch.setattr(obs, "RUNS", tmp_path / ".area" / "runs.jsonl")
     monkeypatch.setattr(obs, "_current_app", None)   # process-global; leaks otherwise
+
+    # The memory store is the same hazard and strictly worse: `obs.RUNS` only
+    # feeds a gate, while `memory.MEM` is injected into the TOP of later build
+    # prompts. Nothing writes it from the suite today, but only because
+    # `remember()` needs a fix and no current test supplies one — a test of the
+    # retry path would have poisoned real prompts. docs/harness2-gap-assessment.md F5.
+    from area.memory import store as _mem
+
+    monkeypatch.setattr(_mem, "MEM", tmp_path / ".area" / "memory.jsonl")
