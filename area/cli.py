@@ -617,7 +617,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         "a new one — what an `area clarify` confirmation applies to")
     c.add_argument("--kind", default="auto", choices=["auto", "repo", "path", "url"])
     c.add_argument("--rea", action="store_true",
-                   help="Tier 2: use REA MCP for deep RE (authorized targets only)")
+                   help="Tier 2: use REA MCP for deep RE")
     _add_common(c)
 
     ig = sub.add_parser(
