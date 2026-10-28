@@ -177,8 +177,9 @@ def _apply_sql(app: Path, url: str, rel: str) -> bool:
 def provision_postgres(app_dir: str | Path) -> tuple[bool, str]:
     """Ensure a Postgres store is connected + apply migrations, BEFORE deploy.
 
-    Mirrors cloudflare.provision_d1's contract: idempotent + NON-FATAL (never
-    blocks deploy). The key difference from D1: Vercel no longer creates a
+    Mirrors cloudflare.provision_d1's contract: idempotent; a CONNECTED store whose
+    migration fails BLOCKS the deploy (B6), while a not-yet-connected store stays
+    non-fatal. The key difference from D1: Vercel no longer creates a
     database from the CLI — a Postgres store is provisioned through the Vercel
     Marketplace (Neon) and connected to the project; that injects POSTGRES_URL
     into the project env. So here we `vercel link` + `vercel env pull` to surface
@@ -223,6 +224,13 @@ def provision_postgres(app_dir: str | Path) -> tuple[bool, str]:
         sqls = sorted(mig.glob("*.sql"))
         applied = sum(1 for s in sqls if _apply_sql(app, url, f"migrations/{s.name}"))
         log.append(f"postgres migrate: applied {applied}/{len(sqls)} schema file(s)")
+        if applied < len(sqls):
+            # B6: a CONNECTED store whose migration did not fully apply BLOCKS the
+            # deploy (mirror cloudflare.provision_d1's ok_all) rather than shipping an
+            # app against a half-migrated DB. The not-connected (no-URL) case above
+            # stays non-fatal: that is the deploy-first-then-connect-Marketplace flow.
+            log.append("postgres migrate: INCOMPLETE — refusing deploy (fail-closed)")
+            return False, "\n".join(log)
     return True, "\n".join(log)
 
 
