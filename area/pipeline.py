@@ -296,6 +296,8 @@ def iterate_pipeline(
     clarify: bool = True,
     spec_review: bool = False,
     workspace: Optional[str | Path] = None,
+    strict: bool = False,
+    use_spec: bool = False,
 ) -> PipelineResult:
     """Flow A⁺ — the "command box": amend an EXISTING app from a natural-language
     change request. The request is folded into the current spec (not handed raw to
@@ -313,6 +315,7 @@ def iterate_pipeline(
         amended, name=name, target=target, backend=backend, model=model,
         spec_iters=spec_iters, build_iters=build_iters, design=design, tdd=tdd,
         expected=expected, clarify=clarify, spec_review=spec_review, workspace=root,
+        strict=strict, use_spec=use_spec,
     )
 
 
