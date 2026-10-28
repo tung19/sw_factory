@@ -337,6 +337,71 @@ def run_once(
     return conv
 
 
+# Asked for in the SAME turn that fixes the failure, so extracting a lesson costs no
+# extra model call — and it is asked of the only party that knows the answer. The loop
+# sees what BROKE (`result.feedback`); only the agent that changed the code knows what
+# FIXED it, which is why storing a symptom alone produced garbage (F1a).
+_LESSON_REQUEST = (
+    "\n\n--- after the checks pass ---\n"
+    "If your fix makes them pass, also write a file `.area-lesson.md` in this "
+    "directory with exactly two lines, so a future build of a different app avoids "
+    "the same trap:\n"
+    "SYMPTOM: <the underlying cause in one line — not the error text>\n"
+    "FIX: <what you changed to resolve it>\n"
+    "Write it ONLY if the checks actually pass, only about this failure, and keep "
+    "each line under 300 characters. Do not include credentials, tokens, URLs with "
+    "secrets, or absolute paths from this machine. Skip the file entirely if the "
+    "cause was specific to this one app and would not help anyone else."
+)
+
+
+def _harvest_lesson(workspace: str | Path, label: str) -> bool:
+    """Read, sanitise, store and DELETE the lesson the agent left behind.
+
+    Deleted either way: the file sits in the app directory, so leaving it would put
+    it in the artifact digest that provenance attests. Redacted before storage
+    because the text is agent-written from error output that may quote a token, and
+    it will be injected into later prompts — `area.screen` is the same filter the
+    clone path uses on untrusted input. docs/harness2-gap-assessment.md F1b.
+    """
+    from area import memory
+
+    f = Path(workspace) / memory.LESSON_FILE
+    try:
+        if not f.is_file():
+            return False
+        raw = f.read_text(errors="ignore")[:4000]
+    except OSError:
+        return False
+    finally:
+        try:
+            f.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    symptom, fix = memory.parse_lesson(raw)
+    if not symptom or not fix:
+        return False
+    try:
+        from area.screen import redact_text
+
+        symptom, s_hits = redact_text(symptom)
+        fix, f_hits = redact_text(fix)
+        if s_hits or f_hits:
+            print(f"[area] lesson: redacted {len(s_hits) + len(f_hits)} secret-shaped "
+                  "value(s) before storing")
+    except Exception:  # noqa: BLE001 — never fail a green build over bookkeeping
+        pass
+    # dedupe: `[label.split(':')[0], label]` gave ['spec','spec'] for a flat label
+    tags = list(dict.fromkeys([label.split(":")[0], label]))
+    try:
+        memory.remember(symptom=symptom, fix=fix, tags=tags)
+        print(f"[area] lesson learned ({label}): {symptom[:80]}")
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def run_until(
     agent: AgentBase,
     workspace: str | Path,
@@ -372,7 +437,7 @@ def run_until(
 
     passed = False
     used = max_iters
-    first_fail = None   # kept, unconsumed: half of the lesson F1b will extract
+    first_fail = None   # the evidence that this run had something to overcome
     wall = _wall_timeout()
     for attempt in range(1, max_iters + 1):
         # The verifier runs the GENERATED app: `npm install` executes whatever
@@ -402,6 +467,7 @@ def run_until(
             conv,
             "The acceptance checks did not pass yet. Fix the code so they pass.\n\n"
             f"--- check output (attempt {attempt}/{max_iters}) ---\n{result.feedback}"
+            + _LESSON_REQUEST
         )
     else:
         with _scrubbed_agent_env():
@@ -414,17 +480,11 @@ def run_until(
                     outer_iters=used, passed=passed, backend=type(agent).__name__)
     except Exception:
         pass
-    # P6 memory: deliberately NOT written here. This used to call
-    # `memory.remember(symptom=first_fail, ...)` on any build that passed after a
-    # retry — but the loop knows only what BROKE, never what fixed it, and
-    # `memory` is injected into the top of later build prompts. The result was
-    # four stored "pitfalls" that were an environment error, raw npm audit output,
-    # a harness misconfiguration, and the oracle's own tamper rejection.
-    # `remember()` now requires a `fix`, so this call would be a silent no-op;
-    # leaving it would only suggest that lessons are being collected.
-    # Extracting a real lesson means asking, at this exact moment, what the
-    # resolution was — one cheap extra turn. That is the next step, not this one.
-    # docs/harness2-gap-assessment.md F1 (F1a here, F1b is the extraction).
+    # P6 memory: harvest the lesson the agent wrote while fixing (F1b). Only a run
+    # that actually failed and then passed has one to give: `first_fail` is the
+    # evidence that the loop had something to overcome.
+    if passed and used > 1 and first_fail:
+        _harvest_lesson(workspace, label)
     return passed, conv
 
 

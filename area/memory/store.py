@@ -8,6 +8,7 @@ so the agent avoids repeating them. Seeded with the vinext compat-date gotcha.
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Iterable
 
@@ -26,6 +27,53 @@ _SEED = [
         "vitest.config.ts, plain node env, no vinext/cloudflare plugins).",
     },
 ]
+
+
+# Where the build agent writes the lesson it learned, in its own working directory.
+# Asked for in the retry prompt and harvested by `run_until`, which deletes it — so it
+# never reaches the artifact digest. See `parse_lesson` for why it is not free-form.
+LESSON_FILE = ".area-lesson.md"
+_LESSON_MAX = 400
+
+
+def parse_lesson(text: str) -> tuple[str, str]:
+    """Pull (symptom, fix) out of what the agent wrote. ("", "") if either is missing.
+
+    Deliberately strict, for two reasons that have nothing to do with tidiness:
+
+    1. **This text becomes part of a later prompt.** `as_prompt` renders it under a
+       `=== ... ===` header, so a lesson containing such a line could forge a new
+       prompt section. Those are stripped, and each half is collapsed to one line.
+       In Flow B the build agent has been reading an UNTRUSTED reference repo, so the
+       text it writes here is not automatically trustworthy input for the next agent.
+    2. **Both halves are required** (see `remember`). A lesson with no fix is the
+       defect this whole mechanism replaced.
+    """
+    sym = fix = ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("==") or line.startswith("---"):
+            continue       # never let stored text forge a prompt section boundary
+        low = line.lower()
+        if low.startswith("symptom:") and not sym:
+            sym = line.split(":", 1)[1].strip()
+        elif low.startswith("fix:") and not fix:
+            fix = line.split(":", 1)[1].strip()
+    sym, fix = _deforge(sym)[:_LESSON_MAX], _deforge(fix)[:_LESSON_MAX]
+    return (sym, fix) if sym and fix else ("", "")
+
+
+# Only RUNS of `=` forge a section header. Stripping every `=` (the first attempt)
+# silently broke the secret scrubber: `area.screen` matches `KEY=value`, so by the
+# time `_harvest_lesson` redacted the text there was no `=` left to match, and
+# `DATABASE_URL=postgres://u:pw@h/db` was stored intact as `DATABASE_URLpostgres://...`.
+# It also mangled legitimate text like `npm install --omit=dev`. A guard must not
+# disable another guard.
+_EQ_RUN = re.compile(r"={2,}")
+
+
+def _deforge(s: str) -> str:
+    return _EQ_RUN.sub(" ", s).strip()
 
 
 def _load() -> list[dict[str, Any]]:
