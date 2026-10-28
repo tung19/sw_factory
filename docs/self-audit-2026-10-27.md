@@ -799,6 +799,41 @@ working as designed rather than merely passing its tests.
 
 
 
+### M14 · five lists said what "not app source" means, and they disagreed — FIXED (2026-10-28)
+
+Found by auditing the seams where the day's work meets **Flow B**, the flow none of it
+had been run against. Not by another incident — which is the point: M12 cost a build to
+discover, and this is the same class found for nothing.
+
+`area/provenance.py`, `area/verify/visual.py`, `area/re/ui_capture.py`,
+`area/screen.py` and `area/web/jobs.py` each carried their own set of "junk" paths.
+`artifact_digest` **hashed four directories the others already excluded**, so an
+attestation could be invalidated by work that changes no source at all:
+
+| digested, but generated | the operator action that broke the attestation |
+|---|---|
+| `.visual/` | **re-running `area visual <name>` to look at a score** |
+| `coverage/` | **running the test suite** |
+| `out/` | a Next.js static export (`output: 'export'`) — **every build** |
+| `.turbo/` | any turbo-cached command |
+
+`.visual/` is the sharpest: the visual gate is **auto-selected** for a clone with
+captured UI (#35), so on the Flow B path a human who looked twice at their own parity
+score would have been told the artifact had changed since gating.
+
+One canonical set now lives in `area/paths.py` (`GENERATED_DIRS`, plus
+`GENERATED_AT_ROOT` for `dist`/`build`, which are junk only at the app root because
+`src/build/helpers.ts` is real code). All five modules derive from it. The one
+purpose-specific exception is kept and explained: `visual` and `ui_capture` also skip
+`.area-ui`, because that is the vendored **reference** UI and scanning it as the clone's
+own markup would compare the reference against itself — a statement about those gates'
+job, not about what app source is.
+
+11 tests; 8 go red when provenance is given its own list back. The one that matters is
+the last: it fails if **any** module ever again treats something as generated that the
+attestation still digests, and a second asserts they are not merely in agreement today
+but derived from the same set.
+
 ## Scores
 
 | Dimension | Score | Why |

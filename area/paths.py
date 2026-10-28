@@ -24,3 +24,36 @@ def workspace() -> Path:
 
 
 WORKSPACE = workspace()
+
+
+# ---------------------------------------------------------------------------
+# What is NOT a built app's authored source: dependency trees, VCS metadata, and
+# anything a tool or a gate GENERATES. One set, because there were five.
+#
+# `area/provenance.py`, `area/verify/visual.py`, `area/re/ui_capture.py`,
+# `area/screen.py` and `area/web/jobs.py` each carried their own list and they
+# disagreed — so `artifact_digest` hashed directories the rest of AREA treats as
+# junk, and an attestation could be invalidated by work that changes no source:
+#
+#   * `.visual/`  — the visual gate's own score/diff output. Re-running
+#                   `area visual <name>` to look at a score broke the attestation.
+#   * `coverage/` — written by running the test suite.
+#   * `out/`      — Next.js static export output, rewritten by every build.
+#   * `.turbo/`   — tool cache.
+#
+# Same class as M12 (`next-env.d.ts`), found by auditing the seams rather than by
+# another incident. Keep this list as the single answer, and add to it here.
+GENERATED_DIRS = frozenset({
+    # dependencies + VCS
+    "node_modules", ".git",
+    # framework / deploy build output
+    ".next", ".vinext", ".open-next", ".cloudflare", ".wrangler", ".vercel", "out",
+    # tool + gate output
+    ".turbo", "coverage", ".visual", "test-results", "playwright-report",
+    # agent + factory bookkeeping inside a built app
+    ".openhands", ".area", ".claude",
+})
+
+# Names that are ALSO plausible source directory names, so they are only junk at the
+# app ROOT — `src/build/helpers.ts` is real source and was once silently excluded.
+GENERATED_AT_ROOT = frozenset({"dist", "build"})
