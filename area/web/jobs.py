@@ -17,7 +17,7 @@ from typing import IO, Any
 
 from area._util import kill_process_group, safe_name
 
-from area.paths import REPO as ROOT, WORKSPACE as WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware; `as` = explicit re-export for `from area.web.jobs import WORKSPACE`)
+from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS, REPO as ROOT, WORKSPACE as WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware; `as` = explicit re-export for `from area.web.jobs import WORKSPACE`)
 
 STATE_DIR = WORKSPACE / ".area"
 JOBS_JSON = STATE_DIR / "jobs.json"
@@ -30,10 +30,7 @@ AREA_BIN = ROOT / ".venv" / "bin" / "area"
 # output from an untrusted reference app). The dashboard escapes and re-validates
 # it too — this is the first of the three layers, not the only one.
 _URL_RE = re.compile(r"https://[A-Za-z0-9.\-]+\.(?:workers|pages)\.dev(?:/[A-Za-z0-9\-._~/%?&=+#:@]*)?")
-_SKIP_DIRS = {
-    "node_modules", ".next", ".vinext", ".open-next", ".cloudflare",
-    ".openhands", ".wrangler", ".git",
-}
+_SKIP_DIRS = set(GENERATED_DIRS) | set(GENERATED_AT_ROOT)
 
 
 def _env() -> dict[str, str]:

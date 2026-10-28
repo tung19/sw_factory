@@ -34,7 +34,7 @@ from typing import Any, Optional
 import yaml
 
 from area._util import safe_name
-from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; see area.verify.e2e)
+from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS, WORKSPACE  # noqa: E402 (leaf single-source; see area.verify.e2e)
 from area.ui_tokens import extract_tokens  # leaf: no agent/SDK import behind a gate
 
 VISUAL_DIR = ".visual"
@@ -42,8 +42,9 @@ DEFAULT_MIN_SIMILARITY = 0.75
 _WEIGHTS = {"pixel": 0.5, "dom": 0.3, "tokens": 0.2}
 
 _TEMPLATE_DIFF = Path(__file__).resolve().parent / "templates" / "visual_diff.mjs"
-_SKIP_DIRS = {"node_modules", ".git", ".next", "dist", "build", "out", ".visual",
-              ".area-ui", "coverage", ".turbo", ".vercel"}
+# Canonical generated set, plus `.area-ui`: that is the vendored REFERENCE UI, not
+# junk — scanning it as the clone's own markup would compare the reference to itself.
+_SKIP_DIRS = set(GENERATED_DIRS) | set(GENERATED_AT_ROOT) | {".area-ui"}
 _CLONE_CSS_GLOBS = ("*.css", "app/**/*.css", "src/**/*.css", "styles/**/*.css",
                     "tailwind.config.js", "tailwind.config.ts")
 _CLONE_MARKUP_GLOBS = ("app/**/layout.tsx", "app/**/page.tsx", "app/**/page.jsx",

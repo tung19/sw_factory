@@ -39,6 +39,8 @@ import json
 import time
 from collections.abc import Iterator
 from pathlib import Path
+
+from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS
 from typing import Any, Optional
 
 PROV_REL = ".area/provenance.json"
@@ -50,11 +52,12 @@ PROV_REL = ".area/provenance.json"
 #  - _SKIP_TOPLEVEL: build-OUTPUT names that are ALSO plausible source dir names
 #    (`build/`, `dist/`, …) — skipped ONLY at the app root, so a legitimate source
 #    file like `src/build/helpers.ts` is still digested (was silently excluded).
-_SKIP_ANYWHERE = {
-    "node_modules", ".next", ".vinext", ".open-next", ".cloudflare", ".wrangler",
-    ".openhands", ".git", ".vercel", ".area", ".claude",
-}
-_SKIP_TOPLEVEL = {"dist", "build", "test-results", "playwright-report"}
+# One source of truth, from `area.paths` — this list used to be local and was missing
+# `.visual/`, `coverage/`, `out/` and `.turbo/`, all of which the rest of AREA already
+# treated as generated. So the attestation could be broken by re-reading a visual score
+# or by running the test suite. See GENERATED_DIRS for the full account.
+_SKIP_ANYWHERE = set(GENERATED_DIRS)
+_SKIP_TOPLEVEL = set(GENERATED_AT_ROOT)
 # FILES that the toolchain generates or the running app writes. They are not authored
 # source, so digesting them makes the attestation describe a moment rather than an
 # artifact — and it broke for real: on 2026-10-28 provenance for `expenses` was written

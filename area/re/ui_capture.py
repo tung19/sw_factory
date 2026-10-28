@@ -27,6 +27,8 @@ from collections.abc import Iterator
 from http.client import HTTPMessage
 from html.parser import HTMLParser
 from pathlib import Path
+
+from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS
 from typing import IO, Optional
 
 import yaml
@@ -42,8 +44,7 @@ _MAX_ASSET = 5_000_000     # 5 MB per fetched asset / stylesheet
 _MAX_ASSETS = 40           # cap number of fetched assets (url mode)
 _MAX_FILES = 60            # cap copied files per category (sample mode)
 
-_SKIP_DIRS = {"node_modules", ".git", ".next", "dist", "build", ".area", "out",
-              "coverage", ".turbo", ".vercel"}
+_SKIP_DIRS = set(GENERATED_DIRS) | set(GENERATED_AT_ROOT)
 _CONFIG_NAMES = (
     "tailwind.config.js", "tailwind.config.ts", "tailwind.config.cjs",
     "tailwind.config.mjs", "postcss.config.js", "postcss.config.mjs",
