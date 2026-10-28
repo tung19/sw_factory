@@ -121,8 +121,9 @@ def test_a_lesson_written_while_fixing_is_stored(store, tmp_path, monkeypatch):
 def test_the_file_is_always_deleted(store, tmp_path, monkeypatch):
     """It lives in the app dir, so surviving would change the artifact digest that
     provenance attests."""
-    for body in ("SYMPTOM: a\nFIX: b\n", "SYMPTOM: only a symptom\n", "garbage"):
-        app = tmp_path / "apps" / f"a{hash(body) & 0xff}"
+    for i, body in enumerate(
+            ("SYMPTOM: a\nFIX: b\n", "SYMPTOM: only a symptom\n", "garbage")):
+        app = tmp_path / "apps" / f"a{i}"  # deterministic: hash() is per-process random
         app.mkdir(parents=True)
         _drive(app, monkeypatch, on_retry=lambda b=body: _lesson(app, b))
         assert not (app / M.LESSON_FILE).exists(), f"left behind for {body!r}"
