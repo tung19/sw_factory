@@ -20,7 +20,7 @@ import pytest
 from area import pipeline as P
 
 # Every pipeline entrypoint whose CLI command exposes --strict.
-_ENTRYPOINTS = ("run_pipeline", "clone_pipeline", "intake_pipeline")
+_ENTRYPOINTS = ("run_pipeline", "clone_pipeline", "intake_pipeline", "iterate_pipeline")
 
 
 @pytest.mark.parametrize("fn", _ENTRYPOINTS)
@@ -60,15 +60,20 @@ def test_every_pipeline_hands_strict_to_the_build(fn, monkeypatch, tmp_path):
                         raising=False)
     monkeypatch.setattr(P, "review_spec", lambda *a, **k: [], raising=False)
 
-    kwargs: dict[str, object] = {"name": "a", "workspace": tmp_path, "strict": True,
+    kwargs: dict[str, object] = {"workspace": tmp_path, "strict": True,
                                  "clarify": False}
     if fn == "run_pipeline":
         args: tuple = ("a requirement",)
+        kwargs["name"] = "a"
     elif fn == "clone_pipeline":
         args = (str(tmp_path / "ref"),)
-    else:
+        kwargs["name"] = "a"
+    elif fn == "intake_pipeline":
         (tmp_path / "artifacts").mkdir(exist_ok=True)
         args = (str(tmp_path / "artifacts"),)   # intake takes a PATH, not a dict
+        kwargs["name"] = "a"
+    else:  # iterate_pipeline(name, change_request, ...): name is positional #1
+        args = ("a", "make the primary button blue")
 
     # Deliberately NOT wrapped in a skip: `intake_pipeline` was one of the two flows
     # where --strict was inert, so a skip here would hide exactly what this pins.
@@ -99,7 +104,7 @@ def test_every_pipeline_can_build_a_confirmed_spec(fn):
     )
 
 
-@pytest.mark.parametrize("cmd", ["run", "clone", "intake"])
+@pytest.mark.parametrize("cmd", ["run", "clone", "intake", "iterate"])
 def test_every_command_with_a_clarify_gate_offers_the_resume(cmd):
     """The CLI half: a flag the operator cannot type is not a resume."""
     from area.cli import _build_parser

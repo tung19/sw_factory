@@ -653,6 +653,9 @@ def _build_parser() -> argparse.ArgumentParser:
     it.add_argument("request", help="natural-language change request, in quotes")
     it.add_argument("--target", default=None, choices=["cloudflare", "vercel", "plain"],
                     help="build target (default: auto-detect from the existing app)")
+    it.add_argument("--use-spec", action="store_true",
+                    help="reuse the already-written (confirmed) spec instead of "
+                         "re-extracting — the clarify-gate resume after `area clarify`")
     it.add_argument("--no-tdd", action="store_true",
                     help="do NOT re-lock an independent holdout before building "
                          "(NOT recommended — drops the oracle guarantee)")
@@ -1038,6 +1041,7 @@ def _cmd_iterate(args: argparse.Namespace, expected: str | None) -> int:
         backend=args.backend, model=args.model,
         spec_iters=args.spec_iters, build_iters=args.build_iters,
         design=args.design, tdd=tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+        strict=args.strict, use_spec=args.use_spec,
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
