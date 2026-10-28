@@ -234,16 +234,21 @@ verdict — the same conclusion M9 reached from the cost side.
 
 Ordered by value ÷ cost. Each is small; none requires the framework.
 
-1. **Fix F1 — put the gate where the reader is.** Two honest shapes: gate `memory.remember`
+1. ~~**Fix F1 — put the gate where the reader is.**~~ **DONE** (F1a #48, F1b
+   2026-10-28). Two honest shapes: gate `memory.remember`
    the way `record_experience` is gated, or give `experience` the read path that `memory`
    has. Either way, what reaches a prompt must carry evidence, and what carries evidence
    must be able to reach a prompt. **The cheapest correct first move is smaller than both:
    a `fix`-less entry is not a lesson — refuse to store one.** That alone drops 4 of the 4
    auto-written entries, including the oracle's own FORBIDDEN message.
-2. **Fix F3 — install the guardrail into built apps.** Write a minimal `.claude/settings.json`
+2. ~~**Fix F3 — install the guardrail into built apps.**~~ **DONE** (#48). Write a minimal `.claude/settings.json`
    with the `PreToolUse` hook alongside `install_skills`, so prevention reaches the agent
    that actually writes code. Deterministic, agent-free testable, closes #33's class.
-3. **Invest in skills (F2), using the INV/DOM split AREA already has.** This is the
+3. ~~**Invest in skills (F2) / M9-1b.**~~ **Scoping DONE** (#49): a skill declares
+   `targets:`, `install_skills` is target-aware, and the digest's skills term is split
+   by scope — one Cloudflare skill edit now re-versions **1 of 16** kinds instead of 7.
+   *Writing more skills* remains open, and is still the measured biggest lever.
+   Original note: This is the
    measured biggest lever in the paper and the thinnest component in AREA. It converges
    with **M9 option 1b**: scope the skills term per kind/target, and install only the
    skills a target can use. Do it now, while there is no baseline to invalidate.
@@ -253,7 +258,32 @@ Ordered by value ÷ cost. Each is small; none requires the framework.
    oracle plus `evals` metrics, compose = a human (Tung) reading a diff. Automate the
    proposer only after the grader has produced a single real verdict.
 
-### What to grasp
+#### Shipped so far
+
+| | what landed | where |
+|---|---|---|
+| **F1a** | a symptom with no resolution is refused; 4 garbage rows purged; `conftest` guards `memory.MEM` | [#48](https://github.com/tung19/sw_factory/pull/48) |
+| **F3** | `install_guardrail()` — the locked-holdout hook now reaches the build agent | [#48](https://github.com/tung19/sw_factory/pull/48) |
+| **F2 / M9-1b** | skills declare `targets:`; install and digest are scope-aware (7/16 → 1/16) | [#49](https://github.com/tung19/sw_factory/pull/49) |
+| **F1b** | the agent that fixes the build writes `.area-lesson.md` in the same turn; harvested, redacted, deleted | 2026-10-28 |
+
+**F1b is Harness²'s harnessing-level recursion, scoped to one task and costing no
+extra model call** — the retry prompt asks for the lesson in the turn that already
+fixes the failure, so the information comes from the only party that has it. Three
+properties it had to get right: both halves or nothing (the F1a rule); the file never
+survives, because it sits in the app directory and would otherwise enter the artifact
+digest provenance attests; and the text is redacted through `area.screen`, because it
+is agent-written from error output that may quote a credential and it is injected into
+later prompts — in Flow B its author has been reading an untrusted reference repo.
+
+Building it surfaced one bug worth recording, of this audit's signature class: the
+anti-forgery step stripped **every** `=` from the lesson before redaction ran, and
+`area.screen` matches `KEY=value` — so the scrubber had nothing to match and
+`DATABASE_URL=postgres://u:pw@h/db` was stored intact. **A guard disabled another
+guard.** Only runs of `=` are collapsed now. It was caught by a test asserting the
+secret was absent from the store, not by reading the code.
+
+## What to grasp
 
 - **The paper's contribution is the *object*, not the loop.** Improve the harness, not the
   model — and keep every edit tied to a concrete observation. AREA already versions its
