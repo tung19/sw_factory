@@ -201,7 +201,7 @@ def _fingerprint(holdout: Path) -> frozenset[tuple[str, str]]:
 
 
 def _authoring_oracle(
-    holdout: Path, acc_yaml: str, *, require_contract: bool
+    holdout: Path, acc_yaml: str, *, require_contract: bool, strict: bool = False
 ) -> tuple[bool, str]:
     """Quality gate on the authored suite (not just 'a file exists').
 
@@ -235,7 +235,40 @@ def _authoring_oracle(
             "The tests contain no assertions (`expect(...)`) — they must assert "
             "concrete outcomes, not be empty."
         )
+    # ORACLE STRENGTH. Everything above measures whether a test EXISTS for each
+    # criterion; this measures whether it can SETTLE it. `expenses` AC-14 declared a
+    # runtime property ("makes no outbound network requests") and was "verified" by
+    # grepping source — it reported PASS while telemetry was enabled. The verdict is
+    # reported either way and BLOCKS only under --strict, because an approximating
+    # oracle is a legitimate choice as long as it is labelled; failing every app with
+    # one hard-to-observe criterion would be a false block, not a finding.
+    weak = _weak_criteria(acc_yaml, text)
+    if weak:
+        msg = (
+            f"These criteria declare `verify_by: execution` — a claim about the "
+            f"RUNNING system — but their tests only read the source, so a PASS would "
+            f"not mean the property holds: {', '.join(weak)}. Drive the app through "
+            f"its public surface (import ../../lib/...) and assert the observed "
+            f"behaviour, or change the criterion's `verify_by`/`then` to something "
+            f"inspection can actually settle."
+        )
+        if strict:
+            problems.append(msg)
+        else:
+            print(f"[holdout] ⚠ oracle strength: {msg}")
     return (not problems), " ".join(problems)
+
+
+def _weak_criteria(acc_yaml: str, test_text: str) -> list[str]:
+    """Criteria whose test cannot settle the claim they make (area.verify.strength)."""
+    from area.verify.strength import classify, weak
+
+    try:
+        data = yaml.safe_load(acc_yaml) or {}
+        crit = data.get("criteria") or [] if isinstance(data, dict) else []
+    except Exception:  # noqa: BLE001
+        return []
+    return weak(classify([c for c in crit if isinstance(c, dict)], test_text))
 
 
 def _locked_state(app: Path) -> str:
@@ -258,6 +291,7 @@ def _locked_state(app: Path) -> str:
 def author_until(
     app: Path, acc_yaml: str, *, backend: Backend, model: Optional[str], tdd: bool,
     reference: Optional[str] = None, attempts: int = 4, max_no_progress: int = 2,
+    strict: bool = False,
 ) -> tuple[Path, dict[str, str]]:
     """Author the holdout suite under its OWN oracle-loop.
 
@@ -321,7 +355,7 @@ def author_until(
         finally:
             vagent.close()
 
-        ok, feedback = _authoring_oracle(holdout, acc_yaml, require_contract=tdd)
+        ok, feedback = _authoring_oracle(holdout, acc_yaml, require_contract=tdd, strict=strict)
         if ok:
             stop = "ok"
             break
@@ -337,7 +371,7 @@ def author_until(
         print(f"[area] holdout: author attempt {attempt}/{attempts} not complete "
               f"— {feedback[:140]}")
 
-    ok, feedback = _authoring_oracle(holdout, acc_yaml, require_contract=tdd)
+    ok, feedback = _authoring_oracle(holdout, acc_yaml, require_contract=tdd, strict=strict)
     if not ok:
         raise RuntimeError(
             f"holdout authoring failed ({stop}) after {attempts} attempts: {feedback}"
@@ -449,6 +483,7 @@ def author_and_lock(
     acc_yaml: Optional[str] = None,
     app: Optional[str | Path] = None,
     reference: Optional[str] = None,
+    strict: bool = False,
 ) -> tuple[Path, dict[str, str]]:
     """TDD 'red' step: author + checksum-lock the holdout suite BEFORE any build.
 
@@ -466,8 +501,7 @@ def author_and_lock(
             raise RuntimeError(f"no acceptance.yaml at {acc_path}")
         acc_yaml = acc_path.read_text()
     return author_until(
-        app, acc_yaml, backend=backend, model=model, tdd=True, reference=reference
-    )
+        app, acc_yaml, backend=backend, model=model, tdd=True, reference=reference, strict=strict)
 
 
 def tdd_build_oracle(

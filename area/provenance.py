@@ -163,6 +163,38 @@ def skills_digest() -> Optional[str]:
     return ("sha256:" + h.hexdigest()) if found else None
 
 
+
+def _oracle_strength(app: Path, spec_dir: Optional[str | Path]) -> dict[str, Any]:
+    """Which acceptance criteria the locked suite can actually SETTLE.
+
+    "Oracle green" is not one fact. A criterion declaring a runtime property whose
+    test only greps source reports PASS without checking anything — `expenses` AC-14
+    did exactly that while telemetry was enabled. Independence was attested here from
+    the start; strength was not recorded at all, so a reader could not tell a strong
+    green from a decorative one. Reported, never blocking: an approximating oracle is
+    legitimate when it is labelled, and `--strict` is where it blocks (in the
+    authoring oracle, so the loop converges on it rather than being told afterwards).
+    """
+    try:
+        import yaml
+
+        from area.verify.strength import classify, unstated, weak
+
+        sd = Path(spec_dir) if spec_dir else None
+        acc = (sd / "acceptance.yaml") if sd else None
+        hold = app / "__tests__" / "_holdout"
+        if not (acc and acc.exists() and hold.is_dir()):
+            return {}
+        data = yaml.safe_load(acc.read_text()) or {}
+        crit = [c for c in (data.get("criteria") or []) if isinstance(c, dict)]
+        text = "\n".join(f.read_text(errors="ignore")
+                          for f in sorted(hold.glob("*.ts")))
+        v = classify(crit, text)
+        return {"criteria": len(v), "unableToVerify": weak(v),
+                "methodUnstated": unstated(v)}
+    except Exception:  # noqa: BLE001 — bookkeeping must never fail an attestation
+        return {}
+
 def write_provenance(
     app_dir: str | Path,
     *,
@@ -195,6 +227,7 @@ def write_provenance(
         "gates": dict(gates),
         "gatesNotRun": sorted(gates_not_run or []),
         "policy": pol,
+        "oracle": _oracle_strength(app, spec_dir),
         "product": {"artifactDigest": artifact_digest(app)},
     }
     out = app / PROV_REL

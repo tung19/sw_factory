@@ -30,12 +30,36 @@ class Feature(BaseModel):
     description: str
 
 
+# How a criterion's "then" is to be proven. IEEE 1233 treats verifiability as a core
+# attribute of a requirement and names these four methods; a criterion whose method
+# cannot be stated is usually ambiguous or not worth the cost of verifying.
+#
+#   execution      — run the system and observe the stated outcome. The only method
+#                    that can settle a RUNTIME claim.
+#   inspection     — read the artifact (source, config, a manifest).
+#   demonstration  — exercise it in a live environment (a browser, a deployed app).
+#   analysis       — derive it (a type system, a proof, a measured budget).
+#
+# Why this exists: `expenses` AC-14 asserted "the app makes no outbound network
+# requests" — a runtime property — and the locked holdout "verified" it by grepping
+# source for HTTP client names. It passed while `next telemetry status` reported
+# Enabled, and it later FAILED on a documentation URL inside a comment. Independent,
+# frozen, and nearly powerless. AREA's spine is "quality <= strength + INDEPENDENCE of
+# the oracle"; independence was enforced and strength was never measured, because
+# nothing recorded what a criterion's proof was supposed to be.
+VERIFY_METHODS = ("execution", "inspection", "demonstration", "analysis")
+
+
 class AcceptanceCriterion(BaseModel):
     id: str  # e.g. "AC-1"
     feature: str  # must reference a Feature.id
     given: str
     when: str
     then: str
+    # None = the spec did not state one. Reported as "method unstated", which is NOT
+    # the same as "unverifiable" — it is the truth about specs written before this
+    # field existed, and must not be silently defaulted to a method nobody chose.
+    verify_by: Optional[str] = None
 
 
 class UiEvidence(BaseModel):

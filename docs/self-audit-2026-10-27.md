@@ -665,6 +665,82 @@ silent. The confirmation written during that dogfood was then **deleted**, becau
 leaving a record claiming a human reviewed 11 assumptions they had not seen is the same
 category of error as a hand-written attestation.
 
+### M11 · AREA enforced the oracle's INDEPENDENCE and never measured its STRENGTH — FIXED (2026-10-28)
+
+Found by building a real app and then **re-running its locked oracle**, which the build
+had just reported green.
+
+The spine is *"quality ≤ strength + **independence** of the oracle"*. Independence is
+enforced hard — a separate agent authors the suite from the spec alone, it is
+checksum-frozen, and the build oracle refuses if a locked file was modified or did not
+execute. **Strength was never measured at all**, and `_authoring_oracle`'s coverage
+check is "the AC id appears in the test text", which cannot tell an assertion from a
+`grep`.
+
+What that permitted, in `expenses` AC-14 — *"the app makes no outbound network
+requests"*, a property of the **running** system, "verified" by grepping source for
+HTTP client names:
+
+- **false negative:** PASS while `next telemetry status` reported `Status: Enabled`;
+- **false positive:** on re-run it **FAILED** on a documentation URL inside a comment in
+  the generated `next-env.d.ts`.
+
+Maximally independent, nearly powerless, and nothing anywhere said so. The independent
+spec reviewer had predicted it almost verbatim (*"AC-14 passes only by accident or fails
+on a technicality nobody scoped"*) — and that finding was printed as one of eleven
+`material` assumptions and then discarded, which is the second half of the defect:
+**a measurement that cannot measure was routed to the human as a product decision.**
+Confirming "append-only has no correction path" is meaningful; confirming "AC-14 passes
+by accident" is not — no human answer makes an invalid oracle valid.
+
+The fix follows IEEE 1233 (verifiability is an attribute of the requirement, proven by
+**execution / inspection / demonstration / analysis**) and the established practice of
+reporting an **"unable to verify"** result *separately from the pass rate*:
+
+1. **`verify_by` on `AcceptanceCriterion`** — the spec stage must state how a `then` is
+   to be proven. `Optional`, so the four existing apps still load; an unstated method is
+   reported as **unstated**, which is the truth, rather than defaulted to one nobody
+   chose.
+2. **`area/verify/strength.py`** — pure and deterministic, like the rest of the authoring
+   oracle. For a criterion declaring `execution`, the enclosing `describe`/`it` block
+   must drive the app through its public surface (`../../lib/…`) rather than only read
+   it. Scoped per criterion by brace matching, so one file that drives the app somewhere
+   cannot launder a grep-only criterion inside it; an unresolvable structure guesses
+   toward "fine", because a false block on an honest suite costs more than a missed weak
+   one.
+3. **Blocking only under `--strict`, and from INSIDE `_authoring_oracle`** — so the
+   decision is a term in the verifier the authoring loop converges on, not a note beside
+   it ([[area-fix-moves-decision-not-measurement]]). Advisory by default: an
+   approximating oracle is a legitimate choice as long as it is labelled, and failing
+   every app with one hard-to-observe criterion would be a false block.
+4. **`provenance.oracle`** — `{criteria, unableToVerify, methodUnstated}`, so a reader
+   can tell a strong green from a decorative one. Reported, never blocking.
+
+Measured on the real app: with AC-14 declared `execution`, the check reports
+`1 UNABLE TO VERIFY (AC-14: declared execution but the test only reads the source)`.
+As committed, `expenses` records all 14 criteria as `methodUnstated` — it predates the
+field, and that is stated rather than papered over.
+
+16 tests, 4 shown to go red when reverted.
+
+### M12 · the preview step mutates the app AFTER provenance attests it — OPEN
+
+Same build, same minute. `provenance.json` was written at **09:13:39**; AREA then ran
+`npm run dev` to open a preview, which regenerated `next-env.d.ts` at **09:13:40**. The
+attested `artifactDigest` is `75f7cd5e…`; the app on disk now digests to `af97d656…`.
+
+So the attestation describes an app that no longer exists, and `area deploy` would refuse
+it — fail-closed working correctly, protecting the operator from an app **the factory
+itself broke one second after certifying it**. It is also what made AC-14 flip from pass
+to fail on re-run, which is how M11 was found at all.
+
+This is the class #34 already fixed once (`harden_cf_app` mutated the app after
+`verify_provenance`), recurring through a path nobody considered: the **post-build
+preview**. The narrow fix is to run the preview before provenance is written, or outside
+the build path entirely. Left open deliberately — the right answer may be that nothing in
+the build path may touch the app after the digest is taken, which is a rule rather than a
+patch.
+
 ## Scores
 
 | Dimension | Score | Why |

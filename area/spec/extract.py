@@ -48,6 +48,20 @@ Write these YAML files in the current working directory, nothing else:
        given: <starting state>
        when: <user action>
        then: <observable, testable result>
+       verify_by: execution | inspection | demonstration | analysis
+       # HOW this `then` is to be PROVEN. Pick the weakest method that can actually
+       # settle it, and be honest:
+       #   execution     — run the system and observe the outcome. REQUIRED for any
+       #                   claim about behaviour at run time.
+       #   inspection    — read source/config/a manifest. Enough for "no dependency
+       #                   on X", "this route does not exist"; NEVER enough for a
+       #                   claim about what the running app does or does not do.
+       #   demonstration — drive it live (a browser, a deployed instance).
+       #   analysis      — derive it (types, a proof, a measured budget).
+       # If a `then` cannot be settled by any of these as written, say so in
+       # assumptions.yaml AND rewrite the `then` into something that can be. A
+       # criterion verified by the wrong method is worse than a missing one: it
+       # reports PASS for a property nobody checked.
 
 3) assumptions.yaml       # the requirement is rarely complete — record your guesses
    assumptions:           # every ambiguous point where you chose a default
