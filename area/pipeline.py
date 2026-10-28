@@ -332,6 +332,7 @@ def intake_pipeline(
     spec_review: bool = False,
     workspace: Optional[str | Path] = None,
     strict: bool = False,
+    use_spec: bool = False,
 ) -> PipelineResult:
     """Hybrid seam: ingest AI-DLC Inception artifacts -> spec -> [design] -> build.
 
@@ -354,7 +355,7 @@ def intake_pipeline(
     print(f"[area] intake : {artifacts!r} (AI-DLC, trace={trace_id})")
     spec, acc = spec_from_aidlc(
         artifacts, spec_dir, expected=expected, backend=backend, model=model,
-        max_iters=spec_iters, trace_id=trace_id,
+        max_iters=spec_iters, trace_id=trace_id, reuse=use_spec,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
     if spec_review:
@@ -406,6 +407,7 @@ def clone_pipeline(
     spec_review: bool = False,
     workspace: Optional[str | Path] = None,
     strict: bool = False,
+    use_spec: bool = False,
 ) -> PipelineResult:
     """Flow B: reverse-engineer a sample app -> spec -> [independent review] -> build."""
     name = safe_name(name)
@@ -420,7 +422,7 @@ def clone_pipeline(
     root = Path(workspace) if workspace else WORKSPACE
     print(f"[area] re-spec: {source!r} (kind={kind}, rea={use_rea})")
     spec, acc = spec_from_source(
-        source, root / "specs" / name, kind=kind, use_rea=use_rea,
+        source, root / "specs" / name, kind=kind, use_rea=use_rea, reuse=use_spec,
         expected=expected, backend=backend, model=model, max_iters=spec_iters,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")

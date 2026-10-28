@@ -921,6 +921,35 @@ blocking each one would be a false block, as a sibling criterion often pins the 
 back) and the four real routes as a fixture, so the test is the measurement rather than an
 invention. Run against the live clone spec, the new verdict fires exactly as described.
 
+### M17 · the clarify gate's resume existed on one flow in three — FIXED (2026-10-28)
+
+Found immediately after M16, by asking how I would actually re-run the clone: **M10 gave
+the gate a resume, and gave it only to `area run`.**
+
+A clone that stops at the clarify gate could record a confirmation
+(`area clarify <name> --confirm-all`) and then had **no way to build it**:
+
+* `area clone` re-investigates the reference, producing a different spec with a
+  different digest — **expiring the confirmation it had just been given**;
+* `area run --use-spec` has no `reference` parameter, so it cannot build in parity mode
+  at all — the clone would come out as a fresh app that happens to share a spec.
+
+So for Flow B and intake, the gate was still the wall M10 was written to remove. This is
+the identical shape to `--strict` being inert on two flows (#54), **found the same way
+and two hours later** — which says the real lesson is about how a capability gets added
+here, not about either flag: a feature threaded through `run_pipeline` looks done, passes
+its tests, and is absent from two thirds of the product.
+
+`spec_from_source` and `spec_from_aidlc` now take `reuse`, mirroring `extract_spec`;
+`clone_pipeline` and `intake_pipeline` take `use_spec` and pass it; both commands expose
+`--use-spec`. For a clone, `_sample/` is left in place by the idempotent isolation
+(M15), so a reused spec still has the evidence the build needs for parity.
+
+The guard lives beside #54's, and is deliberately the same shape: for **every** pipeline
+whose command offers the flag, assert the parameter exists; and for every command,
+assert the flag is typeable. A flag the operator cannot type is not a resume, and a
+parameter no command passes is not a feature.
+
 ## Scores
 
 | Dimension | Score | Why |

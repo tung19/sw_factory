@@ -105,6 +105,7 @@ def spec_from_source(
     backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
+    reuse: bool = False,
 ) -> tuple[Spec, Acceptance]:
     """Reverse-engineer a sample app into a validated spec artifact.
 
@@ -119,6 +120,14 @@ def spec_from_source(
         if files:
             print(f"[area] re-spec: isolated {files} file(s) ({size / 1e6:.1f} MB) "
                   f"into {out / '_sample'} (generated trees skipped)")
+
+    if reuse:
+        sp, ac = out / "spec.yaml", out / "acceptance.yaml"
+        if not (sp.exists() and ac.exists()):
+            raise RuntimeError(
+                f"--use-spec: no re-spec to reuse at {out}. Run without it first.")
+        print(f"[area] re-spec: reusing {sp} (not re-investigating the reference)")
+        return load_spec(sp), load_acceptance(ac)
 
     tier2 = (
         "\nYou ALSO have the REA toolset (MCP) available for deep reverse-"

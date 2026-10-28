@@ -104,6 +104,7 @@ def spec_from_aidlc(
     model: Optional[str] = None,
     max_iters: int = 3,
     trace_id: Optional[str] = None,
+    reuse: bool = False,
 ) -> tuple[Spec, Acceptance]:
     """Translate AI-DLC Inception artifacts into a validated AREA spec artifact.
 
@@ -112,6 +113,14 @@ def spec_from_aidlc(
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    if reuse:
+        sp, ac = out / "spec.yaml", out / "acceptance.yaml"
+        if not (sp.exists() and ac.exists()):
+            raise RuntimeError(
+                f"--use-spec: no spec to reuse at {out}. Run without it first.")
+        print(f"[area] intake : reusing {sp} (not re-translating the artifacts)")
+        return load_spec(sp), load_acceptance(ac)
     trace_id = trace_id or new_trace_id()
     blob = load_aidlc_artifacts(artifacts)
     emit_evidence(out, trace_id, "intake.start", {"artifacts": str(artifacts)})
