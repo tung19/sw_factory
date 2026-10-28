@@ -281,6 +281,25 @@ def redact_file(src: Path, dst: Path) -> list[Finding]:
     return findings
 
 
+def redact_tree(src: Path, dst: Path, *, skip_dirs: Optional[Iterable[str]] = None,
+                ) -> list[tuple[str, Finding]]:
+    """Copy the tree under `src` to `dst`, redacting credential VALUES on the way, so an
+    untrusted reference can be read by the agent without handing it the secrets. `src` is
+    left byte-exact (it is the evidence `_sample/` that provenance attests). Symlinks are
+    skipped. Returns (relative-path, Finding) for every hit."""
+    skip = set(skip_dirs or ("node_modules", ".git", ".next", "dist", "build"))
+    out: list[tuple[str, Finding]] = []
+    for p in sorted(src.rglob("*")):
+        if not p.is_file() or p.is_symlink():
+            continue
+        rel = p.relative_to(src)
+        if any(part in skip for part in rel.parts):
+            continue
+        for f in redact_file(p, dst / rel):
+            out.append((str(rel), f))
+    return out
+
+
 def scan_tree(root: Path, *, skip_dirs: Optional[Iterable[str]] = None,
               ) -> list[tuple[str, Finding]]:
     """Report credential hits under `root` WITHOUT modifying anything — for evidence

@@ -433,6 +433,7 @@ def clone_pipeline(
     spec, acc = spec_from_source(
         source, root / "specs" / name, kind=kind, use_rea=use_rea, reuse=use_spec,
         expected=expected, backend=backend, model=model, max_iters=spec_iters,
+        strict=strict,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
     # The reference is UNTRUSTED code. Report any credential sitting in it — a token in
