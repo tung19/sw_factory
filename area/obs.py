@@ -106,10 +106,21 @@ def installed_skills(name: Optional[str]) -> tuple[Optional[str], tuple[str, ...
                 for n in names:
                     h.update(n.encode())
                     h.update(b"\0")
-                    try:
-                        h.update((d / n / "SKILL.md").read_bytes())
-                    except OSError:
-                        h.update(b"<unreadable>")
+                    # Hash the WHOLE skill subtree, not just SKILL.md (B12): a skill's
+                    # references/ and vendored scripts ARE domain knowledge, and
+                    # profile._pack_digest already covers them — so "what a run had"
+                    # must track "what can change this kind", or evals' confounded-skills
+                    # guard is blind to an intra-skill change.
+                    for f in sorted((d / n).rglob("*")):
+                        if not f.is_file():
+                            continue
+                        h.update(str(f.relative_to(d / n)).encode())
+                        h.update(b"\0")
+                        try:
+                            h.update(f.read_bytes())
+                        except OSError:
+                            h.update(b"<unreadable>")
+                        h.update(b"\0")
                 out = ("sha256:" + h.hexdigest()[:16], tuple(names))
     except OSError:
         pass
