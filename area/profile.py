@@ -112,6 +112,11 @@ def missing_prompt_sources(p: Profile) -> list[str]:
 #                inherited anyway — erring toward "this changed, re-measure" rather than
 #                "nothing changed, trust the old baseline" is the whole point of the
 #                digest.)
+#                SCOPE: only the UNIVERSAL skills. A domain skill is in the app dir only
+#                because the builder put it there, and `install_skills` no longer copies
+#                one into an app whose target it excludes — so for that target it cannot
+#                be discovered at all. See `profile_digest` for the full argument and the
+#                one residual it names.
 #   none       — never runs where the pack is; `ask_cli` kinds run in a temp dir, and the
 #                spec/inception/research kinds run in a spec or scratch directory.
 SKILLS_VALUES = ("all", "inherited", "none")
@@ -119,11 +124,46 @@ SKILLS_VALUES = ("all", "inherited", "none")
 _SKILLS_IN_DIGEST = ("all", "inherited")
 
 
-def _skills_hash() -> str:
-    try:
-        from area.provenance import skills_digest
+def _pack_digest(*, domain: bool) -> str:
+    """Digest of one HALF of the skills pack: the universal skills (no `targets:` in
+    their frontmatter) or the domain ones (scoped to specific build targets).
 
-        return skills_digest() or "none"
+    Split because folding the WHOLE pack into every participating kind's version
+    made a single edit to `vinext-cf-build` re-version 7 of 16 kinds — including
+    `e2e-author`, `chaos-author` and `auditor`, which were running against plain
+    Next.js apps a Cloudflare skill cannot reach. The baseline for all seven was
+    orphaned, and `MIN_RUNS = 5` then put a verdict ~12 builds away. The whole pack
+    is still attested per build by `provenance.skills_digest()`, which this
+    deliberately does NOT change: the attestation answers "what shaped this build",
+    a version answers "what can change this kind's behaviour".
+    See docs/harness2-gap-assessment.md F2 and self-audit-2026-10-27.md M9.
+    """
+    from area.skills import SKILLS_DIR, skill_names, skill_targets
+
+    h = hashlib.sha256()
+    found = False
+    # pass SKILLS_DIR explicitly: `skill_names`' default is bound at def time, so
+    # relying on it would read a different directory than the one named here.
+    for name in skill_names(SKILLS_DIR):
+        d = SKILLS_DIR / name
+        if bool(skill_targets(d)) is not domain:
+            continue
+        for p in sorted(d.rglob("*")):
+            if not p.is_file():
+                continue
+            found = True
+            h.update(p.relative_to(SKILLS_DIR).as_posix().encode())
+            h.update(b"\0")
+            try:
+                h.update(hashlib.sha256(p.read_bytes()).digest())
+            except OSError:
+                h.update(b"<unreadable>")
+    return ("sha256:" + h.hexdigest()) if found else "none"
+
+
+def _skills_hash(*, domain: bool = False) -> str:
+    try:
+        return _pack_digest(domain=domain)
     except Exception:  # noqa: BLE001
         return "unknown"
 
@@ -139,8 +179,27 @@ _DIGEST_FIELDS = ("labels", "prompt_sources", "skills", "defaults")
 
 
 def profile_digest(p: Profile) -> str:
-    """sha256 over the behavioural config + the hashed source of each prompt + the skills
-    pack. Editing any of those is a new version; editing the prose is not."""
+    """sha256 over the behavioural config + the hashed source of each prompt + the
+    skills this kind can actually be changed by. Editing any of those is a new
+    version; editing the prose is not.
+
+    The skills term is split by scope, because "which skills exist" and "which
+    skills can change THIS kind" are different questions:
+
+      * universal skills (no `targets:`) -> every kind that runs where the pack is,
+        i.e. `all` and `inherited`.
+      * domain skills (target-scoped) -> only the kinds that INSTALL them (`all`).
+        An `inherited` kind sees a domain skill solely because the builder put it in
+        the app directory, and after `install_skills` became target-aware it is not
+        there at all for a target the skill excludes. When it IS there, the builder's
+        own version has moved and `provenance.skills_digest()` attests the full pack,
+        so the change is never unrecorded.
+
+    Known residual: an `inherited` kind's behaviour change that is specific to a
+    domain target is not separately versioned. Fixing that properly means stamping
+    the ACTUALLY INSTALLED skill set on each run rather than deriving it from the
+    profile — which changes how `evals` pairs runs, so it is a separate step.
+    """
     h = hashlib.sha256()
     h.update(yaml.safe_dump({k: p.raw.get(k) for k in _DIGEST_FIELDS},
                             sort_keys=True).encode())
@@ -149,6 +208,8 @@ def profile_digest(p: Profile) -> str:
         h.update(b"\0")
     if p.skills in _SKILLS_IN_DIGEST:
         h.update(_skills_hash().encode())
+    if p.skills == "all":
+        h.update(_skills_hash(domain=True).encode())
     return "sha256:" + h.hexdigest()[:32]
 
 

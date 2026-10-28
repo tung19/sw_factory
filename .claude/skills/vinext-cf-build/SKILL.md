@@ -1,5 +1,9 @@
 ---
 name: vinext-cf-build
+# Only reaches a build for these targets: `area.skills.install_skills` does not
+# copy it into a plain/vercel app, and `area.profile` folds it into the version of
+# the kinds that INSTALL it rather than every kind that merely runs in an app dir.
+targets: [cloudflare]
 description: Get a green Cloudflare (vinext) build that also passes `npm audit`, and keep node:sqlite out of the Workers bundle. Use when building, auditing, or deploying an AREA app to Cloudflare Workers — target "cloudflare", a `build:cf` / `vite build` script, a D1 database, or an `npm audit` gate failing on braces.
 ---
 

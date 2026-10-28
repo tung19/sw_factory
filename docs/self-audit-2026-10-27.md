@@ -546,7 +546,7 @@ and the real ledger grows by 2 in that run. The 108 synthetic rows were removed,
 a synthetic backend **and** the test window so a genuine `ask_cli` run could not be caught
 by it; the original is kept at `runs.jsonl.bak-2026-10-28`.
 
-### M9 · `area evals` is priced out of ever returning a verdict — OPEN, Tung's call
+### M9 · `area evals` is priced out of ever returning a verdict — option 1b DONE (2026-10-28)
 
 Found by trying to run the A/B Tung asked for. The mechanism is sound; the **version
 granularity** makes it unaffordable, and the two facts together mean the gate can
@@ -581,6 +581,28 @@ with the thing being graded. The options, cheapest first:
 1. **Scope the skills term to the skills a kind can actually use** (per-skill hashes
    rather than one pack digest), so a CF skill edit re-versions only the kinds a CF
    build uses. Keeps the conservatism where it is load-bearing.
+
+   **Tung chose this one; shipped 2026-10-28.** Two halves, and the first is what makes
+   the second honest. (a) A skill declares its scope in its own SKILL.md frontmatter
+   (`targets: [cloudflare]`), and `install_skills` is target-aware — so a plain app never
+   *receives* the CF skill. Previously `skills_preamble` declined to NAME it for a plain
+   build while the installer copied it in regardless, so a Claude Code session in that
+   directory could still discover it. (b) `profile_digest`'s skills term is split by
+   scope: universal skills version every kind that runs where the pack is (`all` and
+   `inherited`), domain skills version only the kinds that INSTALL them (`all`).
+   `provenance.skills_digest()` deliberately still covers the WHOLE pack — a version
+   answers "what can change this kind", an attestation answers "what shaped this build",
+   and narrowing the second would make provenance claim less than the truth.
+
+   **Measured, same experiment as above:** editing one Cloudflare skill now re-versions
+   **1 of 16** kinds (`builder`) instead of 7, while editing the universal
+   `area-oracle-loop` still re-versions all 7. 824 tests.
+
+   **Residual, stated rather than buried:** an `inherited` kind's behaviour change that
+   is specific to a domain target is not separately versioned. The complete fix is to
+   stamp the ACTUALLY INSTALLED skill set on each run instead of deriving it from the
+   profile, which changes how `evals` pairs runs — a separate step, not folded in
+   quietly.
 2. **Let `MIN_RUNS` fall for a matched-pairs design** — defensible statistically, since
    pairing removes the between-task variance the threshold is guarding against, but it
    is also the option that fits the measurement to the budget, so it needs saying out
