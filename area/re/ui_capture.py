@@ -275,7 +275,7 @@ def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
     rendered: list[str] = []
     tokens: dict[str, list[str]] = {}
     hits: list[tuple[str, screen.Finding]] = []
-    files = list(_iter_files(sample))
+    files = sorted(_iter_files(sample))  # B18: deterministic subset under the cap
 
     for p in files:
         if len(styles) >= _MAX_FILES:
@@ -296,7 +296,7 @@ def _capture_from_sample(source: str, sample: Path, ui_dir: Path) -> UiEvidence:
 
     seen_markup: set[Path] = set()
     for pat in _MARKUP_GLOBS:
-        for p in sample.glob(pat):
+        for p in sorted(sample.glob(pat)):
             if (p.is_file() and p not in seen_markup
                     and not any(part in _SKIP_DIRS for part in p.parts)):
                 seen_markup.add(p)

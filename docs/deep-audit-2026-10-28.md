@@ -58,3 +58,16 @@ filename `shlex.quote`d) · `jobs.cancel` (process-group kill) · `isolate_local
 (skips symlinks, contained) · audit/perf/cost/visual/strength verdict logic · profile_digest
 coverage · `memory.remember` (both halves; redact-after-deforge order correct) ·
 env-scrub scope around the build pipelines · in-slice subprocess timeouts.
+
+## Status (updated after remediation)
+
+All MED-and-up findings fixed and merged. Remaining is one deferred item and one residual.
+
+| Finding | Status |
+|---|---|
+| B1, B2, B3, B5 | ✅ merged (#62, #63, #64) |
+| B7, B8, B9, B10, B12 | ✅ merged (#65, #66, #67, #68) |
+| B6, B4 | ✅ merged (#69, #70) — B4 **local-path** scope |
+| B11, B13, B15, B16, B17, B18 | ✅ this cleanup PR |
+| **B14** | ⏸ deferred — screen's 2 MB cap needs a chunked scanner (documented tradeoff, reported loudly) |
+| **B4 git/URL** | ⏸ residual — closing non-local references needs the pipeline to fetch before the RE agent + a funded live clone run to confirm the agent honours the redacted-view prompt |

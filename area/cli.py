@@ -685,6 +685,10 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="skip the independent spec-vs-intent reviewer")
     it.add_argument("--verify", action="store_true")
     it.add_argument("--audit", action="store_true")
+    it.add_argument("--audit-level", default="high",
+                    choices=["low", "moderate", "high", "critical"],
+                    help="npm-audit severity threshold "
+                         "(B11: so provenance records the level enforced)")
     it.add_argument("--e2e", action="store_true")
     it.add_argument("--no-e2e", action="store_true",
                     help="override the e2e gate forced before deploying an auth app")

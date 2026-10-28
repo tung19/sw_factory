@@ -184,6 +184,10 @@ def nfr_verify(name: str, *, backend: str = "acp", model: Optional[str] = None,
         return False
 
     if not results:
+        if blocking:
+            print("[area] nfr: FAIL — no measurable metric to check under --strict "
+                  "(B13: no longer passes by absence of evidence)")
+            return False
         print("[area] nfr: no measurable metrics (no build output?) — skipped")
         return True
     for r in results:
