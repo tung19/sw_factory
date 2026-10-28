@@ -602,7 +602,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     r = sub.add_parser("run", help="Flow A: requirement -> spec -> app")
-    r.add_argument("requirement", help="natural-language requirement, in quotes")
+    r.add_argument("requirement", nargs="?", default="",
+                   help="natural-language requirement, in quotes "
+                        "(omit with --use-spec)")
+    r.add_argument("--use-spec", action="store_true",
+                   help="build the EXISTING specs/<name>/ instead of extracting "
+                        "a new one — what a `area clarify` confirmation applies to")
     _add_common(r)
 
     c = sub.add_parser("clone", help="Flow B: reverse-engineer a sample app -> spec -> app")
@@ -807,6 +812,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("mem", help="Show the experience store (pitfalls remembered)")
 
+    cl = sub.add_parser(
+        "clarify",
+        help="Answer the --clarify gate for an app (list / confirm its material "
+             "assumptions)")
+    cl.add_argument("name", help="app name (specs/<name>/)")
+    cl.add_argument("--confirm-all", action="store_true",
+                    help="accept the recorded assumptions for THIS spec")
+    cl.add_argument("--answer", action="append", metavar="N=TEXT",
+                    help="answer question N in your own words (repeatable)")
+    cl.add_argument("--workspace", default=None, help=argparse.SUPPRESS)
+
     dg = sub.add_parser("design", help="Architect stage: write design.md from a spec")
     dg.add_argument("name")
     dg.add_argument("--backend", default="acp", choices=["acp", "llm"])
@@ -975,6 +991,7 @@ def _cmd_run(args: argparse.Namespace, expected: str | None) -> int:
         backend=args.backend, model=args.model,
         spec_iters=args.spec_iters, build_iters=args.build_iters,
         design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+        use_spec=getattr(args, "use_spec", False),
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
@@ -1386,6 +1403,66 @@ def _cmd_mem(args: argparse.Namespace, expected: str | None) -> int:
     return 0
 
 
+def _cmd_clarify(args: argparse.Namespace, expected: str | None) -> int:
+    """Answer the --clarify gate, which could previously only ever say no.
+
+    The gate told the operator to "confirm/override then re-run", but `--expect` only
+    feeds the extractor, an edit to `assumptions.yaml` is overwritten by the next
+    extraction, and no confirm verb existed — so the sole exit was `--no-clarify`,
+    which removes the gate rather than satisfying it. See area/spec/clarify.py.
+    """
+    from area.paths import WORKSPACE
+    from area.spec.clarify import CLARIFIED, confirm, is_current, open_questions
+
+    spec_dir = (Path(args.workspace) if getattr(args, "workspace", None)
+                else WORKSPACE) / "specs" / safe_name(args.name)
+    if not (spec_dir / "spec.yaml").exists():
+        print(f"[clarify] no spec at {spec_dir} — run `area run` first")
+        return 2
+
+    answers: dict[int, str] = {}
+    for pair in (args.answer or []):
+        idx, _, text = pair.partition("=")
+        try:
+            answers[int(idx.strip())] = text.strip()
+        except ValueError:
+            print(f"[clarify] --answer expects N=text, got {pair!r}")
+            return 2
+
+    open_qs = open_questions(spec_dir)
+    if not (args.confirm_all or answers):
+        if is_current(spec_dir):
+            print(f"[clarify] {args.name}: confirmed for this spec "
+                  f"({spec_dir / CLARIFIED}) — `area run --name "
+                  f"{args.name} --use-spec` will build it")
+            return 0
+        print(f"[clarify] {args.name}: {len(open_qs)} open material question(s)")
+        for i, q in enumerate(open_qs):
+            print(f"\n  [{i}] {q.get('question', '')}")
+            print(f"      assumed -> {q.get('assumption') or q.get('assumed') or ''}")
+        if open_qs:
+            print(f"\n[clarify] confirm the assumptions with `area clarify {args.name} "
+                  f"--confirm-all`, or answer one with `--answer N=\"...\"`, then "
+                  f"`area run --name {args.name} --use-spec`")
+        return 0
+
+    # A confirmation must name what it covered, so record the questions as shown.
+    shown = open_qs or []
+    if answers and max(answers) >= len(shown):
+        print(f"[clarify] --answer index out of range (0..{len(shown) - 1})")
+        return 2
+    rec = confirm(spec_dir, shown, answers=answers)
+    print(f"[clarify] {args.name}: recorded {len(shown)} question(s), "
+          f"{len(answers)} answered -> {spec_dir / CLARIFIED}")
+    print(f"[clarify] anchored on spec digest {str(rec.get('spec_digest'))[:23]}… — "
+          "changing the requirement expires it")
+    if answers:
+        print("[clarify] your typed answers become authoritative input to the next "
+              "extraction; omit --use-spec to re-extract with them")
+    print(f"[clarify] now: area run --name {args.name} --use-spec")
+    return 0
+
+
 def _cmd_design(args: argparse.Namespace, expected: str | None) -> int:
     from area.design import design_stage
 
@@ -1585,7 +1662,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "export": _cmd_export, "provenance": _cmd_provenance, "rollback": _cmd_rollback,
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
-    "mem": _cmd_mem, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
+    "mem": _cmd_mem, "clarify": _cmd_clarify, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
     "evals": _cmd_evals,
     "perf": _cmd_perf, "visual": _cmd_visual, "cost": _cmd_cost,
     "cf-fix": _cmd_cf_fix,

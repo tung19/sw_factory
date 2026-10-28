@@ -37,12 +37,12 @@ def _clarify_gate(root: Path, name: str, clarify: bool) -> list[dict[str, Any]]:
     make (ambiguities worth asking the user about before building)."""
     if not clarify:
         return []
-    from area.spec.extract import load_assumptions
+    from area.spec.clarify import open_questions
 
-    return [
-        a for a in load_assumptions(root / "specs" / name)
-        if str(a.get("material")).lower() == "true"
-    ]
+    # `open_questions` subtracts a human confirmation that still matches this spec's
+    # digest. Without it the gate had a STOP and no RESUME: nothing the operator could
+    # do would satisfy it, so the only exit was turning it off. See area/spec/clarify.py.
+    return open_questions(root / "specs" / name)
 
 
 def _spec_review_step(
@@ -195,6 +195,7 @@ def run_pipeline(
     clarify: bool = True,
     spec_review: bool = False,
     workspace: Optional[str | Path] = None,
+    use_spec: bool = False,
 ) -> PipelineResult:
     """Flow A: requirement -> spec -> [independent review] -> [clarify] -> [design] -> build.
 
@@ -205,10 +206,18 @@ def run_pipeline(
     name = safe_name(name)
     obs.set_app(name)  # scope this build's agent-run cost to this app (cost gate)
     root = Path(workspace) if workspace else WORKSPACE
-    print(f"[area] spec   : {requirement!r}")
+    spec_dir = root / "specs" / name
+    if not use_spec:
+        print(f"[area] spec   : {requirement!r}")
+    # A human's typed answers are authoritative input to a re-extraction, so the
+    # extractor stops re-guessing what they already decided.
+    from area.spec.clarify import answers_block
+
+    answered = answers_block(spec_dir)
     spec, acc = extract_spec(
-        requirement, root / "specs" / name, expected=expected, backend=backend,
-        model=model, max_iters=spec_iters,
+        requirement, spec_dir,
+        expected="\n\n".join(x for x in (expected, answered) if x) or None,
+        backend=backend, model=model, max_iters=spec_iters, reuse=use_spec,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")
     # Deliberately NOT gated on `clarify`. It used to be `clarify and spec_review`,
