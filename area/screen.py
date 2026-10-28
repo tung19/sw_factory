@@ -57,8 +57,11 @@ class Finding:
 _ASSIGNMENT = re.compile(
     r"""(?P<key>api[_-]?key|secret[_a-z]*|password|passwd|access[_-]?token|auth[_-]?token
         |client[_-]?secret|private[_-]?key|token)
-        \s*["']?\s*[:=]\s*(?P<q>["']?)
-        (?P<val>[A-Za-z0-9/+_.=~-]{16,})""",
+        \s*["']?\s*[:=]\s*
+        (?:
+            (?P<q>["'])(?P<val>[^"'\n]{8,})["']?       # quoted literal: punctuation allowed (B2)
+          | (?P<val2>[A-Za-z0-9/+_.=~-]{16,})           # unquoted: strict class (JS-code guarded)
+        )""",
     re.IGNORECASE | re.VERBOSE,
 )
 
@@ -165,20 +168,36 @@ def _line_of(text: str, pos: int) -> int:
     return text.count("\n", 0, pos) + 1
 
 
+def _assigned_value(m: re.Match[str]) -> str:
+    """The matched secret value: the quoted-literal group or the unquoted-strict group."""
+    return m.group("val") or m.group("val2")
+
+
 def _skip_assignment(s: str, m: re.Match[str]) -> bool:
     """Shared by scan and redact so the two can never disagree about a hit."""
-    value = m.group("val")
+    value = _assigned_value(m)
     return (_env_sourced(s, m.start(), value)
             or bool(_EXCLUDE_VALUE.search(value))
             or bool(_PATHISH.search(value))
             or (not m.group("q") and bool(_CODE_VALUE.match(value))))
 
 
-def _skip_vendor(m: re.Match[str]) -> bool:
-    """VALUE scope only — so the canonical doc placeholders (`AKIAIOSFODNN7EXAMPLE`,
-    `postgres://u:changeme@…`) don't get flagged, while a real literal token is never
-    excused by its surroundings."""
+_BARE_PLACEHOLDER = frozenset({
+    "example", "placeholder", "dummy", "changeme", "sample", "fixture",
+    "redacted", "todo", "xxxx",
+})
+
+
+def _skip_vendor(m: re.Match[str], kind: str = "") -> bool:
+    """VALUE scope only — so the canonical doc placeholder `AKIAIOSFODNN7EXAMPLE` isn't
+    flagged, while a real literal token is never excused by its surroundings.
+
+    A connection-string password is HUMAN-CHOSEN, so a substring match would excuse a
+    real secret that merely CONTAINS a placeholder word (`postgres://u:Todo1234pass@…`,
+    finding B3). There we exclude only a value that IS a bare placeholder (`:changeme@`)."""
     val = m.groupdict().get("val") or m.group(0)
+    if kind == "db-url-password":
+        return val.lower() in _BARE_PLACEHOLDER
     return bool(_EXCLUDE_VALUE.search(val))
 
 
@@ -192,7 +211,7 @@ def scan_text(text: str) -> list[Finding]:
                            m.group("key").lower()))
     for kind, pat in _VENDOR:
         for m in pat.finditer(text):
-            if _skip_vendor(m):
+            if _skip_vendor(m, kind):
                 continue
             out.append(Finding(kind, _line_of(text, m.start()), kind))
     return sorted(out, key=lambda f: (f.line, f.kind))
@@ -209,13 +228,14 @@ def redact_text(text: str) -> tuple[str, list[Finding]]:
     def _sub_assignment(m: re.Match[str]) -> str:
         if _skip_assignment(m.string, m):
             return m.group(0)  # scan_text skipped it too — stay consistent
-        return m.group(0).replace(m.group("val"), f"{REDACTION}:{m.group('key').lower()}")
+        val = _assigned_value(m)
+        return m.group(0).replace(val, f"{REDACTION}:{m.group('key').lower()}")
 
     new = _ASSIGNMENT.sub(_sub_assignment, text)
 
     for kind, pat in _VENDOR:
         def _sub_vendor(m: re.Match[str], _kind: str = kind) -> str:
-            if _skip_vendor(m):
+            if _skip_vendor(m, _kind):
                 return m.group(0)
             val = m.groupdict().get("val")
             if val:  # only part of the match is the secret (e.g. a db URL password)
