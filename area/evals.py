@@ -385,7 +385,8 @@ def record_experience(kind: str, note: str, *,
     """
     import datetime
 
-    res = compare(kind, runs=runs, root=root)
+    res = compare(kind, runs=runs, root=root,
+                  only_tasks=load_task_set() if root is None else None)  # B16
     verdict = res.get("verdict")
     if verdict not in DECISIVE:
         return False, (f"refused: `area evals` says {verdict} for '{kind}' "

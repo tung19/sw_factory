@@ -151,6 +151,12 @@ _NAVIGATES = re.compile(
     r"lands? on|page at|url)\b", re.I)
 
 
+def _names_a_path(text: str, pp: str) -> bool:
+    """True if `pp` appears as a PATH token in `text`, so a declared "/" does not match
+    every slash while "/boards" still matches "/boards" and "/boards/7" (B17, dormant)."""
+    return bool(re.search(rf"(?<![\w/]){re.escape(pp)}(?![\w])", text))
+
+
 def routes_unquoted(spec: Spec, acc: Acceptance) -> list[str]:
     """Criteria that navigate somewhere without naming a declared route.
 
@@ -165,7 +171,7 @@ def routes_unquoted(spec: Spec, acc: Acceptance) -> list[str]:
         text = " ".join((c.given, c.when, c.then))
         if not _NAVIGATES.search(text):
             continue
-        if not any(pp in text for pp in paths):
+        if not any(_names_a_path(text, pp) for pp in paths):
             out.append(c.id)
     return out
 

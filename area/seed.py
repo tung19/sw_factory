@@ -11,6 +11,7 @@ Fetching the candidate records is upstream (agent/http, untrusted) and passed in
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -78,8 +79,23 @@ def robots_allows(robots_txt: str, path: str, *, user_agent: str = "*") -> bool:
     return True if best is None else best[1]
 
 
+_PII_TOKENS = frozenset({
+    "email", "mail", "phone", "mobile", "ssn", "password", "pwd", "name", "dob",
+    "birthdate", "birthday", "address", "street", "card", "cvv", "ip",
+})
+
+
+def _field_tokens(name: str) -> list[str]:
+    """Split a field name into lowercase tokens across separators AND camelCase, so
+    `phoneNumber`/`email_address`/`user.email` all surface their PII component (B15)."""
+    snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name.strip())
+    return [t for t in re.split(r"[^A-Za-z0-9]+", snake.lower()) if t]
+
+
 def is_pii_field(name: str) -> bool:
-    return name.strip().lower() in _PII_FIELDS
+    if name.strip().lower() in _PII_FIELDS:
+        return True
+    return any(t in _PII_TOKENS for t in _field_tokens(name))
 
 
 def strip_pii(record: dict[str, Any]) -> tuple[dict[str, Any], int]:
