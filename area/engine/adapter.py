@@ -297,6 +297,23 @@ def _profile_defaults(label: str) -> dict[str, Any]:
         return {}
 
 
+def _cap(explicit: Any, env_name: str, profile_val: Any, cast: Any) -> Any:
+    """Resolve a resource cap by precedence: an explicit kwarg > the CLI flag (delivered
+    via env) > the per-kind profile default > the global default (left to
+    _mk_conversation). A profile value used to silently SHADOW --budget/--agent-iters
+    because the profile default was applied before the env was read (finding B7); reading
+    the CLI flag first makes the documented "a CLI flag always wins" true again."""
+    if explicit is not None:
+        return explicit
+    raw = os.getenv(env_name)
+    if raw:
+        try:
+            return cast(raw)
+        except ValueError:
+            pass
+    return profile_val
+
+
 def run_once(
     agent: AgentBase, workspace: str | Path, message: str, *,
     agent_iters: int | None = None, budget: float | None = None, label: str = "agent",
@@ -309,10 +326,8 @@ def run_once(
     import time as _t
 
     _d = _profile_defaults(label)
-    if agent_iters is None:
-        agent_iters = _d.get("agent_iters")
-    if budget is None:
-        budget = _d.get("budget_usd")
+    agent_iters = _cap(agent_iters, "AREA_AGENT_ITERS", _d.get("agent_iters"), int)
+    budget = _cap(budget, "AREA_MAX_BUDGET", _d.get("budget_usd"), float)
     t0 = _t.time()
     ws = Path(workspace)
     ws.mkdir(parents=True, exist_ok=True)
@@ -423,10 +438,8 @@ def run_until(
     import time as _t
 
     _d = _profile_defaults(label)
-    if agent_iters is None:
-        agent_iters = _d.get("agent_iters")
-    if budget is None:
-        budget = _d.get("budget_usd")
+    agent_iters = _cap(agent_iters, "AREA_AGENT_ITERS", _d.get("agent_iters"), int)
+    budget = _cap(budget, "AREA_MAX_BUDGET", _d.get("budget_usd"), float)
     if max_iters is None:
         max_iters = _d.get("max_iters") or 5
     t0 = _t.time()
