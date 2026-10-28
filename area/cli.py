@@ -1122,7 +1122,8 @@ def _cmd_provenance(args: argparse.Namespace, expected: str | None) -> int:
         return 1
     if args.verify:
         status, detail = verify_provenance(app_dir)
-        icon = {"ok": "✅", "mismatch": "❌", "absent": "⚠"}.get(status, "?")
+        icon = {"ok": "✅", "mismatch": "❌", "absent": "⚠",
+                "stale-digest": "⚠"}.get(status, "?")
         print(f"[area] provenance {status} {icon} — {detail}")
         return 0 if status == "ok" else 1
     prov = read_provenance(app_dir)
