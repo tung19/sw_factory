@@ -40,7 +40,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS
+from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS, TEST_SUFFIXES
 from typing import Any, Optional
 
 PROV_REL = ".area/provenance.json"
@@ -220,8 +220,10 @@ def _oracle_strength(app: Path, spec_dir: Optional[str | Path]) -> dict[str, Any
             return {}
         data = yaml.safe_load(acc.read_text()) or {}
         crit = [c for c in (data.get("criteria") or []) if isinstance(c, dict)]
-        text = "\n".join(f.read_text(errors="ignore")
-                          for f in sorted(hold.glob("*.ts")))
+        text = "\n".join(
+            f.read_text(errors="ignore")
+            for f in sorted(p for p in hold.rglob("*")
+                            if p.is_file() and p.suffix in TEST_SUFFIXES))
         v = classify(crit, text)
         return {"criteria": len(v), "unableToVerify": weak(v),
                 "methodUnstated": unstated(v)}

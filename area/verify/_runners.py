@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+
+from area.paths import TEST_SUFFIXES
 from typing import Iterable, Optional
 
 
@@ -122,9 +124,7 @@ def assert_locked_files_ran(report: Path, app: Path,
     # or shadowing locked test files so a green exit code hides an oracle that never
     # ran; a file's test registrations are part of its checksum-locked bytes, so a
     # locked test file cannot be made to look test-free without breaking the lock.
-    runnable = {p for p in locked
-                if p.endswith((".ts", ".tsx", ".mts", ".cts",
-                               ".js", ".jsx", ".mjs", ".cjs"))}
+    runnable = {p for p in locked if p.endswith(tuple(sorted(TEST_SUFFIXES)))}
     wanted = {p for p in runnable if _registers_tests(app / p)}
     if not wanted:
         return True, "no runnable locked test files to confirm"
