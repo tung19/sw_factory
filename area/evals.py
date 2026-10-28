@@ -263,6 +263,22 @@ def compare(kind: str, *, runs: Optional[list[dict[str, Any]]] = None,
             f"(current ran {sorted({t for t in map(_task_of, cur_runs) if t})}, "
             f"previous ran {sorted({t for t in map(_task_of, prev_runs) if t})})" + note))
         return out
+    # Same rank as `unpaired`, and for the same reason: more runs cannot fix it. The
+    # profile digest answers "which configuration", but after M9-1b scoped the skills
+    # term it no longer answers "which domain knowledge" — an `inherited` kind in a
+    # Cloudflare app and the same kind in a plain app carry the same version while
+    # seeing different packs. Comparing across that attributes a difference in KNOWLEDGE
+    # to the thing under test.
+    cur_sk = {str(r.get("skills_digest")) for r in cur_cmp if r.get("skills_digest")}
+    prev_sk = {str(r.get("skills_digest")) for r in prev_cmp if r.get("skills_digest")}
+    out["skills"] = {"current": sorted(cur_sk), "previous": sorted(prev_sk)}
+    if cur_sk and prev_sk and cur_sk != prev_sk:
+        out.update(verdict="confounded-skills", reason=(
+            "the two versions ran with DIFFERENT installed skill packs, so any delta "
+            "mixes a change in domain knowledge with the change under test "
+            f"(current {sorted(cur_sk)}, previous {sorted(prev_sk)}). Re-run both sides "
+            "on the same pack; collecting more runs cannot separate them."))
+        return out
     if len(cur_cmp) < min_runs or len(prev_cmp) < min_runs:
         out.update(verdict="insufficient-data", reason=(
             f"need >={min_runs} runs per version to judge on the {len(shared)} shared "
@@ -308,12 +324,15 @@ def check(kinds: Optional[list[str]] = None, *, strict: bool = False,
     bad = {"regressed", "broken"}
     if strict:
         bad |= {"insufficient-data", "no-data", "no-profile", "unpaired"}
+    # Not strict-only: an unseparable confound is not "not enough data", it is a
+    # comparison that cannot be made, so it never counts as a pass.
+    bad |= {"confounded-skills"}
     return (not any(r["verdict"] in bad for r in results)), results
 
 
 _ICON = {"ok": "✅", "improved": "🎉", "regressed": "❌", "broken": "💥",
          "insufficient-data": "…", "no-data": "–", "new-profile": "🆕",
-         "no-profile": "?", "unpaired": "⚖"}
+         "no-profile": "?", "unpaired": "⚖", "confounded-skills": "⚗"}
 
 
 def report_text(results: list[dict[str, Any]]) -> str:
