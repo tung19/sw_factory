@@ -113,3 +113,20 @@ def test_a_quoted_literal_is_never_excused_as_code():
     assert S.scan_text('password=hunter2hunter2hunter\n')
     assert S.scan_text(f'PASSWORD={PW}aaaaaaaa\n')
     assert S.scan_text('API_KEY=sk_live_abc123def456ghi\n')
+
+
+def test_b2_quoted_values_with_punctuation_are_caught():
+    """B2 (deep audit 2026-10-28): the assignment value class excluded punctuation, so a
+    quoted password with special chars after a recognized key was never matched."""
+    assert S.scan_text('password = "Str0ng!P@ss#2024"\n')
+    assert S.scan_text('api_key="abc:defghijklmnop1234"\n')
+    new, finds = S.redact_text('password = "Str0ng!P@ss#2024"\n')
+    assert finds and "Str0ng!P@ss#2024" not in new and "password" in new
+
+
+def test_b3_db_url_password_not_excused_by_a_contained_placeholder():
+    """B3 (deep audit 2026-10-28): a connection password is human-chosen, so merely
+    CONTAINING a placeholder word must not excuse it; only a bare placeholder is docs."""
+    assert S.scan_text('DB="postgres://u:Todo1234passxyz@host:5432/app"\n')
+    assert S.scan_text('DB="postgres://u:sampleRealPassword9@host/app"\n')
+    assert not S.scan_text('DB="postgres://u:changeme@host/app"\n')
