@@ -6,7 +6,7 @@ simple/SSR sites.
 
 Tier 2 (use_rea=True, opt-in) additionally wires the REA MCP server into the
 agent (deep reverse-engineering of binaries / closed-source). REA is beta and
-legally sensitive — use ONLY on software you are authorized to analyze.
+legally sensitive.
 
 Output is the SAME spec schema as area.spec, so a reverse-engineered app flows
 into the exact same build + deploy pipeline.
@@ -35,7 +35,7 @@ def rea_mcp_config() -> dict[str, Any]:
             command="npx",
             args=["-y", "rea-agents@6.7.0", "--mcp"],
             env={"npm_config_cache": str(Path.home() / ".cache" / "npm-area")},
-            description="Reverse Engineer Anything (authorized targets only)",
+            description="Reverse Engineer Anything",
         )
     }
 
