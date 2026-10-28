@@ -42,16 +42,67 @@ def skill_names(src: str | Path = SKILLS_DIR) -> list[str]:
     return sorted(p.name for p in src.iterdir() if (p / "SKILL.md").exists())
 
 
-def install_skills(app_dir: str | Path, src: str | Path = SKILLS_DIR) -> list[str]:
-    """Copy each skill from `src` into `<app_dir>/.claude/skills/`. Idempotent.
-    Returns the installed skill names."""
+def skill_targets(skill_dir: str | Path) -> tuple[str, ...]:
+    """The build targets a skill applies to, from its SKILL.md frontmatter.
+
+    Empty tuple = universal (applies to every target). A skill that names targets
+    is DOMAIN knowledge: `vinext-cf-build` is Cloudflare-specific, and shipping it
+    into a `plain` app put ~105 lines of irrelevant instruction in the builder's
+    context while making every kind's version move whenever it was edited.
+    Unparseable or absent frontmatter reads as universal — the safe direction,
+    since a skill nobody scoped should keep reaching everyone.
+    """
+    f = Path(skill_dir) / "SKILL.md"
+    try:
+        text = f.read_text(errors="ignore")
+    except OSError:
+        return ()
+    if not text.startswith("---"):
+        return ()
+    end = text.find("\n---", 3)
+    if end == -1:
+        return ()
+    try:
+        import yaml
+
+        meta = yaml.safe_load(text[3:end]) or {}
+    except Exception:  # noqa: BLE001
+        return ()
+    if not isinstance(meta, dict):
+        return ()
+    raw = meta.get("targets")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return ()
+    return tuple(sorted(str(t).strip() for t in raw if str(t).strip()))
+
+
+def applies_to(skill_dir: str | Path, target: str = "") -> bool:
+    """Whether this skill reaches a build for `target`. No target given = install
+    everything, which keeps every existing caller's behaviour."""
+    scope = skill_targets(skill_dir)
+    return not scope or not target or target in scope
+
+
+def install_skills(app_dir: str | Path, src: str | Path = SKILLS_DIR,
+                   target: str = "") -> list[str]:
+    """Copy the skills that apply to `target` from `src` into
+    `<app_dir>/.claude/skills/`. Idempotent. Returns the installed skill names.
+
+    Scoping by target is what makes "a Cloudflare skill cannot affect a plain
+    build" TRUE rather than assumed: `skills_preamble` already declined to NAME
+    the CF skill for a plain build, but the files were copied in anyway, so a
+    Claude Code session in that directory could still discover them.
+    See docs/harness2-gap-assessment.md F2.
+    """
     src = Path(src)
     dest = Path(app_dir) / ".claude" / "skills"
     names: list[str] = []
     if src.is_dir():
         dest.mkdir(parents=True, exist_ok=True)
         for p in src.iterdir():
-            if not (p / "SKILL.md").exists():
+            if not (p / "SKILL.md").exists() or not applies_to(p, target):
                 continue
             shutil.copytree(p, dest / p.name, dirs_exist_ok=True)
             names.append(p.name)
@@ -106,13 +157,16 @@ def _is_our_hook(matcher: object) -> bool:
 def skills_preamble(target: str = "") -> str:
     """A short nudge prepended to the build prompt. Auto-match already works, but
     naming the skills makes the headless/ACP path reliable (explicit `/name`)."""
-    names = skill_names()
+    # One rule for "does this skill reach this build", shared with install_skills —
+    # the CF gate used to be hardcoded here while the installer copied everything,
+    # so the prompt and the directory disagreed.
+    names = [n for n in skill_names(SKILLS_DIR) if applies_to(SKILLS_DIR / n, target)]
     if not names:
         return ""
     lines = ["You have AREA skills in this project (.claude/skills). Use them:"]
     if "area-oracle-loop" in names:
         lines.append("- /area-oracle-loop — the build discipline (lock the oracle, build to green, never self-judge).")
-    if "vinext-cf-build" in names and (not target or target == "cloudflare"):
+    if "vinext-cf-build" in names:
         lines.append("- /vinext-cf-build — Cloudflare (vinext) build + audit gotchas & fixes.")
     extra = [n for n in names if n not in ("area-oracle-loop", "vinext-cf-build")]
     for n in extra:

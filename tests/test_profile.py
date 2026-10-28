@@ -101,7 +101,8 @@ def test_digest_tracks_skills_only_when_the_kind_installs_them(tmp_path, monkeyp
     _write(tmp_path, "without", skills="none")
     a1 = P.load_profile("withskills", root=tmp_path).digest
     b1 = P.load_profile("without", root=tmp_path).digest
-    monkeypatch.setattr(P, "_skills_hash", lambda: "sha256:DIFFERENT")
+    monkeypatch.setattr(P, "_skills_hash",
+                        lambda *, domain=False: "sha256:DIFFERENT")
     assert P.load_profile("withskills", root=tmp_path).digest != a1
     assert P.load_profile("without", root=tmp_path).digest == b1
 
@@ -183,7 +184,8 @@ def test_inherited_follows_the_skills_pack_but_none_does_not(tmp_path, monkeypat
     def _digest(skills: str, skills_hash: str) -> str:
         (tmp_path / "k.yaml").write_text(
             f"kind: k\nlabels: [k]\nprompt_sources: []\nskills: {skills}\n")
-        monkeypatch.setattr(P, "_skills_hash", lambda: skills_hash)
+        monkeypatch.setattr(P, "_skills_hash",
+                            lambda *, domain=False: skills_hash)
         prof = P.load_profile("k", root=tmp_path)
         assert prof is not None
         return prof.digest

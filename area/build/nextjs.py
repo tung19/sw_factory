@@ -264,7 +264,7 @@ def build_app(
     # app dir) discovers them as project skills, and nudge it to use them.
     from area.skills import install_guardrail, install_skills, skills_preamble
 
-    installed = install_skills(app)
+    installed = install_skills(app, target=target)
     if installed:
         prompt = skills_preamble(target) + prompt
         print(f"[area] skills: {', '.join('/' + n for n in installed)}")

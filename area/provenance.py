@@ -133,11 +133,19 @@ def factory_commit() -> str:
 
 
 def skills_digest() -> Optional[str]:
-    """Digest of the skills pack `area/skills.py` installs into every built app — i.e.
-    WHICH prompt/domain-knowledge content shaped this build. None if absent."""
-    from area.paths import REPO
+    """Digest of the skills pack `area/skills.py` installs into a built app — i.e.
+    WHICH prompt/domain-knowledge content shaped this build. None if absent.
 
-    d = REPO / "skills"
+    Covers the WHOLE pack on purpose, including skills scoped to other targets, and
+    must keep doing so: a version answers "what can change this kind" (and is
+    therefore scoped — see `area.profile.profile_digest`), while an attestation
+    answers "what shaped this build". Narrowing this would make provenance claim
+    less than the truth.
+
+    Takes the directory from `area.skills` rather than re-deriving `REPO / "skills"`,
+    so there is one answer to where the pack lives.
+    """
+    from area.skills import SKILLS_DIR as d
     if not d.is_dir():
         return None
     h = hashlib.sha256()
