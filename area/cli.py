@@ -935,9 +935,7 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="skip the one-shot clarify confirm (accept the filled spec)")
     ad.add_argument("--yes", action="store_true", help="auto-confirm the one-shot clarify")
     ad.add_argument("--seed", action="store_true",
-                    help="opt-in: seed data from the reference (needs --seed-attest)")
-    ad.add_argument("--seed-attest", action="store_true",
-                    help="attest you have the right to copy the reference's data")
+                    help="opt-in: seed data from the reference (robots/PII/cap still apply)")
 
     mo = sub.add_parser("monitor", help="Probe a deployed app's health/latency")
     mo.add_argument("target", help="app name or https URL")
@@ -1622,7 +1620,7 @@ def _cmd_adapt(args: argparse.Namespace, expected: str | None) -> int:
     from area.seed import SeedPolicy
 
     name = _resolve_name(args.name, hint=args.reference, fallback="adapt")
-    seed_policy = SeedPolicy(attested=args.seed_attest) if args.seed else None
+    seed_policy = SeedPolicy() if args.seed else None
 
     def _confirm(_res: "AdaptResult") -> bool:
         return bool(getattr(args, "yes", False))  # one-shot: --yes accepts the filled spec

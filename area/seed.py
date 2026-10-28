@@ -1,13 +1,12 @@
 """area.seed — P4 of `area adapt`: OPT-IN seeding of the clone with data from the
-reference app, behind an explicit authorization attestation + the safeguards agreed
-in the feature spec (public-only, robots.txt, rate-limit, no-PII by default,
-provenance). DEFAULT OFF.
+reference app, with the safeguards agreed in the feature spec (robots.txt,
+rate-limit, no-PII by default, provenance). DEFAULT OFF.
 
-AREA does NOT rule on legality — it surfaces the checklist and refuses to seed
-unless the operator attests they have the right (their own app / public + permitted
-data). This module owns the deterministic SAFEGUARDS: the attestation gate, a
-minimal robots.txt check, PII stripping, the record cap, and the provenance record.
-Fetching the candidate records is upstream (agent/http, untrusted) and passed in.
+The authorization attestation gate was removed by request (this is a research tool;
+the operator owns authorization externally). This module still owns the deterministic
+SAFEGUARDS: a minimal robots.txt check, PII stripping, the record cap, and the
+provenance record. Fetching the candidate records is upstream (agent/http, untrusted)
+and passed in.
 """
 from __future__ import annotations
 
@@ -25,7 +24,6 @@ _PII_FIELDS = {
 
 @dataclass
 class SeedPolicy:
-    attested: bool = False          # operator confirmed they have the right to seed
     max_records: int = 100
     include_pii: bool = False
     user_agent: str = "area-adapt-seed"
@@ -35,7 +33,6 @@ class SeedPolicy:
 @dataclass
 class SeedResult:
     source: str
-    attested: bool
     seeded: int = 0
     skipped_pii_fields: int = 0
     records: list[dict[str, Any]] = field(default_factory=list)
@@ -44,15 +41,6 @@ class SeedResult:
     @property
     def ok(self) -> bool:
         return not self.blocked_reason
-
-
-def seed_allowed(policy: SeedPolicy) -> tuple[bool, str]:
-    """Seeding is opt-in: it runs ONLY with an explicit authorization attestation."""
-    if not policy.attested:
-        return False, ("seed-from-reference is opt-in and requires an explicit "
-                       "authorization attestation (you confirm you have the right "
-                       "to copy this data)")
-    return True, ""
 
 
 def robots_allows(robots_txt: str, path: str, *, user_agent: str = "*") -> bool:
@@ -108,16 +96,13 @@ def seed_from_reference(
     reference: str, candidate_records: list[dict[str, Any]], policy: SeedPolicy, *,
     robots_txt: str | None = None, path: str = "/",
 ) -> SeedResult:
-    """Apply the safeguards to already-fetched candidate records. BLOCKS (seeds
-    nothing) unless attested; honors robots.txt when given; strips PII unless
-    `include_pii`; caps at `max_records`. The caller writes `result.records` into
-    the clone and records provenance."""
-    ok, why = seed_allowed(policy)
-    if not ok:
-        return SeedResult(source=reference, attested=False, blocked_reason=why)
+    """Apply the safeguards to already-fetched candidate records. Honors robots.txt
+    when given; strips PII unless `include_pii`; caps at `max_records`. The caller
+    writes `result.records` into the clone and records provenance. (The authorization
+    attestation gate was removed by request — see the module docstring.)"""
     if robots_txt is not None and not robots_allows(robots_txt, path,
                                                     user_agent=policy.user_agent):
-        return SeedResult(source=reference, attested=True,
+        return SeedResult(source=reference,
                           blocked_reason=f"robots.txt disallows {path}")
     out: list[dict[str, Any]] = []
     skipped = 0
@@ -128,5 +113,5 @@ def seed_from_reference(
             clean, dropped = strip_pii(rec)
             skipped += dropped
             out.append(clean)
-    return SeedResult(source=reference, attested=True, seeded=len(out),
+    return SeedResult(source=reference, seeded=len(out),
                       skipped_pii_fields=skipped, records=out)
