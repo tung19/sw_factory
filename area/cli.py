@@ -1011,6 +1011,7 @@ def _cmd_clone(args: argparse.Namespace, expected: str | None) -> int:
         backend=args.backend, model=args.model,
         spec_iters=args.spec_iters, build_iters=args.build_iters,
         design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+        strict=args.strict,
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
@@ -1073,6 +1074,7 @@ def _cmd_intake(args: argparse.Namespace, expected: str | None) -> int:
         backend=args.backend, model=args.model,
         spec_iters=args.spec_iters, build_iters=args.build_iters,
         design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
+        strict=args.strict,
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})

@@ -331,6 +331,7 @@ def intake_pipeline(
     clarify: bool = True,
     spec_review: bool = False,
     workspace: Optional[str | Path] = None,
+    strict: bool = False,
 ) -> PipelineResult:
     """Hybrid seam: ingest AI-DLC Inception artifacts -> spec -> [design] -> build.
 
@@ -363,7 +364,8 @@ def intake_pipeline(
         emit_evidence(spec_dir, trace_id, "clarify.needed", {"questions": len(qs)})
         return _clarify_result(name, spec, acc, root, qs)
     _maybe_design(name, backend, model, design, spec)
-    res = _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
+    res = _build(name, spec, acc, root, target, backend, model, build_iters,
+                  tdd=tdd, strict=strict)
     emit_evidence(spec_dir, trace_id, "construction.done", {"passed": res.passed})
     return res
 
@@ -403,6 +405,7 @@ def clone_pipeline(
     clarify: bool = True,
     spec_review: bool = False,
     workspace: Optional[str | Path] = None,
+    strict: bool = False,
 ) -> PipelineResult:
     """Flow B: reverse-engineer a sample app -> spec -> [independent review] -> build."""
     name = safe_name(name)
@@ -458,5 +461,5 @@ def clone_pipeline(
     reference = _resolve_clone_reference(source, root / "specs" / name) if tdd else None
     return _build(
         name, spec, acc, root, target, backend, model, build_iters, tdd=tdd,
-        reference=reference, ui_dir=ui_dir,
+        reference=reference, ui_dir=ui_dir, strict=strict,
     )

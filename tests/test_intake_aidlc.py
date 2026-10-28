@@ -87,7 +87,7 @@ def test_clone_tdd_passes_parity_reference(monkeypatch, tmp_path):
                         lambda src, out, **k: _spec_acc())
 
     def fake_build(name, spec, acc, root, target, backend, model, build_iters,
-                   tdd=False, reference=None, ui_dir=None):
+                   tdd=False, reference=None, ui_dir=None, **_):
         cap.update(tdd=tdd, reference=reference, ui_dir=ui_dir)
         return area.pipeline.PipelineResult(
             name, spec, acc, root / "specs" / name, root / "apps" / name, True
@@ -106,7 +106,7 @@ def test_clone_without_tdd_has_no_reference(monkeypatch, tmp_path):
                         lambda src, out, **k: _spec_acc())
 
     def fake_build(name, spec, acc, root, target, backend, model, build_iters,
-                   tdd=False, reference=None, ui_dir=None):
+                   tdd=False, reference=None, ui_dir=None, **_):
         cap.update(tdd=tdd, reference=reference, ui_dir=ui_dir)
         return area.pipeline.PipelineResult(
             name, spec, acc, root / "specs" / name, root / "apps" / name, True
@@ -128,7 +128,7 @@ def test_clone_captures_ui_and_passes_ui_dir(monkeypatch, tmp_path):
     (sample / "globals.css").write_text("body{color:#0ea5e9;font-family:Inter}")
 
     def fake_build(name, spec, acc, root, target, backend, model, build_iters,
-                   tdd=False, reference=None, ui_dir=None):
+                   tdd=False, reference=None, ui_dir=None, **_):
         cap.update(ui_dir=ui_dir, ui=spec.ui)
         return area.pipeline.PipelineResult(
             name, spec, acc, root / "specs" / name, root / "apps" / name, True
