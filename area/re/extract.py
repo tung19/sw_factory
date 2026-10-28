@@ -40,6 +40,61 @@ def rea_mcp_config() -> dict[str, Any]:
     }
 
 
+
+# A local-path reference was the one kind that never reached `_sample/`: the RE prompt
+# told the agent "local path -> read the files there", so nothing was isolated. Two
+# consequences, both silent:
+#
+#  1. `capture_ui_evidence` looks for `_sample/` (or an http source) and otherwise
+#     returns "no _sample/ tree" — so a local-path clone captured NO UI evidence, which
+#     means `_with_ui_parity` had nothing to bolt onto the build oracle and the visual
+#     gate was never auto-selected. The UI half of Flow B did nothing, and the build
+#     still went green. `area clone ./some-app` is the most natural invocation there is.
+#  2. `.claude/skills/clone-from-source` requires the reference to be ISOLATED and READ,
+#     never run. Reading the user's live directory in place is not that.
+#
+# The intent was always otherwise: ui_capture's own docstring says "_sample/ tree
+# (repo/local-path reference cloned by RE)". This makes the path kind match it.
+#
+# Generated trees are skipped, which is also what makes it affordable: the AREA-built
+# apps on this machine are 1.2-1.4 GB, almost all of it node_modules and .next.
+def isolate_local_path(source: str, out_dir: Path) -> tuple[int, int]:
+    """Copy a local reference into `<out_dir>/_sample/`. Returns (files, bytes).
+
+    Idempotent: an existing non-empty `_sample/` is left alone, so a re-run does not
+    silently replace the evidence an earlier spec was derived from.
+    """
+    import shutil
+
+    from area.paths import GENERATED_AT_ROOT, GENERATED_DIRS
+
+    src = Path(source).expanduser()
+    sample = out_dir / "_sample"
+    if sample.is_dir() and any(sample.iterdir()):
+        return (0, 0)
+    if not src.is_dir():
+        return (0, 0)
+
+    skip = set(GENERATED_DIRS)
+    n = total = 0
+    for p in src.rglob("*"):
+        rel = p.relative_to(src)
+        if any(part in skip for part in rel.parts):
+            continue
+        if rel.parts and rel.parts[0] in GENERATED_AT_ROOT:
+            continue
+        if not p.is_file() or p.is_symlink():
+            continue
+        dst = sample / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(p, dst)
+        except OSError:
+            continue
+        n += 1
+        total += dst.stat().st_size
+    return (n, total)
+
 def spec_from_source(
     source: str,
     out_dir: str | Path,
@@ -59,6 +114,12 @@ def spec_from_source(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
+    if kind in ("path", "auto") and Path(source).expanduser().is_dir():
+        files, size = isolate_local_path(source, out)
+        if files:
+            print(f"[area] re-spec: isolated {files} file(s) ({size / 1e6:.1f} MB) "
+                  f"into {out / '_sample'} (generated trees skipped)")
+
     tier2 = (
         "\nYou ALSO have the REA toolset (MCP) available for deep reverse-"
         "engineering (binaries, .NET, APK, native). Use it when the source tools "
@@ -72,7 +133,8 @@ def spec_from_source(
         f"=== SAMPLE APP (kind={kind}) ===\n{source}\n\n"
         "Investigate with your own tools (keyless):\n"
         "- git URL  -> `git clone` into ./_sample and read the source.\n"
-        "- local path -> read the files there.\n"
+        "- local path -> ALREADY ISOLATED at ./_sample (generated trees "
+        "skipped). Read it there; never run it, never `npm install`.\n"
         "- http(s) URL -> `curl` it and inspect the HTML / visible behavior."
         f"{tier2}\n"
         "Work out the app's observable FEATURES and DATA MODEL. Capture ONLY what "

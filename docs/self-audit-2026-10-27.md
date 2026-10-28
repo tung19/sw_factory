@@ -834,6 +834,44 @@ the last: it fails if **any** module ever again treats something as generated th
 attestation still digests, and a second asserts they are not merely in agreement today
 but derived from the same set.
 
+### M15 · a local-path clone silently lost the entire UI half of Flow B — FIXED (2026-10-28)
+
+Found while choosing a reference for the first real `area clone` run, which is the
+cheapest a finding has been: **$0, and it would have cost ~$10 to NOT discover.**
+
+`capture_ui_evidence` captures from `_sample/`, or from a live http(s) source. The RE
+prompt said *"local path -> read the files there"*, so nothing ever created `_sample/`
+for a path. Measured per kind:
+
+    kind=path  captured=False   "no _sample/ tree and source is not an http(s) URL"
+    kind=url   captured=True
+
+With no UI evidence, `_with_ui_parity` has nothing to bolt onto the build oracle and the
+visual gate is never auto-selected. So **`area clone ./some-app --tdd` — the most
+natural invocation there is — produced a GREEN build with the whole UI-parity half of
+Flow B inert.** That is #35's entire contribution ("the UI is now a TERM IN THE BUILD
+ORACLE") disabled by the choice of reference kind, while reporting success. Had the run
+happened first, the report would have been "clone green" and the omission invisible.
+
+The intent was always otherwise — `capture_ui_evidence`'s own docstring says "`_sample/`
+tree (repo/**local-path** reference cloned by RE)". So this is an implementation gap
+against stated intent, not a design disagreement. `isolate_local_path` copies the
+reference into `_sample/` before the RE agent runs, skipping `GENERATED_DIRS`, and the
+prompt now points the agent there with the do-not-run rule attached — which also
+enforces `.claude/skills/clone-from-source`'s requirement that the reference be
+ISOLATED and READ rather than read in place. Idempotent: an existing `_sample/` is left
+alone, so a re-run cannot swap the evidence an earlier spec was derived from.
+
+Measured on the real reference: **1.4 GB → 53 files, 0.3 MB, 0.5 s**, with
+`node_modules`/`.next` skipped and `app/` intact — and `capture_ui_evidence` then
+returns `captured=True` with 5 rendered files, 1 stylesheet and 3 design tokens. The
+affordability is a direct consequence of M14's single `GENERATED_DIRS` set.
+
+11 tests. The first ten passed **with the call site removed**, because they exercised
+`isolate_local_path` directly — the same wiring blind spot F3 had. The eleventh drives
+the real `spec_from_source` with only the agent stubbed, asserts `_sample/` exists *when
+the agent is invoked*, and goes red without the call.
+
 ## Scores
 
 | Dimension | Score | Why |
