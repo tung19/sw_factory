@@ -136,15 +136,33 @@ def extract_spec(
     backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
+    reuse: bool = False,
 ) -> tuple[Spec, Acceptance]:
     """Turn a natural-language requirement into a validated spec artifact.
 
     Writes <out_dir>/spec.yaml, acceptance.yaml, assumptions.yaml. Returns the
     parsed (Spec, Acceptance). `expected` carries user-provided expected-result
     examples that become authoritative acceptance criteria.
+
+    `reuse=True` loads an existing spec instead of generating one. This is what makes
+    a clarify confirmation usable: the extractor is an LLM, so re-running it produces
+    a DIFFERENT spec with a different digest, which would expire the confirmation the
+    human had just given. Confirming a spec and then building a regenerated one would
+    also mean the thing reviewed is not the thing built. It additionally makes
+    confirming free — the loop of re-running to get past the gate cost a fresh
+    extraction plus an unpriced review every time.
     """
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+
+    if reuse:
+        sp, ac = out / "spec.yaml", out / "acceptance.yaml"
+        if not (sp.exists() and ac.exists()):
+            raise RuntimeError(
+                f"--use-spec: no spec to reuse at {out} (expected spec.yaml and "
+                "acceptance.yaml). Run without --use-spec first.")
+        print(f"[area] spec   : reusing {sp} (not re-extracting)")
+        return load_spec(sp), load_acceptance(ac)
 
     task = (
         "You are the spec stage of a software factory. Turn the REQUIREMENT "

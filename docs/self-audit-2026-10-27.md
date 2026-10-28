@@ -610,6 +610,61 @@ with the thing being graded. The options, cheapest first:
 3. **Leave it, and accept that `evals` is a tripwire for "something changed", not a
    grader.** It would then be honest to say so in its own output.
 
+### M10 · the `--clarify` gate implemented the STOP without the RESUME — FIXED (2026-10-28)
+
+Found by trying to run a real build, three times, and never getting one. The gate
+prints *"Confirm/override then re-run"*. Nothing an operator can do satisfies it:
+
+| the offered exit | what it actually does |
+|---|---|
+| `--expect "<examples>"` | text appended to the **extraction** prompt (`extract.expected_block`); never reaches `_clarify_gate` |
+| edit `material: false` | **destroyed** — the extractor rewrites `assumptions.yaml` every run |
+| a confirm verb | **did not exist** — 32 handlers, no `clarify`/`confirm` |
+| `--no-clarify` | removes the gate rather than answering it |
+
+So the real choice was **"cannot build" or "no gate"**, with nothing between — and each
+attempt cost a fresh spec extraction plus an unpriced `ask_cli` review (~$0.50 + an
+unmeasurable half, ~2 min).
+
+**It also does not converge.** Measured on one app over three runs: **8 → 2 → 11**
+material assumptions. Answering a question in the requirement makes the independent
+reviewer ask the *next* question down — attempt 2 asked "how does the user type an
+amount", attempt 3 answered that and was asked "which strings count as valid: leading
+`+`, bare `.50`, comma decimal marks, thousands separators?". `material` is also the
+agent's **own** label (`extract.py:52` tells it to record its guesses), uncalibrated and
+uncapped, which is why the count swings. So "every question answered" is not a reachable
+state, and a gate keyed to it can only ever say no.
+
+Three of attempt 3's eleven were worth the stop, which is why the answer is not to
+weaken it: nothing enforced "local-only" (`next dev` binds every interface);
+`AC-14` asserts "no outbound network requests" while Next telemetry and `next/font`
+make several by default, so **that acceptance criterion would have passed by accident**;
+and `./data/expenses.db` was headed for version control with real spending data in it.
+
+**The fix is a resume, not a loosening.** CLAUDE.md puts the human as the top gate; an
+unanswerable stop is not a gate, it is a wall. New `area/spec/clarify.py` +
+`area clarify <name> [--confirm-all] [--answer N="…"]` records the decision in
+`specs/<name>/clarified.yaml`, **anchored on the spec digest** rather than on question
+text — because per-question closure is unreachable, while "the human reviewed THIS
+spec" is reachable and bounded: change the requirement and it expires. `clarified.yaml`
+is deliberately **not** in `provenance._MATERIALS`, so recording a confirmation cannot
+expire itself.
+
+`extract_spec(reuse=True)` / `area run --use-spec` is the other half, and without it the
+first half is useless: the extractor is an LLM, so re-running it yields a different spec
+with a different digest, expiring the confirmation just given — and would mean the spec
+reviewed is not the spec built. It also makes confirming free.
+
+`--confirm-all` deliberately does **not** feed the agent's own assumptions back to the
+extractor as answers; repeating a guess would dress it up as a decision. Only answers a
+human types become authoritative input.
+
+12 tests, one shown to go red against the old gate. Dogfooded on the real `expenses`
+spec: 11 open → confirmed → silent → spec edited → 11 open again → spec restored →
+silent. The confirmation written during that dogfood was then **deleted**, because
+leaving a record claiming a human reviewed 11 assumptions they had not seen is the same
+category of error as a hand-written attestation.
+
 ## Scores
 
 | Dimension | Score | Why |
