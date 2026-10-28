@@ -108,6 +108,7 @@ def _build(
     name: str, spec: Spec, acc: Acceptance, root: Path, target: str, backend: Backend,
     model: Optional[str], build_iters: int, tdd: bool = False,
     reference: Optional[str] = None, ui_dir: Optional[str] = None,
+    strict: bool = False,
 ) -> PipelineResult:
     app_dir = root / "apps" / name
     design_path = root / "specs" / name / "design.md"
@@ -116,7 +117,7 @@ def _build(
     if tdd:
         passed = _tdd_build(
             name, spec, acc, app_dir, target, backend, model, build_iters,
-            design_text, reference=reference, ui_dir=ui_dir,
+            design_text, reference=reference, ui_dir=ui_dir, strict=strict,
         )
     else:
         print(f"[area] build : target={target} -> {app_dir}")
@@ -132,7 +133,7 @@ def _tdd_build(
     name: str, spec: Spec, acc: Acceptance, app_dir: Path, target: str,
     backend: Backend, model: Optional[str], build_iters: int, design_text: str,
     *, reference: Optional[str] = None, ui_dir: Optional[str] = None,
-    max_challenges: int = 1,
+    max_challenges: int = 1, strict: bool = False,
 ) -> bool:
     """TDD: lock the independent acceptance suite FIRST, then build-to-green
     against it. If the build fails because the builder challenges a locked test
@@ -156,7 +157,7 @@ def _tdd_build(
     app_dir.mkdir(parents=True, exist_ok=True)
     holdout, lock = author_and_lock(
         name, backend=backend, model=model, app=app_dir, acc_yaml=acc_yaml,
-        reference=reference,
+        reference=reference, strict=strict,
     )
 
     for attempt in range(max_challenges + 1):
@@ -196,6 +197,7 @@ def run_pipeline(
     spec_review: bool = False,
     workspace: Optional[str | Path] = None,
     use_spec: bool = False,
+    strict: bool = False,
 ) -> PipelineResult:
     """Flow A: requirement -> spec -> [independent review] -> [clarify] -> [design] -> build.
 
@@ -234,7 +236,8 @@ def run_pipeline(
     if qs:
         return _clarify_result(name, spec, acc, root, qs)
     _maybe_design(name, backend, model, design, spec)
-    return _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd)
+    return _build(name, spec, acc, root, target, backend, model, build_iters, tdd=tdd,
+                  strict=strict)
 
 
 def _prior_spec_text(root: Path, name: str) -> str:
