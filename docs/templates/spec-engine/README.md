@@ -58,6 +58,7 @@ cp assumptions.template.yaml /path/to/specs/<name>/assumptions.yaml
 
 # 2. the weld — green == done (make it your spec engine's CI gate)
 tools/validate-spec.sh /path/to/specs/<name> --strict
+tools/validate-spec.sh /path/to/specs/<name> --strict --json   # machine-readable verdict
 
 # 3. hand off to the factory
 area run --name <name> --use-spec
