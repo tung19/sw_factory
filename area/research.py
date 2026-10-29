@@ -135,6 +135,26 @@ def validate_brief(brief: ResearchBrief, *, min_repos: int = 5) -> list[str]:
     return issues
 
 
+def research_block(brief: ResearchBrief) -> str:
+    """Prompt context for the spec stage: the features the top comparable OSS projects
+    implement, to INFORM the spec. The requirement stays authoritative and scope must
+    NOT grow beyond it; every folded-in feature still needs an acceptance criterion, so
+    the spec the LLM writes keeps `validate_cross`'s feature↔AC coverage by construction.
+    Empty when no analysed repo carried any feature (nothing to fold)."""
+    lines = [f"- {r.repo}: {', '.join(r.features[:6])}" for r in brief.top if r.features]
+    if not lines:
+        return ""
+    body = "\n".join(lines)
+    return (
+        "\n=== COMPARABLE PROJECTS (research — CONTEXT, not authority) ===\n"
+        f"{len(brief.top)} top open-source apps solving a similar problem implement the "
+        "features below. Fold in ONLY the ones that serve the REQUIREMENT above — the "
+        "requirement is authoritative and you must NOT invent scope beyond it. For every "
+        "feature you keep, write at least one acceptance criterion.\n"
+        f"{body}\n"
+    )
+
+
 def _engine_runner(backend: "Backend", model: Optional[str],
                    budget: Optional[float], top: int) -> Callable[[str, Path], None]:
     """Default runner: drive the agent to WRITE brief.json, looping until it parses
