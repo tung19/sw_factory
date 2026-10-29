@@ -753,6 +753,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         "PRODUCTION datastores it would create/migrate, the gate "
                         "prompt) and change nothing — no provisioning, no deploy")
 
+    fm = sub.add_parser(
+        "feature-map",
+        help="(Re)generate specs/<name>/FEATURE_MAP.md — the condensed map of what the "
+             "app does and how to reach it — from spec.yaml + acceptance.yaml")
+    fm.add_argument("name")
+
     pv = sub.add_parser("provenance",
                         help="Show or verify an app's build provenance (SLSA-style)")
     pv.add_argument("name")
@@ -1188,6 +1194,21 @@ def _cmd_export(args: argparse.Namespace, expected: str | None) -> int:
     print(log)
     print(f"[area] export: {'✅ done' if ok else '❌ failed'} — {args.name}")
     return 0 if ok else 1
+
+
+def _cmd_feature_map(args: argparse.Namespace, expected: str | None) -> int:
+    from area.feature_map import write_feature_map
+    from area.pipeline import WORKSPACE
+    from area.spec.models import load_acceptance, load_spec
+
+    spec_dir = WORKSPACE / "specs" / safe_name(args.name)
+    sp, ap = spec_dir / "spec.yaml", spec_dir / "acceptance.yaml"
+    if not sp.exists() or not ap.exists():
+        print(f"[area] no spec.yaml/acceptance.yaml at {spec_dir} — build the app first.")
+        return 1
+    out = write_feature_map(load_spec(sp), load_acceptance(ap), spec_dir)
+    print(f"[area] feature-map → {out}")
+    return 0
 
 
 def _cmd_provenance(args: argparse.Namespace, expected: str | None) -> int:
@@ -1753,7 +1774,8 @@ def _cmd_watch(args: argparse.Namespace, expected: str | None) -> int:
 _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "run": _cmd_run, "clone": _cmd_clone, "iterate": _cmd_iterate,
     "inception": _cmd_inception, "intake": _cmd_intake, "deploy": _cmd_deploy,
-    "export": _cmd_export, "provenance": _cmd_provenance, "rollback": _cmd_rollback,
+    "export": _cmd_export, "feature-map": _cmd_feature_map,
+    "provenance": _cmd_provenance, "rollback": _cmd_rollback,
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "clarify": _cmd_clarify, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
