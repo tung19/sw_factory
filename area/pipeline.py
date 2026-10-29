@@ -127,7 +127,18 @@ def _build(
             max_iters=build_iters, design=design_text, ui_dir=ui_dir,
         )
     print(f"[area]        build {'GREEN' if passed else 'NOT green'}")
-    return PipelineResult(name, spec, acc, root / "specs" / name, app_dir, passed)
+    spec_dir = root / "specs" / name
+    # The single convergence point of run/iterate/intake/clone, so the feature map is
+    # emitted once for all of them (not threaded through one entrypoint). It is derived
+    # from the spec, so even a non-green build gets one; a render failure must never
+    # break the build.
+    try:
+        from area.feature_map import write_feature_map
+
+        write_feature_map(spec, acc, spec_dir)
+    except Exception as e:  # noqa: BLE001
+        print(f"[area] feature-map skipped (warn): {e}")
+    return PipelineResult(name, spec, acc, spec_dir, app_dir, passed)
 
 
 def _tdd_build(
