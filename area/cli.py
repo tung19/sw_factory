@@ -24,6 +24,7 @@ from area._util import safe_name
 if TYPE_CHECKING:
     from area.inception.engine import ApproveFn, Bolt
     from area.pipeline import PipelineResult
+    from area.research import RepoAnalysis
 
 # The post-build gates, in run order — the SINGLE source for the gate set. The
 # `_finish` selection, `_run_gate` dispatch, and the `--all` help string all derive
@@ -617,6 +618,9 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--clone-best", action="store_true",
                    help="research comparable apps, then CLONE the single highest-ranked "
                         "repo (Flow B parity rebuild) instead of building a fresh spec")
+    r.add_argument("--clone-pick", action="store_true",
+                   help="like --clone-best but PRINT the top repos and let you choose "
+                        "which one to clone (needs an interactive terminal)")
     _add_common(r)
 
     c = sub.add_parser("clone", help="Flow B: reverse-engineer a sample app -> spec -> app")
@@ -999,14 +1003,49 @@ def main(argv: list[str] | None = None) -> int:
 # --- subcommand handlers (one per command). `expected` is used only by the build
 # flows (run/clone/intake/iterate); the others accept it for a uniform table. ---
 
+def _repo_chooser(
+    read: Callable[[str], str] = input,   # injectable for tests
+) -> "Callable[[list[RepoAnalysis]], int]":
+    """Interactive top-N chooser for `--clone-pick`: print each researched repo and
+    prompt for an index (1-based). Empty answer → the first (highest-ranked). Returns a
+    0-based index into the list; re-prompts until the answer is in range."""
+    def choose(repos: "list[RepoAnalysis]") -> int:
+        print("[area] research found these comparable repos:")
+        for i, r in enumerate(repos, 1):
+            feats = ", ".join(getattr(r, "features", [])[:4])
+            suffix = f"  — {feats}" if feats else ""
+            print(f"  {i}. {r.repo}  (score {r.score:.1f}){suffix}")
+        while True:
+            try:
+                ans = read(f"Chọn repo để clone [1-{len(repos)}] (mặc định 1): ").strip()
+            except EOFError:
+                ans = ""
+            if not ans:
+                return 0
+            if ans.isdigit() and 1 <= int(ans) <= len(repos):
+                return int(ans) - 1
+            print(f"  → nhập một số từ 1 đến {len(repos)}.")
+    return choose
+
+
 def _cmd_run(args: argparse.Namespace, expected: str | None) -> int:
+    import sys
+
     from area import trace
     from area.pipeline import run_pipeline
 
-    if getattr(args, "clone_best", False) and getattr(args, "use_spec", False):
-        print("[area] --clone-best and --use-spec are mutually exclusive: the first "
-              "clones a discovered repo, the second reuses an existing spec.")
+    clone_best = getattr(args, "clone_best", False) or getattr(args, "clone_pick", False)
+    if clone_best and getattr(args, "use_spec", False):
+        print("[area] --clone-best/--clone-pick and --use-spec are mutually exclusive: "
+              "the first clones a discovered repo, the second reuses an existing spec.")
         raise SystemExit(2)
+    choose_repo = None
+    if getattr(args, "clone_pick", False):
+        if not sys.stdin.isatty():
+            print("[area] --clone-pick needs an interactive terminal to choose a repo. "
+                  "Use --clone-best to auto-pick the highest-ranked one.")
+            raise SystemExit(2)
+        choose_repo = _repo_chooser()
     name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="app"))
     trace.start_pipeline(name, "run",
                          inputs={"requirement": args.requirement[:500], "tdd": args.tdd})
@@ -1019,7 +1058,8 @@ def _cmd_run(args: argparse.Namespace, expected: str | None) -> int:
         research=getattr(args, "research", False),
         research_top=getattr(args, "research_top", 5),
         research_budget=getattr(args, "budget", None),
-        clone_best=getattr(args, "clone_best", False),
+        clone_best=clone_best,
+        choose_repo=choose_repo,
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})

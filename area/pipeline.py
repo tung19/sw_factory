@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from area import obs
 from area._util import safe_name
@@ -18,6 +18,7 @@ from area.paths import WORKSPACE as WORKSPACE  # noqa: E402  (single source; ARE
 
 if TYPE_CHECKING:
     from area.engine import Backend
+    from area.research import RepoAnalysis
 
 
 @dataclass
@@ -210,10 +211,13 @@ def _run_clone_best(requirement: str, *, name: str, spec_dir: Path, root: Path,
                     target: str, backend: "Backend", model: Optional[str],
                     spec_iters: int, build_iters: int, design: Optional[bool],
                     tdd: bool, clarify: bool, spec_review: bool, strict: bool,
-                    research_top: int, research_budget: Optional[float]) -> PipelineResult:
-    """`--clone-best`: research comparable OSS, pick the single highest-ranked repo, and
-    hand it to Flow B (`clone_pipeline`) for a parity rebuild. The research brief is
-    cached+reused (as for `--research`) so a re-run does not re-pay the survey."""
+                    research_top: int, research_budget: Optional[float],
+                    choose_repo: Optional[Callable[[list["RepoAnalysis"]], int]] = None,
+                    ) -> PipelineResult:
+    """`--clone-best`: research comparable OSS, pick a repo, and hand it to Flow B
+    (`clone_pipeline`) for a parity rebuild. `choose_repo(top)` selects the index (the
+    CLI's interactive `--clone-pick`); without it, the single highest-ranked repo wins.
+    The research brief is cached+reused (as for `--research`) so a re-run is not re-paid."""
     from area.research import BRIEF_FILE, parse_brief, research
     ws = spec_dir / "research"
     cached = ws / BRIEF_FILE
@@ -227,8 +231,13 @@ def _run_clone_best(requirement: str, *, name: str, spec_dir: Path, root: Path,
             "--clone-best: research found no comparable repo to clone "
             f"(considered {brief.candidates_considered}). Run without --clone-best to "
             "build from the requirement instead.")
-    best = max(brief.top, key=lambda r: r.score)
-    print(f"[area] clone-best: cloning top repo {best.repo} (score {best.score:.2f}) "
+    if choose_repo is not None:
+        idx = choose_repo(brief.top)
+        best = brief.top[idx] if 0 <= idx < len(brief.top) else max(
+            brief.top, key=lambda r: r.score)
+    else:
+        best = max(brief.top, key=lambda r: r.score)
+    print(f"[area] clone-best: cloning repo {best.repo} (score {best.score:.2f}) "
           f"— {best.url}")
     return clone_pipeline(
         best.url, name=name, kind="auto", target=target, backend=backend, model=model,
@@ -257,6 +266,7 @@ def run_pipeline(
     research_top: int = 5,
     research_budget: Optional[float] = None,
     clone_best: bool = False,
+    choose_repo: Optional[Callable[[list["RepoAnalysis"]], int]] = None,
 ) -> PipelineResult:
     """Flow A: requirement -> spec -> [independent review] -> [clarify] -> [design] -> build.
 
@@ -276,7 +286,7 @@ def run_pipeline(
             backend=backend, model=model, spec_iters=spec_iters,
             build_iters=build_iters, design=design, tdd=tdd, clarify=clarify,
             spec_review=spec_review, strict=strict, research_top=research_top,
-            research_budget=research_budget)
+            research_budget=research_budget, choose_repo=choose_repo)
     if not use_spec:
         print(f"[area] spec   : {requirement!r}")
     # A human's typed answers are authoritative input to a re-extraction, so the
