@@ -608,6 +608,12 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--use-spec", action="store_true",
                    help="build the EXISTING specs/<name>/ instead of extracting "
                         "a new one — what a `area clarify` confirmation applies to")
+    r.add_argument("--research", action="store_true",
+                   help="survey comparable open-source apps (top-N by stars/quality) "
+                        "and fold their patterns into the spec before building "
+                        "(requirement stays authoritative; costs an agent run)")
+    r.add_argument("--research-top", type=int, default=5,
+                   help="how many top repos to analyse when --research is set (default 5)")
     _add_common(r)
 
     c = sub.add_parser("clone", help="Flow B: reverse-engineer a sample app -> spec -> app")
@@ -1003,6 +1009,9 @@ def _cmd_run(args: argparse.Namespace, expected: str | None) -> int:
         spec_iters=args.spec_iters, build_iters=args.build_iters,
         design=args.design, tdd=args.tdd, expected=expected, clarify=args.clarify, spec_review=args.spec_review,
         use_spec=getattr(args, "use_spec", False), strict=args.strict,
+        research=getattr(args, "research", False),
+        research_top=getattr(args, "research_top", 5),
+        research_budget=getattr(args, "budget", None),
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})

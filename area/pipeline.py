@@ -181,6 +181,31 @@ def _tdd_build(
     return False
 
 
+def _research_context(requirement: str, spec_dir: Path, backend: "Backend",
+                      model: Optional[str], budget: Optional[float],
+                      top: int) -> Optional[str]:
+    """Run (or reuse) the research stage and render its brief as spec-prompt context.
+
+    Flow A has no reference app, so research is driven by the requirement alone. The
+    brief is cached at specs/<name>/research/brief.json and REUSED on a later re-run
+    (e.g. a clarify confirmation) so the agent survey is not re-paid. Any failure is
+    swallowed — research only enriches the spec, it must never block the build."""
+    from area.research import BRIEF_FILE, parse_brief, research, research_block
+    ws = spec_dir / "research"
+    cached = ws / BRIEF_FILE
+    try:
+        if cached.exists():
+            return research_block(parse_brief(cached.read_text())) or None
+        brief = research("", requirement, backend=backend, model=model,
+                         budget=budget, top=top, workspace=ws)
+    except Exception as e:  # noqa: BLE001
+        print(f"[area] research: skipped ({e})")
+        return None
+    print(f"[area] research: {len(brief.top)} repo(s) folded into the spec "
+          f"(from {brief.candidates_considered} considered)")
+    return research_block(brief) or None
+
+
 def run_pipeline(
     requirement: str,
     *,
@@ -198,6 +223,9 @@ def run_pipeline(
     workspace: Optional[str | Path] = None,
     use_spec: bool = False,
     strict: bool = False,
+    research: bool = False,
+    research_top: int = 5,
+    research_budget: Optional[float] = None,
 ) -> PipelineResult:
     """Flow A: requirement -> spec -> [independent review] -> [clarify] -> [design] -> build.
 
@@ -216,9 +244,17 @@ def run_pipeline(
     from area.spec.clarify import answers_block
 
     answered = answers_block(spec_dir)
+    # Flow A opt-in: survey comparable OSS and fold their patterns into the spec PROMPT
+    # (not a mechanical merge) — requirement stays authoritative, coverage stays intact.
+    research_ctx = (
+        _research_context(requirement, spec_dir, backend, model, research_budget,
+                          research_top)
+        if research and not use_spec else None
+    )
     spec, acc = extract_spec(
         requirement, spec_dir,
         expected="\n\n".join(x for x in (expected, answered) if x) or None,
+        research=research_ctx,
         backend=backend, model=model, max_iters=spec_iters, reuse=use_spec,
     )
     print(f"[area]        spec OK: {len(spec.features)} features, {len(acc.criteria)} AC")

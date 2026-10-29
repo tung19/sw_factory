@@ -157,6 +157,7 @@ def extract_spec(
     out_dir: str | Path,
     *,
     expected: Optional[str] = None,
+    research: Optional[str] = None,
     backend: Backend = "acp",
     model: Optional[str] = None,
     max_iters: int = 3,
@@ -193,6 +194,7 @@ def extract_spec(
         "below into a structured spec.\n\n"
         f"=== REQUIREMENT ===\n{requirement}\n"
         f"{expected_block(expected)}\n"
+        f"{research or ''}"
         f"=== OUTPUT FORMAT ===\n{_SCHEMA_GUIDE}"
     )
 
