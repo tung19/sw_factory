@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# assumptions.yaml — the CONFIDENCE sidecar.  This is where input-richness variance
+# LIVES (never in spec.yaml / acceptance.yaml).  The thinner your input, the denser
+# this list.                                                            (contract §5a)
+#
+#   material: true   a wrong guess here changes the app materially.  In --clarify mode
+#                    (default ON), any UNANSWERED material:true assumption STOPS the
+#                    build at the spec and asks the human.  That stop is a SUCCESS —
+#                    the factory refusing to build a guess — not a failure.
+#   material: false  a reasonable default nobody needs to confirm.
+#
+# NOTE: tools/validate-spec.sh does NOT read this file (it checks spec+acceptance only);
+# `area run`'s clarify gate does.  Write it anyway — it is your honesty ledger.
+# ─────────────────────────────────────────────────────────────────────────────
+
+assumptions:
+  - question: <what the input left unclear>
+    assumption: <the default you chose>
+    material: true
+  - question: <...>
+    assumption: <...>
+    material: false
+
+# assumptions: []     # <-- use the empty form ONLY when the input was genuinely unambiguous

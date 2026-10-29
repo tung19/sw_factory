@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# spec.yaml — WHAT the app is.  (The build ALSO needs acceptance.yaml — the oracle.)
+# Schema authority: area/spec/models.py.   Validate (definition of done):
+#     tools/validate-spec.sh <this-dir> --strict
+#
+# Your chain → this ONE schema (the factory never sees your intermediate stages):
+#     [US]  User Story      → summary, features[].id/title
+#     [BA]  BA Requirement  → entities[], routes[]  (NFR/constraints → assumptions.yaml)
+#     [FS]  Function Spec   → features[].description precise;  the real work is in
+#                             acceptance.yaml (the oracle)
+# Input richness changes HOW MUCH you infer — never this schema. (contract §1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: <app-name>              # [US] short slug; names the app + workspace dir
+summary: >                    # [US] 1–2 sentences: what it is and who uses it
+  <one or two sentence summary>
+
+stack: nextjs                 # [BA] default nextjs; change only if the target differs
+
+entities:                     # [BA] the data model.  [] is allowed; most apps have >=1.
+  - name: <Entity>            #      PascalCase
+    fields:
+      - {name: id,      type: int,     required: true}
+      - {name: <field>, type: string,  required: true}   # string|text|int|float|bool|datetime|enum
+      # enum: list the values in a trailing comment, e.g.
+      #   - {name: status, type: enum, required: true}   # todo|doing|done
+
+features:                     # [US]→[FS]  >=1 REQUIRED.  Every id MUST be covered by >=1 AC.
+  - id: <kebab-case-id>       # [US] stable id; acceptance.criteria[].feature points here
+    title: <Title>            # [US] short human title
+    description: >            # [FS] precise, observable behaviour (the functional requirement)
+      <what this feature does, stated in terms you could observe from outside>
+
+routes:                       # [BA] EVERY path the app serves.  Absolute (must start with /).
+  - {path: "/",      purpose: <what a visitor does here>, kind: page}
+  - {path: "/login", purpose: <...>,                      kind: page}
+  # Dynamic segment: declare it WITH brackets, e.g.  {path: "/items/[id]", ...}
+  #   and (rule R4) quote THAT literal bracket form in any AC that navigates to it.
+  # kind:  page | api | action
+
+ui:                           # OPTIONAL.  Flow-B capture fills this; for Flow A you may hint.
+  description: <optional look-and-feel hint>
+  palette: []

@@ -1,0 +1,35 @@
+# The confidence sidecar for timeoff. The user story was a single sentence, so several
+# decisions had to be inferred. Three are material: in --clarify mode the build STOPS and
+# asks about each until it is answered (or the user story is enriched to state it). The
+# rest are safe defaults. validate-spec.sh ignores this file; `area run`'s clarify gate
+# reads it.
+assumptions:
+  - question: What is a new employee's starting leave balance?
+    assumption: 20 whole days.
+    material: true
+
+  - question: Are weekends and public holidays excluded from the day count?
+    assumption: >
+      No calendar logic in v1 — the day count is simply (endDate - startDate) in whole
+      days, inclusive. Excluding weekends/holidays is out of scope.
+    material: true
+
+  - question: Is there a manager/approval workflow?
+    assumption: >
+      No. A request is self-service and deducts from the balance immediately; there is no
+      approve/reject/cancel step in v1.
+    material: true
+
+  - question: What identifier do employees sign up and log in with?
+    assumption: Email address, unique per account.
+    material: false
+
+  - question: How are passwords hashed, and how is a session kept?
+    assumption: >
+      A vetted adaptive hash (bcrypt/scrypt/argon2) with per-user salt; session via a
+      signed, HTTP-only cookie set on signup/login.
+    material: false
+
+  - question: Are partial-day requests or overlapping date ranges allowed?
+    assumption: Whole days only; overlapping ranges are permitted (no overlap check in v1).
+    material: false

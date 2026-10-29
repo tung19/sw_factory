@@ -1,0 +1,79 @@
+# FILLED EXAMPLE — validates green under: tools/validate-spec.sh <this-dir> --strict
+# Source user story: "As an employee I want to request time off against my leave
+# balance and see my own requests, so I can manage my days off." → BA added the data
+# model + the balance rule → Function Spec wrote the acceptance criteria.
+name: timeoff
+summary: >
+  A leave-management web app. Employees sign up and log in, see their remaining leave
+  balance, request time off (whole days) which is deducted from that balance, and view
+  their own requests. Each employee sees only their own data; passwords are stored
+  hashed; data persists durably across a server restart.
+stack: nextjs
+
+entities:
+  - name: Employee
+    fields:
+      - {name: id, type: int, required: true}
+      - {name: email, type: string, required: true}
+      - {name: passwordHash, type: string, required: true}
+      - {name: balanceDays, type: int, required: true}        # remaining leave days
+      - {name: createdAt, type: datetime, required: false}
+
+  - name: LeaveRequest
+    fields:
+      - {name: id, type: int, required: true}
+      - {name: employeeId, type: int, required: true}
+      - {name: startDate, type: datetime, required: true}
+      - {name: endDate, type: datetime, required: true}
+      - {name: days, type: int, required: true}               # whole days requested
+      - {name: createdAt, type: datetime, required: false}
+
+features:
+  - id: signup
+    title: Sign up
+    description: >
+      From the combined login/signup page, a visitor creates an account with an email
+      and password; the account starts with a leave balance, the visitor is logged in
+      and taken to the dashboard.
+
+  - id: login
+    title: Log in
+    description: >
+      An existing employee logs in with their email and password; wrong credentials are
+      rejected and no session is created.
+
+  - id: password-security
+    title: Passwords stored hashed
+    description: >
+      An employee's password is stored only as a cryptographic hash; the plaintext
+      password is never persisted anywhere.
+
+  - id: auth-guard
+    title: Require login for the dashboard
+    description: >
+      Requesting the dashboard while not logged in is rejected and the visitor is sent
+      to the login page.
+
+  - id: request-leave
+    title: Request time off
+    description: >
+      A logged-in employee requests time off for a date range from the dashboard. If the
+      requested whole-day count is within their remaining balance, the request is saved
+      and the balance is reduced by that many days; a request that exceeds the remaining
+      balance is rejected and nothing is changed.
+
+  - id: view-requests
+    title: View my requests and balance
+    description: >
+      The dashboard shows the logged-in employee's current remaining balance and the
+      list of their own leave requests — and only their own, never another employee's.
+
+  - id: durable-persistence
+    title: Durable persistence
+    description: >
+      Employees, their balances and their leave requests are stored durably so they
+      survive a server restart.
+
+routes:
+  - {path: "/", purpose: "dashboard — remaining balance, request-time-off form, my requests", kind: page}
+  - {path: "/login", purpose: "combined login / sign-up page", kind: page}
