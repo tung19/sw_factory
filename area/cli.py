@@ -614,6 +614,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         "(requirement stays authoritative; costs an agent run)")
     r.add_argument("--research-top", type=int, default=5,
                    help="how many top repos to analyse when --research is set (default 5)")
+    r.add_argument("--clone-best", action="store_true",
+                   help="research comparable apps, then CLONE the single highest-ranked "
+                        "repo (Flow B parity rebuild) instead of building a fresh spec")
     _add_common(r)
 
     c = sub.add_parser("clone", help="Flow B: reverse-engineer a sample app -> spec -> app")
@@ -1000,6 +1003,10 @@ def _cmd_run(args: argparse.Namespace, expected: str | None) -> int:
     from area import trace
     from area.pipeline import run_pipeline
 
+    if getattr(args, "clone_best", False) and getattr(args, "use_spec", False):
+        print("[area] --clone-best and --use-spec are mutually exclusive: the first "
+              "clones a discovered repo, the second reuses an existing spec.")
+        raise SystemExit(2)
     name = _check_collision(_resolve_name(args.name, hint=args.requirement, fallback="app"))
     trace.start_pipeline(name, "run",
                          inputs={"requirement": args.requirement[:500], "tdd": args.tdd})
@@ -1012,6 +1019,7 @@ def _cmd_run(args: argparse.Namespace, expected: str | None) -> int:
         research=getattr(args, "research", False),
         research_top=getattr(args, "research_top", 5),
         research_budget=getattr(args, "budget", None),
+        clone_best=getattr(args, "clone_best", False),
     )
     rc = _finish(res, args)
     trace.end_pipeline(passed=(rc == 0), output={"name": res.name, "app": str(res.app_dir)})
