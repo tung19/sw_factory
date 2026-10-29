@@ -76,3 +76,27 @@ def test_cli_exposes_feature_map(tmp_path):
 
     ns = _build_parser().parse_args(["feature-map", "shop"])
     assert ns.cmd == "feature-map" and ns.name == "shop"
+
+
+def _cells(row):
+    import re
+    # split a markdown table row on UNESCAPED pipes → leading "" + cells + trailing ""
+    return re.split(r"(?<!\\)\|", row)
+
+
+def test_render_escapes_pipes_so_an_enum_does_not_break_the_table():
+    # A `|` in free text (an enum like todo|doing|done, or "list | grid") used to open
+    # phantom table columns, corrupting the condensed map it exists to be legible.
+    spec = Spec(name="t", summary="s",
+                features=[Feature(id="f", title="F", description="d")],
+                routes=[Route(path="/", purpose="list | grid", kind="page")])
+    acc = Acceptance(criteria=[AcceptanceCriterion(
+        id="AC-1", feature="f", given="g",
+        when="set status to todo|doing|done on /",
+        then="shows todo|doing|done", verify_by="execution")])
+    md = FM.render(spec, acc)
+    route_row = [ln for ln in md.splitlines() if ln.startswith("| `/` ")][0]
+    assert len(_cells(route_row)) == 5, route_row     # 3 cols → "" + 3 + ""
+    ac_row = [ln for ln in md.splitlines() if ln.startswith("| AC-1 ")][0]
+    assert len(_cells(ac_row)) == 6, ac_row           # 4 cols → "" + 4 + ""
+    assert "todo\\|doing\\|done" in md                # the pipe survived, escaped

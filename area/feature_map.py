@@ -34,6 +34,13 @@ def _one_line(s: str) -> str:
     return " ".join((s or "").split())
 
 
+def _cell(s: str) -> str:
+    """A value safe to drop into a markdown table cell: collapse whitespace and escape
+    pipes, so an enum like `todo|doing|done` (or "list | grid") can't open phantom
+    columns and corrupt the very map this file exists to keep legible."""
+    return _one_line(s).replace("|", "\\|")
+
+
 def render(spec: Spec, acc: Acceptance) -> str:
     route_paths = [r.path for r in spec.routes]
     lines: list[str] = []
@@ -57,7 +64,7 @@ def render(spec: Spec, acc: Acceptance) -> str:
         lines.append("| Path | Kind | Purpose |")
         lines.append("|------|------|---------|")
         for r in spec.routes:
-            lines.append(f"| `{r.path}` | {r.kind} | {_one_line(r.purpose) or '—'} |")
+            lines.append(f"| `{r.path}` | {_cell(r.kind)} | {_cell(r.purpose) or '—'} |")
     else:
         lines.append("_No routes declared._")
     lines.append("")
@@ -91,9 +98,9 @@ def render(spec: Spec, acc: Acceptance) -> str:
             for c in crits:
                 text = " ".join((c.given, c.when, c.then))
                 reach = ", ".join(f"`{p}`" for p in _reaches(text, route_paths)) or "—"
-                behaviour = _one_line(f"when {c.when} → {c.then}")
-                verify = c.verify_by or "—"
-                lines.append(f"| {c.id} | {verify} | {reach} | {behaviour} |")
+                behaviour = _cell(f"when {c.when} → {c.then}")
+                verify = _cell(c.verify_by or "—")
+                lines.append(f"| {_cell(c.id)} | {verify} | {reach} | {behaviour} |")
         else:
             lines.append("_No acceptance criterion — the contract would reject this._")
         lines.append("")
