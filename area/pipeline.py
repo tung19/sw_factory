@@ -206,6 +206,36 @@ def _research_context(requirement: str, spec_dir: Path, backend: "Backend",
     return research_block(brief) or None
 
 
+def _run_clone_best(requirement: str, *, name: str, spec_dir: Path, root: Path,
+                    target: str, backend: "Backend", model: Optional[str],
+                    spec_iters: int, build_iters: int, design: Optional[bool],
+                    tdd: bool, clarify: bool, spec_review: bool, strict: bool,
+                    research_top: int, research_budget: Optional[float]) -> PipelineResult:
+    """`--clone-best`: research comparable OSS, pick the single highest-ranked repo, and
+    hand it to Flow B (`clone_pipeline`) for a parity rebuild. The research brief is
+    cached+reused (as for `--research`) so a re-run does not re-pay the survey."""
+    from area.research import BRIEF_FILE, parse_brief, research
+    ws = spec_dir / "research"
+    cached = ws / BRIEF_FILE
+    if cached.exists():
+        brief = parse_brief(cached.read_text())
+    else:
+        brief = research("", requirement, backend=backend, model=model,
+                         budget=research_budget, top=research_top, workspace=ws)
+    if not brief.top:
+        raise RuntimeError(
+            "--clone-best: research found no comparable repo to clone "
+            f"(considered {brief.candidates_considered}). Run without --clone-best to "
+            "build from the requirement instead.")
+    best = max(brief.top, key=lambda r: r.score)
+    print(f"[area] clone-best: cloning top repo {best.repo} (score {best.score:.2f}) "
+          f"— {best.url}")
+    return clone_pipeline(
+        best.url, name=name, kind="auto", target=target, backend=backend, model=model,
+        spec_iters=spec_iters, build_iters=build_iters, design=design, tdd=tdd,
+        clarify=clarify, spec_review=spec_review, workspace=root, strict=strict)
+
+
 def run_pipeline(
     requirement: str,
     *,
@@ -226,6 +256,7 @@ def run_pipeline(
     research: bool = False,
     research_top: int = 5,
     research_budget: Optional[float] = None,
+    clone_best: bool = False,
 ) -> PipelineResult:
     """Flow A: requirement -> spec -> [independent review] -> [clarify] -> [design] -> build.
 
@@ -237,6 +268,15 @@ def run_pipeline(
     obs.set_app(name)  # scope this build's agent-run cost to this app (cost gate)
     root = Path(workspace) if workspace else WORKSPACE
     spec_dir = root / "specs" / name
+    # Discovery → parity bridge: research finds the best comparable repo, then Flow B
+    # CLONES it (parity rebuild) instead of synthesizing a fresh Flow A spec.
+    if clone_best and not use_spec:
+        return _run_clone_best(
+            requirement, name=name, spec_dir=spec_dir, root=root, target=target,
+            backend=backend, model=model, spec_iters=spec_iters,
+            build_iters=build_iters, design=design, tdd=tdd, clarify=clarify,
+            spec_review=spec_review, strict=strict, research_top=research_top,
+            research_budget=research_budget)
     if not use_spec:
         print(f"[area] spec   : {requirement!r}")
     # A human's typed answers are authoritative input to a re-extraction, so the
