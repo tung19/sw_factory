@@ -34,11 +34,17 @@ translate the artifacts into the same `spec.yaml`+`acceptance.yaml`. `--use-spec
 ```bash
 tools/validate-spec.sh <name|specs-dir> --strict
 # ✅ Contract OK — N features, M AC, K routes. Sẵn sàng `area run --use-spec`.
+
+tools/validate-spec.sh <name|specs-dir> --strict --json   # machine-readable, for CI
+# {"ok": true, "features": N, "acceptance_criteria": M, "routes": K,
+#  "problems": [], "routes_unquoted": [], "strict": true}
 ```
 
 It calls the factory's own `validate_cross` directly, so passing it **is** fitting the
 contract. Make it your engine's CI gate — this is AREA's spine applied to your half: *don't
 let the reasoning that wrote the spec also certify it; let the factory's gate certify it.*
+Parse the `--json` object (same exit code: 0 = ok, non-zero = fatal) if your CI wants the
+verdict as data rather than text.
 
 ---
 

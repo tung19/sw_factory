@@ -108,3 +108,53 @@ def test_accepts_a_direct_specs_dir_path(tmp_path):
     d = _write(tmp_path, "todo", _GOOD_SPEC, _GOOD_ACC)
     r = subprocess.run(["bash", str(SCRIPT), str(d)], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+# ── --json: a machine-readable verdict a spec-engine CI can consume ──────────────
+def test_json_on_a_valid_spec_is_parseable_and_ok(tmp_path):
+    import json
+
+    _write(tmp_path, "todo", _GOOD_SPEC, _GOOD_ACC)
+    r = _run("todo", tmp_path, "--json")
+    assert r.returncode == 0, r.stdout + r.stderr
+    out = json.loads(r.stdout)                 # stdout is CLEAN JSON (banner suppressed)
+    assert out["ok"] is True
+    assert out["features"] == 1 and out["acceptance_criteria"] == 1 and out["routes"] == 1
+    assert out["problems"] == [] and out["routes_unquoted"] == []
+
+
+def test_json_on_a_dangling_reference_reports_the_problem(tmp_path):
+    import json
+
+    bad_acc = _GOOD_ACC.replace("feature: add-todo", "feature: nonexistent")
+    _write(tmp_path, "todo", _GOOD_SPEC, bad_acc)
+    r = _run("todo", tmp_path, "--json")
+    assert r.returncode != 0
+    out = json.loads(r.stdout)
+    assert out["ok"] is False
+    assert any("nonexistent" in p for p in out["problems"])
+
+
+def test_json_strict_marks_unquoted_navigation_not_ok(tmp_path):
+    import json
+
+    nav_acc = _GOOD_ACC.replace('when: they add "milk" on /',
+                                "when: they visit /admin/secret")
+    _write(tmp_path, "todo", _GOOD_SPEC, nav_acc)
+    # advisory by default → ok True but the advisory is still reported
+    adv = json.loads(_run("todo", tmp_path, "--json").stdout)
+    assert adv["ok"] is True and adv["routes_unquoted"]
+    # fatal under --strict → ok False
+    r = _run("todo", tmp_path, "--strict", "--json")
+    assert r.returncode != 0
+    assert json.loads(r.stdout)["ok"] is False
+
+
+def test_json_on_invalid_yaml_is_still_json(tmp_path):
+    import json
+
+    _write(tmp_path, "todo", "name: [unclosed", _GOOD_ACC)
+    r = _run("todo", tmp_path, "--json")
+    assert r.returncode != 0
+    out = json.loads(r.stdout)
+    assert out["ok"] is False and "spec.yaml" in out["error"]

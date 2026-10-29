@@ -8,12 +8,16 @@
 # DIRECTLY — it does not re-implement the rules — so it can never drift from the gate
 # the factory itself applies (area/spec/extract.py:_spec_verifier).
 #
-#   tools/validate-spec.sh <app-name | path-to-specs-dir> [workspace-dir] [--strict]
+#   tools/validate-spec.sh <app-name | path-to-specs-dir> [workspace-dir] [--strict] [--json]
 #
 # Exit 0 = contract OK (advisory warnings may still print). Non-zero = a FATAL problem,
 # or, under --strict, an advisory one too (a criterion that navigates without quoting a
 # declared route — the holdout author sees ONLY acceptance.yaml, so an unnamed path gets
 # invented and the frozen oracle asserts against a URL the app may not serve).
+#
+# --json prints a single machine-readable object to stdout instead of the human lines
+# ({ok, features, acceptance_criteria, routes, problems[], routes_unquoted[], strict} or
+# {ok:false, error}) so a spec engine's CI can parse the verdict. Same exit codes.
 set -euo pipefail
 . "$(dirname "$0")/_workspace.sh"
 
@@ -22,14 +26,16 @@ set -euo pipefail
 export OPENHANDS_SUPPRESS_BANNER=1
 
 TARGET="${1:-}"
-[ -n "$TARGET" ] || { echo "usage: validate-spec.sh <app-name | specs-dir> [workspace-dir] [--strict]" >&2; exit 2; }
+[ -n "$TARGET" ] || { echo "usage: validate-spec.sh <app-name | specs-dir> [workspace-dir] [--strict] [--json]" >&2; exit 2; }
 shift
 
 STRICT=""
+JSON=""
 WS=""
 for a in "$@"; do
   case "$a" in
     --strict) STRICT="--strict";;
+    --json) JSON="--json";;
     *) WS="$a";;
   esac
 done
@@ -48,7 +54,8 @@ fi
 
 PY="$(area_python)" || { echo "validate-spec.sh: no python found (.venv/bin/python, python3, python)" >&2; exit 2; }
 
-"$PY" - "$SPEC_DIR" "$STRICT" <<'PYEOF'
+"$PY" - "$SPEC_DIR" "$STRICT" "$JSON" <<'PYEOF'
+import json
 import sys
 from pathlib import Path
 
@@ -61,29 +68,55 @@ from area.spec.models import (
 
 d = Path(sys.argv[1])
 strict = sys.argv[2] == "--strict"
+json_out = len(sys.argv) > 3 and sys.argv[3] == "--json"
+
+
+def _load_error(e):
+    # A YAML/schema problem — can't even reach the cross-check. --json still emits an
+    # object so a CI never has to parse a half-JSON / half-prose stream.
+    if json_out:
+        print(json.dumps({"ok": False, "spec_dir": str(d), "error": str(e)},
+                         ensure_ascii=False))
+    else:
+        print(f"❌ {e}")
+    sys.exit(1)
+
 
 try:
     spec = load_spec(d / "spec.yaml")
 except Exception as e:                       # missing / invalid yaml / schema mismatch
-    print(f"❌ spec.yaml invalid: {e}")
-    sys.exit(1)
+    _load_error(f"spec.yaml invalid: {e}")
 try:
     acc = load_acceptance(d / "acceptance.yaml")
 except Exception as e:
-    print(f"❌ acceptance.yaml invalid: {e}")
-    sys.exit(1)
+    _load_error(f"acceptance.yaml invalid: {e}")
 
 problems = validate_cross(spec, acc)         # the exact FATAL set the factory enforces
+# Advisory (fatal only under --strict): criteria that navigate without quoting a
+# declared route. Not in `problems` unless spec.routes is empty, but it is the #1
+# contract gotcha for a spec engine, so surface it either way.
+unquoted = routes_unquoted(spec, acc)
+fatal = bool(problems) or (strict and bool(unquoted))
+
+if json_out:
+    print(json.dumps({
+        "ok": not fatal,
+        "spec_dir": str(d),
+        "strict": strict,
+        "features": len(spec.features),
+        "acceptance_criteria": len(acc.criteria),
+        "routes": len(spec.routes),
+        "problems": problems,
+        "routes_unquoted": unquoted,
+    }, ensure_ascii=False))
+    sys.exit(0 if not fatal else 1)
+
+# Human path — unchanged: a fatal problem prints and exits before the advisory.
 if problems:
     print(f"❌ spec KHÔNG hợp lệ — {len(problems)} lỗi contract:")
     for p in problems:
         print(f"   • {p}")
     sys.exit(1)
-
-# Advisory (fatal only under --strict): criteria that navigate without quoting a
-# declared route. Not in `problems` unless spec.routes is empty, but it is the #1
-# contract gotcha for a spec engine, so surface it either way.
-unquoted = routes_unquoted(spec, acc)
 if unquoted:
     print(f"⚠ {len(unquoted)} tiêu chí điều hướng mà không nêu route literal: "
           f"{', '.join(unquoted)}")
