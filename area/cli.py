@@ -748,6 +748,10 @@ def _build_parser() -> argparse.ArgumentParser:
     d.add_argument("--allow-provision-failure", action="store_true",
                    help="deploy even if creating/migrating the PRODUCTION datastore "
                         "failed (ships an app whose DB may be missing)")
+    d.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="print the deploy PLAN (provider, provenance verdict, the "
+                        "PRODUCTION datastores it would create/migrate, the gate "
+                        "prompt) and change nothing — no provisioning, no deploy")
 
     pv = sub.add_parser("provenance",
                         help="Show or verify an app's build provenance (SLSA-style)")
@@ -1164,6 +1168,7 @@ def _cmd_deploy(args: argparse.Namespace, expected: str | None) -> int:
         app_dir, confirm=_confirm_fn(args.yes),
         require_provenance=getattr(args, "require_provenance", None),
         allow_provision_failure=bool(getattr(args, "allow_provision_failure", False)),
+        dry_run=bool(getattr(args, "dry_run", False)),
     )
     return 0 if ok else 1
 
