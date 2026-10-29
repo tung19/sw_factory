@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# acceptance.yaml — THE ORACLE.  The single most important file.
+# "Quality <= strength + INDEPENDENCE of the oracle."  The build runs to GREEN on these.
+# The [FS] Function-Spec stage OWNS this file: one criterion per functional requirement.
+#
+# HARD RULES (enforced by validate_cross; fatal unless marked advisory):
+#   • >=1 criterion.  Every spec.features[].id has >=1 AC here; every `feature:` below
+#     names a REAL spec.features[].id.                             (coverage, both ways)
+#   • SELF-CONTAINED.  The independent holdout author sees ONLY this file, never
+#     spec.yaml.  So write every path/value a test needs LITERALLY in given/when/then —
+#     "when they request /items/7", NOT "when they open an item".
+#                                                     (rule R4; fatal under --strict)
+#   • verify_by HONEST.  Pick the WEAKEST method that truly settles `then`.  A claim
+#     about the RUNNING app is `execution`.  The wrong method reports PASS for a
+#     property nobody actually checked.                                      (rule R5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+criteria:
+  - id: AC-1
+    feature: <kebab-id from spec.features>
+    given: <starting state — concrete>
+    when: <the user action — quote literal paths / values>
+    then: <ONE observable, testable result>
+    verify_by: execution
+    #  execution     run it, observe the outcome            <-- ALL runtime claims
+    #  inspection    read source / config / a stored value   (e.g. "plaintext not in storage")
+    #  demonstration drive it live (browser / deployed instance)
+    #  analysis      derive it (types, a proof, a measured budget)
+
+  # [FS] earns its keep HERE: add the ERROR and EDGE cases the user story never wrote —
+  # empty input, over-limit, not-found / 404, duplicate, unauthorized, concurrent.
+  - id: AC-2
+    feature: <...>
+    given: <...>
+    when: <...>
+    then: <...>
+    verify_by: execution

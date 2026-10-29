@@ -1,0 +1,67 @@
+# THE ORACLE for timeoff. Every spec feature is covered; every navigating criterion
+# quotes a literal declared route ( / or /login ) so the independent holdout author —
+# which sees ONLY this file — cannot invent a URL. verify_by is honest: the one claim
+# about stored bytes is `inspection`; every claim about the running app is `execution`.
+criteria:
+  - id: AC-1
+    feature: signup
+    given: a visitor is on the login/sign-up page /login and no account exists for the email
+    when: they submit the sign-up form with a valid email and password
+    then: an account is created with a starting leave balance, they are logged in, and they land on the dashboard /
+    verify_by: execution
+
+  - id: AC-2
+    feature: login
+    given: an account already exists for a given email and password
+    when: the visitor submits the login form at /login with the correct email and password
+    then: they are logged in and taken to the dashboard /
+    verify_by: execution
+
+  - id: AC-3
+    feature: login
+    given: an account already exists for a given email
+    when: the visitor submits the login form at /login with the wrong password
+    then: login is rejected, no session is created, and they remain on /login
+    verify_by: execution
+
+  - id: AC-4
+    feature: password-security
+    given: an employee signs up with a known plaintext password
+    when: the Employee record is read back from the persistent store
+    then: the stored password value is a hash that differs from the plaintext, and the plaintext password does not appear anywhere in storage
+    verify_by: inspection
+
+  - id: AC-5
+    feature: auth-guard
+    given: a visitor who is not logged in
+    when: they request the dashboard /
+    then: access is rejected and they are redirected to /login
+    verify_by: execution
+
+  - id: AC-6
+    feature: request-leave
+    given: a logged-in employee with a remaining balance of 20 days on the dashboard /
+    when: they submit the request-time-off form for a date range spanning 3 whole days
+    then: a leave request for 3 days is persisted, appears in their request list on the dashboard /, and their remaining balance shown there becomes 17 days
+    verify_by: execution
+
+  - id: AC-7
+    feature: request-leave
+    given: a logged-in employee whose remaining balance is 2 days on the dashboard /
+    when: they submit the request-time-off form for a date range spanning 5 whole days
+    then: the request is rejected with an error, no leave request is created, and their remaining balance stays 2 days
+    verify_by: execution
+
+  - id: AC-8
+    feature: view-requests
+    given: employee B has leave requests and a balance, and employee A is logged in
+    when: employee A loads the dashboard /
+    then: the page shows only A's own remaining balance and A's own leave requests, and none of employee B's requests or balance are exposed to A
+    verify_by: execution
+
+  - id: AC-9
+    feature: durable-persistence
+    given: a logged-in employee has created leave requests and has a reduced balance
+    when: the server is restarted and the employee logs in again at /login
+    then: their previously created requests and their current balance are still present with the same values
+    verify_by: execution
