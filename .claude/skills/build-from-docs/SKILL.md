@@ -56,3 +56,10 @@ Never pipe a raw change straight into the code.
 ## Stop conditions
 Oracle green (done) · a budget/time you set · a stuck signal (same failure twice) → report
 to Tung rather than thrash. Tung is the top gate on whether the oracle itself is right.
+
+## Progress ledger (resume after a context reset)
+Record each milestone as it goes GREEN with `tools/task-done.sh <name> <milestone> -- <verify-cmd>`
+(e.g. `holdout-locked`, `build-green`, `gate-audit`, `provenance`). The script appends to
+`workspace/apps/<name>/.area/progress.md` only when the verify command exits 0 — the ledger
+records proven state, not intentions. On resume, run `tools/task-done.sh <name> --show` first and
+SKIP any milestone already recorded rather than re-doing it.

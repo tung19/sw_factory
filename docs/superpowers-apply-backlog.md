@@ -91,6 +91,13 @@ we can decide what to actually apply to AREA.
 Status: ✅ done · ▶ next (cheap + targets a documented bug) · ○ later. Each row names the AREA bug/
 memory it targets.
 
+**Applied 2026-10-30 (branch `feat/superpowers-merge`):** P0 ✅ · P1 ✅ · P2 ✅ · P3 ✅ · **P4 resolved**
+— already covered on AREA's native *single-agent* path by the locked holdout + the `guard_holdout.py`
+PreToolUse hook (the builder cannot edit the oracle). "Withhold the Agent tool from the builder" only
+bites in a *multi-agent engine* where a builder subagent could spawn its own reviewer — i.e. the
+`saas-coordinator-runner`/ACP path — so it is deferred there, **not** added as an inert `tools:` field
+on main (that would reproduce the [[a-capability-threaded-through-one-entrypoint]] bug). P5–P11 remain ○.
+
 | # | Apply to AREA | Source | Targets | Effort | Status |
 |---|---|---|---|---|---|
 | P0 | **Skill-description lint** in the gate: must start "Use when", no workflow verbs/arrows, word cap — and fix `authoring-area-skills`'s own description | discovery.md | discoverability; self-caught defect | XS, deterministic | ▶ |
