@@ -25,8 +25,8 @@ from typing import Any, Literal, Optional, cast
 
 from area.paths import WORKSPACE
 
-Verdict = Literal["binds", "weak"]
-Status = Literal["recorded", "weak", "missing"]
+Verdict = Literal["binds", "weak", "inconclusive"]
+Status = Literal["recorded", "weak", "inconclusive", "missing"]
 
 
 def _ledger() -> Path:
@@ -80,7 +80,12 @@ def status_for(kind: str, digest: str) -> Status:
     row = latest_for(kind, digest)
     if row is None:
         return "missing"
-    return "recorded" if row.get("verdict") == "binds" else "weak"
+    v = row.get("verdict")
+    if v == "binds":
+        return "recorded"
+    if v == "inconclusive":
+        return "inconclusive"
+    return "weak"
 
 
 def current_digest(kind: str, *, root: Optional[Path] = None) -> Optional[str]:
@@ -102,7 +107,7 @@ def status_of_kind(kind: str, *, root: Optional[Path] = None) -> Status:
     return status_for(kind, dg)
 
 
-_ICON = {"recorded": "✅", "weak": "⚠", "missing": "·"}
+_ICON = {"recorded": "✅", "weak": "⚠", "inconclusive": "∅", "missing": "·"}
 
 
 def report(kinds: Optional[list[str]] = None, *, root: Optional[Path] = None) -> str:

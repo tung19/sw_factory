@@ -858,6 +858,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="record a PASSING probe (the wording binds) with its evidence")
     wpp.add_argument("--weak", metavar="EVIDENCE", default=None,
                      help="record a WEAK probe (wording did not bind) with its evidence")
+    wpp.add_argument("--inconclusive", metavar="EVIDENCE", default=None,
+                     help="record an INCONCLUSIVE probe (no valid control / confounded run)")
     wpp.add_argument("--reps", type=int, default=0, help="reps per arm the probe ran")
 
     cl = sub.add_parser(
@@ -1518,9 +1520,9 @@ def _cmd_wording_probe(args: argparse.Namespace, expected: str | None) -> int:
         print("[area] wording-probe record needs a kind: "
               "`area wording-probe record <kind> --binds \"<evidence>\"`")
         return 2
-    if args.binds is None and args.weak is None:
-        print("[area] wording-probe record needs --binds \"<evidence>\" "
-              "or --weak \"<evidence>\"")
+    if args.binds is None and args.weak is None and args.inconclusive is None:
+        print("[area] wording-probe record needs --binds, --weak, or "
+              "--inconclusive \"<evidence>\"")
         return 2
     dg = wp.current_digest(args.kind)
     if dg is None:
@@ -1529,9 +1531,12 @@ def _cmd_wording_probe(args: argparse.Namespace, expected: str | None) -> int:
     if args.binds is not None:
         wp.record(args.kind, dg, "binds", args.binds, reps=args.reps)
         verdict = "binds"
-    else:
+    elif args.weak is not None:
         wp.record(args.kind, dg, "weak", args.weak, reps=args.reps)
         verdict = "weak"
+    else:
+        wp.record(args.kind, dg, "inconclusive", args.inconclusive, reps=args.reps)
+        verdict = "inconclusive"
     print(f"[area] wording-probe recorded: {args.kind} @ {dg[:16]}… verdict={verdict}")
     return 0
 

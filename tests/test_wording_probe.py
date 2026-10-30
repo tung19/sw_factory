@@ -39,6 +39,14 @@ def test_weak_is_not_recorded_status(ws: Path) -> None:
     assert wp.status_for("builder", "sha256:d1") == "weak"
 
 
+def test_inconclusive_verdict(ws: Path) -> None:
+    # A confounded run (no valid control) is neither 'recorded' nor 'weak'.
+    wp.record("builder", "sha256:z", "inconclusive", "control saw the rule via CLAUDE.md", reps=10)
+    assert wp.status_for("builder", "sha256:z") == "inconclusive"
+    row = wp.latest_for("builder", "sha256:z")
+    assert row is not None and row["verdict"] == "inconclusive"
+
+
 def test_attestation_is_keyed_to_digest(ws: Path) -> None:
     # The spine: a probe of the OLD wording cannot vouch for a NEW (changed) digest.
     wp.record("builder", "sha256:OLD", "binds", "ok", reps=5)

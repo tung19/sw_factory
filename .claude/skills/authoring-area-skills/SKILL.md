@@ -43,14 +43,24 @@ subagent ignores is the waste the probe removes.
    **minus** your edit, and the tempting task. Record its behavior and its exact
    rationalizations, verbatim. *If the control does not exhibit the failure, stop — there is
    nothing to fix, do not add the words.*
+
+   > **The control must be CLEAN, or it is not a control.** An in-session `Task` subagent
+   > inherits this repo's `CLAUDE.md`. If the text you are probing — or an earlier copy of
+   > it — already lives in `CLAUDE.md`, the "control" silently has the guidance and the whole
+   > probe is confounded. Tell-tale: the control cites a rule or a name your prompt never gave
+   > it (e.g. "Tung", or the exact phrase you just wrote). So **probe BEFORE you commit the
+   > edit into `CLAUDE.md`**; or remove it from `CLAUDE.md` on disk for the run; or probe
+   > out-of-session (raw API / a project with no `CLAUDE.md`). A confounded run is recorded
+   > `--inconclusive`, never `--binds`.
 3. **With-guidance (GREEN).** Spawn the same scenario **with** the edited text in context.
    Confirm it now complies.
 4. **5+ reps per arm. Read every output by hand.** Single samples lie; template echoes and
    quoted counter-examples masquerade as hits. **Variance is the metric** — when wording
    binds, reps converge on the same shape; five different readings mean it does not bind yet.
-5. **Record:** `area wording-probe record <kind> --binds "<evidence>"` (or `--weak`). The
-   attestation is keyed to the profile's **current digest**, so it is invalidated automatically
-   the next time that prompt/skill changes.
+5. **Record:** `area wording-probe record <kind> --binds "<evidence>"` (or `--weak`, or
+   `--inconclusive` for a confounded run). The attestation is keyed to the profile's
+   **current digest**, so it is invalidated automatically the next time that prompt/skill
+   changes.
 
 ## Match the form to the failure
 
@@ -89,6 +99,7 @@ with a "you MUST / never / always / STOP" is a discipline edit and takes the pro
 - [ ] Ran the no-guidance control; it exhibited the failure (else stop)
 - [ ] Ran with-guidance; it complied
 - [ ] 5+ reps per arm, every output read by hand, variance low
+- [ ] Control was CLEAN — not inheriting the edit via CLAUDE.md (else record --inconclusive)
 - [ ] Form matches the failure type (table above)
-- [ ] `area wording-probe record <kind> --binds/--weak "<evidence>"`
+- [ ] `area wording-probe record <kind> --binds/--weak/--inconclusive "<evidence>"`
 - [ ] Only then: `area evals <kind> --check` for the outcome gate
