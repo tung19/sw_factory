@@ -39,8 +39,9 @@ no runner.
    silently change it.
 
 4. **Gates.** `tools/gate.sh <name>` (security audit + NFR). Add `--e2e` for any app with
-   **auth / sessions / forms** — write one Playwright spec per AC under `e2e/`, then it
-   runs them (logic-green ≠ live-works).
+   **auth / sessions / forms** — write one Playwright spec per AC under `e2e/` with
+   **condition-based waits** (no `waitForTimeout`; `tools/check-no-fixed-sleeps.sh <app>/e2e`
+   flags fixed sleeps), then it runs them (logic-green ≠ live-works).
 
 5. **Provenance.** `tools/provenance.sh <name>` (attests spec→gates→artifact).
 

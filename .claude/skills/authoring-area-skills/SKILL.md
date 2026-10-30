@@ -62,6 +62,12 @@ subagent ignores is the waste the probe removes.
    **current digest**, so it is invalidated automatically the next time that prompt/skill
    changes.
 
+**Scenario library:** `docs/templates/wording-probe-scenarios.yaml` holds forced-choice (A/B/C)
+scenarios for AREA's real temptations (tweak the holdout, skip e2e, self-grade, loosen a flaky
+test, lower the audit gate) — use and extend them. Run them on the **cheapest model the factory
+will actually use** (weaker models break first), and store the control's verbatim excuses in the
+attestation so a new rule must cite the excuse it targets.
+
 ## Match the form to the failure
 
 The form that bulletproofs one failure type backfires on another (from superpowers:writing-skills):

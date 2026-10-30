@@ -96,7 +96,10 @@ memory it targets.
 PreToolUse hook (the builder cannot edit the oracle). "Withhold the Agent tool from the builder" only
 bites in a *multi-agent engine* where a builder subagent could spawn its own reviewer — i.e. the
 `saas-coordinator-runner`/ACP path — so it is deferred there, **not** added as an inert `tools:` field
-on main (that would reproduce the [[a-capability-threaded-through-one-entrypoint]] bug). P5–P11 remain ○.
+on main (that would reproduce the [[a-capability-threaded-through-one-entrypoint]] bug). **P5–P11 ✅ applied**
+— P5–P7, P9 and the P10 scenario library are prompt/convention templates (efficacy is statistical,
+not a gate); P8 `review-package.sh`, the P10 schema check, and P11 `check-no-fixed-sleeps.sh` are
+deterministic tools with tests.
 
 | # | Apply to AREA | Source | Targets | Effort | Status |
 |---|---|---|---|---|---|
