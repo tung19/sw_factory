@@ -29,7 +29,7 @@ from area.seed import SeedPolicy, SeedResult, seed_from_reference
 from area.spec.models import Acceptance, AcceptanceCriterion, Feature, Spec
 
 if TYPE_CHECKING:
-    from area.engine import Backend
+    from area.engine_util import Backend
 
 SOURCE_REQUIREMENT = "requirement"
 SOURCE_REFERENCE = "reference"

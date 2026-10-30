@@ -33,7 +33,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from area.engine import scrubbed_env
+from area.engine_util import scrubbed_env
 from area._util import cmd_timeout_or_none
 from typing import Any, Optional
 

@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 from area._util import safe_name
 from area._util import cmd_timeout_or_none
-from area.engine import scrubbed_env
+from area.engine_util import scrubbed_env
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 
 # Shipped build-output dirs to measure (first existing wins). Cache subdirs are

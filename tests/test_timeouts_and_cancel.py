@@ -18,7 +18,8 @@ import area.deploy.cloudflare as CF
 import area.deploy.vercel as VC
 import area.verify.holdout as H
 import area.web.jobs as J
-from area._util import kill_process_group
+from area._util import CMD_TIMEOUT_DEFAULT, kill_process_group
+from area import engine_util as EU
 from area.engine import adapter as A
 
 
@@ -45,7 +46,7 @@ def test_kill_process_group_survives_an_already_dead_child():
 def test_command_verifier_times_out_and_reports_it_as_a_failure(monkeypatch):
     """Reported, not raised — `run_until` feeds the text back to the agent."""
     monkeypatch.setenv("AREA_CMD_TIMEOUT", "1")
-    r = A.command_verifier(["bash", "-c", "echo working; sleep 30"])()
+    r = EU.command_verifier(["bash", "-c", "echo working; sleep 30"])()
     assert r.ok is False
     assert "TIMED OUT" in r.feedback and "AREA_CMD_TIMEOUT" in r.feedback
     assert "working" in r.feedback  # partial output is kept, so the agent sees context
@@ -53,7 +54,7 @@ def test_command_verifier_times_out_and_reports_it_as_a_failure(monkeypatch):
 
 def test_command_verifier_kills_the_whole_tree_on_timeout(monkeypatch):
     monkeypatch.setenv("AREA_CMD_TIMEOUT", "1")
-    r = A.command_verifier(["bash", "-c", "sleep 60 & echo PID=$!; sleep 60"])()
+    r = EU.command_verifier(["bash", "-c", "sleep 60 & echo PID=$!; sleep 60"])()
     pid = int(r.feedback.split("PID=")[1].split()[0])
     time.sleep(0.4)
     with pytest.raises(OSError):
@@ -62,14 +63,14 @@ def test_command_verifier_kills_the_whole_tree_on_timeout(monkeypatch):
 
 def test_command_verifier_still_passes_and_fails_normally(monkeypatch):
     monkeypatch.delenv("AREA_CMD_TIMEOUT", raising=False)
-    assert A.command_verifier(["true"])().ok is True
-    bad = A.command_verifier(["bash", "-c", "echo boom >&2; exit 3"])()
+    assert EU.command_verifier(["true"])().ok is True
+    bad = EU.command_verifier(["bash", "-c", "echo boom >&2; exit 3"])()
     assert bad.ok is False and "boom" in bad.feedback
 
 
 def test_command_verifier_explicit_timeout_beats_the_env(monkeypatch):
     monkeypatch.setenv("AREA_CMD_TIMEOUT", "99")
-    r = A.command_verifier(["bash", "-c", "sleep 30"], timeout=1)()
+    r = EU.command_verifier(["bash", "-c", "sleep 30"], timeout=1)()
     assert r.ok is False and "TIMED OUT after 1s" in r.feedback
 
 
@@ -77,13 +78,13 @@ def test_timeouts_are_read_at_call_time_not_import(monkeypatch):
     """AREA already hit the stale-oracle trap once: a value captured at import can't
     be changed for a running process."""
     monkeypatch.setenv("AREA_CMD_TIMEOUT", "7")
-    assert A._cmd_timeout() == 7.0
+    assert EU._cmd_timeout() == 7.0
     monkeypatch.setenv("AREA_CMD_TIMEOUT", "9")
-    assert A._cmd_timeout() == 9.0
+    assert EU._cmd_timeout() == 9.0
     monkeypatch.setenv("AREA_CMD_TIMEOUT", "not-a-number")
-    assert A._cmd_timeout() == A._CMD_TIMEOUT_DEFAULT
+    assert EU._cmd_timeout() == CMD_TIMEOUT_DEFAULT
     monkeypatch.delenv("AREA_CMD_TIMEOUT")
-    assert A._cmd_timeout() == A._CMD_TIMEOUT_DEFAULT
+    assert EU._cmd_timeout() == CMD_TIMEOUT_DEFAULT
 
 
 def test_wall_timeout_parsing_and_opt_out(monkeypatch):
