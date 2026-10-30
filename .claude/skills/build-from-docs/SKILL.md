@@ -17,7 +17,10 @@ no runner.
    `docs/01-engineering-intent.md` + `02-product-requirements.md` (for Tung to confirm) and
    the machine `workspace/specs/<name>/acceptance.yaml` (numbered AC, "given/when/then").
    Write `docs/03-technical-spec.md` + `04-api-and-data-design.md` as you design (thin for
-   small apps). If a material ambiguity blocks a buildable spec, STOP and ask.
+   small apps). If a material ambiguity blocks a buildable spec, STOP and ask. Before locking
+   the oracle, run the **builder-check** (`docs/templates/builder-check-prompt.md`) as a fresh
+   subagent over docs 01–04 + acceptance.yaml; if it returns ranked questions rather than
+   "nothing important left", STOP and put them to Tung instead of guessing.
 
 2. **Lock the oracle — all three independence enforcements:**
    - **(c) Subagent.** Spawn a **Task subagent** whose prompt contains ONLY the spec +
