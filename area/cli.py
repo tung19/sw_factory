@@ -848,6 +848,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("mem", help="Show the experience store (pitfalls remembered)")
 
+    wpp = sub.add_parser("wording-probe",
+                         help="The CHEAP gate before `area evals`: record / show whether a "
+                              "skill or prompt edit was wording-probed (see the "
+                              "authoring-area-skills skill)")
+    wpp.add_argument("action", choices=["status", "record"])
+    wpp.add_argument("kind", nargs="?", help="kind to record; optional filter for status")
+    wpp.add_argument("--binds", metavar="EVIDENCE", default=None,
+                     help="record a PASSING probe (the wording binds) with its evidence")
+    wpp.add_argument("--weak", metavar="EVIDENCE", default=None,
+                     help="record a WEAK probe (wording did not bind) with its evidence")
+    wpp.add_argument("--reps", type=int, default=0, help="reps per arm the probe ran")
+
     cl = sub.add_parser(
         "clarify",
         help="Answer the --clarify gate for an app (list / confirm its material "
@@ -1491,6 +1503,39 @@ def _cmd_trace(args: argparse.Namespace, expected: str | None) -> int:
     return 0
 
 
+def _cmd_wording_probe(args: argparse.Namespace, expected: str | None) -> int:
+    """The cheap gate in front of `area evals` (see the authoring-area-skills skill).
+
+    `status` shows, per kind, whether the CURRENT version of its prompt/skill carries a
+    wording-probe; `record` attests one, keyed to the kind's current digest so a later
+    edit invalidates it automatically. Engine-free — never loads the agent SDK."""
+    from area import wording_probe as wp
+
+    if args.action == "status":
+        print(wp.report([args.kind] if args.kind else None))
+        return 0
+    if not args.kind:
+        print("[area] wording-probe record needs a kind: "
+              "`area wording-probe record <kind> --binds \"<evidence>\"`")
+        return 2
+    if args.binds is None and args.weak is None:
+        print("[area] wording-probe record needs --binds \"<evidence>\" "
+              "or --weak \"<evidence>\"")
+        return 2
+    dg = wp.current_digest(args.kind)
+    if dg is None:
+        print(f"[area] no profile for kind '{args.kind}'")
+        return 2
+    if args.binds is not None:
+        wp.record(args.kind, dg, "binds", args.binds, reps=args.reps)
+        verdict = "binds"
+    else:
+        wp.record(args.kind, dg, "weak", args.weak, reps=args.reps)
+        verdict = "weak"
+    print(f"[area] wording-probe recorded: {args.kind} @ {dg[:16]}… verdict={verdict}")
+    return 0
+
+
 def _cmd_mem(args: argparse.Namespace, expected: str | None) -> int:
     from area.memory import lessons
 
@@ -1779,7 +1824,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, str | None], int]] = {
     "demo": _cmd_demo, "doctor": _cmd_doctor, "gui": _cmd_gui, "heal": _cmd_heal,
     "verify": _cmd_verify, "e2e": _cmd_e2e, "obs": _cmd_obs, "trace": _cmd_trace,
     "mem": _cmd_mem, "clarify": _cmd_clarify, "design": _cmd_design, "audit": _cmd_audit, "chaos": _cmd_chaos,
-    "evals": _cmd_evals,
+    "evals": _cmd_evals, "wording-probe": _cmd_wording_probe,
     "perf": _cmd_perf, "visual": _cmd_visual, "cost": _cmd_cost,
     "cf-fix": _cmd_cf_fix,
     "cf-clone": _cmd_cf_clone, "research": _cmd_research, "adapt": _cmd_adapt,
