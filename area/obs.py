@@ -6,12 +6,22 @@ one line to workspace/.area/runs.jsonl; `area obs` aggregates it.
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any, Optional
 
 from area.paths import WORKSPACE  # zero-dep constant module (no cycle risk)
 
 RUNS = WORKSPACE / ".area" / "runs.jsonl"
+# The production ledger path, captured at import before any test monkeypatches RUNS.
+# The write guard below uses it to tell "a test forgot to redirect RUNS" (block) from
+# "a test redirected RUNS to a tmp path" (allow).
+_DEFAULT_RUNS = RUNS
+
+
+def _under_test() -> bool:
+    """True inside a pytest run (pytest always sets PYTEST_CURRENT_TEST)."""
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 # The app whose build is currently running, stamped onto each run record so a
 # per-app gate (area.verify.cost) can scope spend to ONE app even though
@@ -160,11 +170,18 @@ def log_run(
         "skills_digest": skills_d,
         "skills": list(skills_n),
     }
-    try:
-        with RUNS.open("a") as f:
-            f.write(json.dumps(rec) + "\n")
-    except Exception:
-        pass
+    # Defense-in-depth (from superpowers:systematic-debugging/defense-in-depth): a test that
+    # forgot to redirect RUNS must not pollute the real ledger — the 108-fake-rows bug. Under
+    # pytest, skip writing the PRODUCTION ledger unless explicitly opted in; a test that
+    # monkeypatched RUNS to a tmp path (RUNS != _DEFAULT_RUNS) still writes normally.
+    skip_write = (_under_test() and RUNS == _DEFAULT_RUNS
+                  and os.environ.get("AREA_OBS_ALLOW_WRITE") != "1")
+    if not skip_write:
+        try:
+            with RUNS.open("a") as f:
+                f.write(json.dumps(rec) + "\n")
+        except Exception:
+            pass
     c = f"${cost:.4f}" if cost is not None else "$?"
     verdict = "ok" if passed else ("fail" if passed is not None else "-")
     print(f"[obs] {label}: {duration:.1f}s · {c} · {verdict}")
@@ -234,6 +251,9 @@ def summary(runs: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
         "total_cost_usd": round(sum(r.get("cost_usd") or 0 for r in runs), 4),
         "total_time_s": round(sum(r.get("duration_s") or 0 for r in runs), 1),
         "avg_cost_usd": round(sum(costed) / len(costed), 4) if costed else None,
+        # A run with no cost is UNKNOWN, not $0 — disclose the count so total_cost_usd
+        # reads as a lower bound rather than silently folding unknowns into zero.
+        "runs_missing_cost": sum(1 for r in runs if r.get("cost_usd") is None),
         "convergence_runs": conv_n,
         "first_try_rate": round(first_try / conv_n, 3) if conv_n else None,
         "retry_rate": round(retried / conv_n, 3) if conv_n else None,

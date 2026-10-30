@@ -77,6 +77,21 @@ def test_status_of_kind_uses_current_digest(ws: Path, monkeypatch: pytest.Monkey
     assert wp.status_of_kind("holdout-author") == "recorded"
 
 
+def test_four_verdicts_map_to_four_distinct_statuses(ws: Path) -> None:
+    # Mutation guard (superpowers:writing-good-tests): if status_for ever collapsed two
+    # verdicts, this fails. The ledger must DISCRIMINATE, or the gate is theater.
+    wp.record("k", "sha256:binds", "binds", "e", reps=5)
+    wp.record("k", "sha256:weak", "weak", "e", reps=5)
+    wp.record("k", "sha256:incon", "inconclusive", "e", reps=5)
+    seen = {
+        wp.status_for("k", "sha256:binds"),
+        wp.status_for("k", "sha256:weak"),
+        wp.status_for("k", "sha256:incon"),
+        wp.status_for("k", "sha256:never-recorded"),
+    }
+    assert seen == {"recorded", "weak", "inconclusive", "missing"}
+
+
 def test_report_lists_each_kind_once(ws: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import area.profile as prof
 

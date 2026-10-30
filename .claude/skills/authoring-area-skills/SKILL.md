@@ -1,6 +1,6 @@
 ---
 name: authoring-area-skills
-description: Use when editing any AREA skill, agent prompt, profile, or CLAUDE.md — i.e. changing how the factory ITSELF behaves. Pressure-test the wording against a fresh subagent (cheap) BEFORE spending on `area evals` outcome runs, and never let the same reasoning write and grade a factory change.
+description: Use when editing any AREA skill, agent prompt, profile, or CLAUDE.md — i.e. changing how the factory itself behaves, rather than building an app the factory produces.
 ---
 
 # Authoring AREA's own skills, prompts and profiles
