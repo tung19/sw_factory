@@ -17,7 +17,10 @@ no runner.
    `docs/01-engineering-intent.md` + `02-product-requirements.md` (for Tung to confirm) and
    the machine `workspace/specs/<name>/acceptance.yaml` (numbered AC, "given/when/then").
    Write `docs/03-technical-spec.md` + `04-api-and-data-design.md` as you design (thin for
-   small apps). If a material ambiguity blocks a buildable spec, STOP and ask.
+   small apps). If a material ambiguity blocks a buildable spec, STOP and ask. Before locking
+   the oracle, run the **builder-check** (`docs/templates/builder-check-prompt.md`) as a fresh
+   subagent over docs 01–04 + acceptance.yaml; if it returns ranked questions rather than
+   "nothing important left", STOP and put them to Tung instead of guessing.
 
 2. **Lock the oracle — all three independence enforcements:**
    - **(c) Subagent.** Spawn a **Task subagent** whose prompt contains ONLY the spec +
@@ -36,8 +39,9 @@ no runner.
    silently change it.
 
 4. **Gates.** `tools/gate.sh <name>` (security audit + NFR). Add `--e2e` for any app with
-   **auth / sessions / forms** — write one Playwright spec per AC under `e2e/`, then it
-   runs them (logic-green ≠ live-works).
+   **auth / sessions / forms** — write one Playwright spec per AC under `e2e/` with
+   **condition-based waits** (no `waitForTimeout`; `tools/check-no-fixed-sleeps.sh <app>/e2e`
+   flags fixed sleeps), then it runs them (logic-green ≠ live-works).
 
 5. **Provenance.** `tools/provenance.sh <name>` (attests spec→gates→artifact).
 
@@ -56,3 +60,16 @@ Never pipe a raw change straight into the code.
 ## Stop conditions
 Oracle green (done) · a budget/time you set · a stuck signal (same failure twice) → report
 to Tung rather than thrash. Tung is the top gate on whether the oracle itself is right.
+
+## Progress ledger (resume after a context reset)
+Record each milestone as it goes GREEN with `tools/task-done.sh <name> <milestone> -- <verify-cmd>`
+(e.g. `holdout-locked`, `build-green`, `gate-audit`, `provenance`). The script appends to
+`workspace/apps/<name>/.area/progress.md` only when the verify command exits 0 — the ledger
+records proven state, not intentions. On resume, run `tools/task-done.sh <name> --show` first and
+SKIP any milestone already recorded rather than re-doing it.
+
+## Close the run — surface your judgment calls (Rulings I made)
+End with a **"Rulings I made"** list: every autonomous decision taken during the build — a spec
+gap you resolved, a gate you judged non-blocking, a retry you capped, a borderline the holdout
+didn't settle — one line each with what it costs if wrong. Tung is the top gate; a ruling that
+dies in the transcript was a decision made in secret.

@@ -54,6 +54,11 @@ spec question, not yours to self-answer.
 - Before and after each build attempt, run `tools/verify-holdout-intact.sh <name>`. If it
   reports a change, you tampered with the oracle — **revert the holdout to its locked
   version** and fix the implementation instead.
+- **Fix the cause, not the measurement.** When the holdout or a gate is red, make the app
+  satisfy it for real — never edit the gate, loosen an assertion, or add a test-only branch
+  to turn it green (AREA's most common self-inflicted bug). After the SAME failure survives
+  three honest attempts, STOP: re-investigate the root cause or ask Tung — a 4th variation of
+  the same fix is almost never right.
 - For Cloudflare/vinext apps, apply `.claude/skills/vinext-cf-build` (compat-date pin,
   vendored braces/CVE gate, `lib/schema` vs `lib/db` split so `node:sqlite` stays
   test-only, etc.).

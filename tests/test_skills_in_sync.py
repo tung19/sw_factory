@@ -31,7 +31,7 @@ INTERACTIVE = REPO / ".claude" / "skills"
 # Skills that exist ONLY for the interactive agent. Listed so adding one is deliberate:
 # a new name appearing here must be a factory workflow, not domain knowledge the builder
 # also needs.
-INTERACTIVE_ONLY = {"build-from-docs", "clone-from-source"}
+INTERACTIVE_ONLY = {"build-from-docs", "clone-from-source", "authoring-area-skills"}
 
 
 def _names(tree: Path) -> set[str]:
