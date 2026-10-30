@@ -66,3 +66,9 @@ Record each milestone as it goes GREEN with `tools/task-done.sh <name> <mileston
 `workspace/apps/<name>/.area/progress.md` only when the verify command exits 0 — the ledger
 records proven state, not intentions. On resume, run `tools/task-done.sh <name> --show` first and
 SKIP any milestone already recorded rather than re-doing it.
+
+## Close the run — surface your judgment calls (Rulings I made)
+End with a **"Rulings I made"** list: every autonomous decision taken during the build — a spec
+gap you resolved, a gate you judged non-blocking, a retry you capped, a borderline the holdout
+didn't settle — one line each with what it costs if wrong. Tung is the top gate; a ruling that
+dies in the transcript was a decision made in secret.
