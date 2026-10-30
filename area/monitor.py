@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from area._util import safe_name
 
 if TYPE_CHECKING:
-    from area.engine import Backend
+    from area.engine_util import Backend
 
 from area.paths import WORKSPACE  # noqa: E402 (AREA_WORKSPACE-aware)
 DEPLOYS = WORKSPACE / ".area" / "deploys"

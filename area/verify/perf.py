@@ -41,7 +41,7 @@ from threading import Thread
 from typing import Any, Optional
 
 from area._util import kill_process_group, safe_name
-from area.engine import scrubbed_env
+from area.engine_util import scrubbed_env
 from area.paths import WORKSPACE  # noqa: E402 (leaf single-source; avoids importing the whole pipeline+SDK behind a gate)
 from area.verify.nfr import parse_budget_yaml  # shared flat-budget parser
 

@@ -17,7 +17,7 @@ from area.spec.review import review_spec
 from area.paths import WORKSPACE as WORKSPACE  # noqa: E402  (single source; AREA_WORKSPACE-aware; `as` = explicit re-export for the many `from area.pipeline import WORKSPACE` sites)
 
 if TYPE_CHECKING:
-    from area.engine import Backend
+    from area.engine_util import Backend
     from area.research import RepoAnalysis
 
 
